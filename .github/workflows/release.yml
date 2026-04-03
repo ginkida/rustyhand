@@ -81,12 +81,13 @@ jobs:
           body: |
             ## Installation
 
-            **CLI (Linux/macOS)**:
+            **From source:**
             ```bash
-            curl -sSf https://rustyhand.sh/install | sh
+            git clone https://github.com/ginkida/rustyhand.git
+            cd rustyhand && cargo build --release -p rusty-hand-cli
             ```
 
-            **Docker**:
+            **Docker:**
             ```bash
             docker pull ghcr.io/ginkida/rustyhand:latest
             ```

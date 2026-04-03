@@ -61,6 +61,9 @@ desktop.ini
 # AI assistant instructions (may contain project-specific secrets/context)
 CLAUDE.md
 
+# Blog drafts
+blog-material.md
+
 # Cargo lock — included for reproducible binary builds
 # (uncomment next line for library-only crates)
 # Cargo.lock
