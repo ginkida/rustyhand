@@ -1,0 +1,261 @@
+//! Tool definition and result types.
+
+use serde::{Deserialize, Serialize};
+
+/// Definition of a tool that an agent can use.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolDefinition {
+    /// Unique tool identifier.
+    pub name: String,
+    /// Human-readable description for the LLM.
+    pub description: String,
+    /// JSON Schema for the tool's input parameters.
+    pub input_schema: serde_json::Value,
+}
+
+/// A tool call requested by the LLM.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCall {
+    /// Unique ID for this tool use instance.
+    pub id: String,
+    /// Which tool to call.
+    pub name: String,
+    /// The input parameters.
+    pub input: serde_json::Value,
+}
+
+/// Result of a tool execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolResult {
+    /// The tool_use ID this result corresponds to.
+    pub tool_use_id: String,
+    /// The output content.
+    pub content: String,
+    /// Whether the tool execution resulted in an error.
+    pub is_error: bool,
+}
+
+/// Normalize a JSON Schema for cross-provider compatibility.
+///
+/// Some providers (Gemini, Groq) reject `anyOf` in tool schemas.
+/// This function:
+/// - Converts `anyOf` arrays of simple types to flat `enum` arrays
+/// - Strips `$schema` keys (not accepted by most providers)
+/// - Recursively walks `properties` and `items`
+pub fn normalize_schema_for_provider(
+    schema: &serde_json::Value,
+    provider: &str,
+) -> serde_json::Value {
+    // Anthropic handles anyOf natively — no normalization needed
+    if provider == "anthropic" {
+        return schema.clone();
+    }
+    normalize_schema_recursive(schema)
+}
+
+fn normalize_schema_recursive(schema: &serde_json::Value) -> serde_json::Value {
+    let obj = match schema.as_object() {
+        Some(o) => o,
+        None => return schema.clone(),
+    };
+
+    let mut result = serde_json::Map::new();
+
+    for (key, value) in obj {
+        // Strip $schema keys
+        if key == "$schema" {
+            continue;
+        }
+
+        // Convert anyOf to flat type + enum when possible
+        if key == "anyOf" {
+            if let Some(converted) = try_flatten_any_of(value) {
+                for (k, v) in converted {
+                    result.insert(k, v);
+                }
+                continue;
+            }
+        }
+
+        // Recurse into properties
+        if key == "properties" {
+            if let Some(props) = value.as_object() {
+                let mut new_props = serde_json::Map::new();
+                for (prop_name, prop_schema) in props {
+                    new_props.insert(prop_name.clone(), normalize_schema_recursive(prop_schema));
+                }
+                result.insert(key.clone(), serde_json::Value::Object(new_props));
+                continue;
+            }
+        }
+
+        // Recurse into items
+        if key == "items" {
+            result.insert(key.clone(), normalize_schema_recursive(value));
+            continue;
+        }
+
+        result.insert(key.clone(), value.clone());
+    }
+
+    serde_json::Value::Object(result)
+}
+
+/// Try to flatten an `anyOf` array into a simple type + enum.
+///
+/// Works when all variants are simple types (string, number, etc.) or
+/// when it's a nullable pattern like `anyOf: [{type: "string"}, {type: "null"}]`.
+fn try_flatten_any_of(any_of: &serde_json::Value) -> Option<Vec<(String, serde_json::Value)>> {
+    let items = any_of.as_array()?;
+    if items.is_empty() {
+        return None;
+    }
+
+    // Check if this is a simple type union (all items have just "type")
+    let mut types = Vec::new();
+    let mut has_null = false;
+    let mut non_null_type = None;
+
+    for item in items {
+        let obj = item.as_object()?;
+        let type_val = obj.get("type")?.as_str()?;
+
+        if type_val == "null" {
+            has_null = true;
+        } else {
+            types.push(type_val.to_string());
+            non_null_type = Some(type_val.to_string());
+        }
+    }
+
+    // If it's a nullable pattern (type + null), emit the non-null type
+    if has_null && types.len() == 1 {
+        let mut result = vec![(
+            "type".to_string(),
+            serde_json::Value::String(non_null_type.unwrap()),
+        )];
+        // Mark as nullable via description hint (since JSON Schema nullable isn't universal)
+        result.push(("nullable".to_string(), serde_json::Value::Bool(true)));
+        return Some(result);
+    }
+
+    // If all items are simple types, create a type array
+    if types.len() == items.len() && types.len() > 1 {
+        let type_array: Vec<serde_json::Value> =
+            types.into_iter().map(serde_json::Value::String).collect();
+        return Some(vec![(
+            "type".to_string(),
+            serde_json::Value::Array(type_array),
+        )]);
+    }
+
+    // Can't flatten — leave as-is
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tool_definition_serialization() {
+        let tool = ToolDefinition {
+            name: "web_search".to_string(),
+            description: "Search the web".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Search query" }
+                },
+                "required": ["query"]
+            }),
+        };
+        let json = serde_json::to_string(&tool).unwrap();
+        assert!(json.contains("web_search"));
+    }
+
+    #[test]
+    fn test_normalize_schema_strips_dollar_schema() {
+        let schema = serde_json::json!({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" }
+            }
+        });
+        let result = normalize_schema_for_provider(&schema, "gemini");
+        assert!(result.get("$schema").is_none());
+        assert_eq!(result["type"], "object");
+    }
+
+    #[test]
+    fn test_normalize_schema_flattens_anyof_nullable() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "value": {
+                    "anyOf": [
+                        { "type": "string" },
+                        { "type": "null" }
+                    ]
+                }
+            }
+        });
+        let result = normalize_schema_for_provider(&schema, "gemini");
+        let value_prop = &result["properties"]["value"];
+        assert_eq!(value_prop["type"], "string");
+        assert_eq!(value_prop["nullable"], true);
+        assert!(value_prop.get("anyOf").is_none());
+    }
+
+    #[test]
+    fn test_normalize_schema_flattens_anyof_multi_type() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "value": {
+                    "anyOf": [
+                        { "type": "string" },
+                        { "type": "number" }
+                    ]
+                }
+            }
+        });
+        let result = normalize_schema_for_provider(&schema, "groq");
+        let value_prop = &result["properties"]["value"];
+        assert!(value_prop["type"].is_array());
+    }
+
+    #[test]
+    fn test_normalize_schema_anthropic_passthrough() {
+        let schema = serde_json::json!({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "anyOf": [{"type": "string"}]
+        });
+        let result = normalize_schema_for_provider(&schema, "anthropic");
+        // Anthropic should get the original schema unchanged
+        assert!(result.get("$schema").is_some());
+    }
+
+    #[test]
+    fn test_normalize_schema_nested_properties() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "outer": {
+                    "type": "object",
+                    "properties": {
+                        "inner": {
+                            "$schema": "strip_me",
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        });
+        let result = normalize_schema_for_provider(&schema, "gemini");
+        assert!(result["properties"]["outer"]["properties"]["inner"]
+            .get("$schema")
+            .is_none());
+    }
+}

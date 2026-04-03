@@ -1,0 +1,31 @@
+services:
+  rustyhand:
+    build: .
+    ports:
+      - "4200:4200"
+    volumes:
+      - rustyhand-data:/data
+      # Mount your own config (optional):
+      # - ./my-config.toml:/data/config.toml:ro
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-}
+      - SLACK_APP_TOKEN=${SLACK_APP_TOKEN:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:4200/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  rustyhand-data:

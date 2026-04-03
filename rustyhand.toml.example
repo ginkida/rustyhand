@@ -1,0 +1,57 @@
+# RustyHand Agent OS — Example Configuration
+# Copy to ~/.rustyhand/config.toml and customize.
+
+# API server settings
+# api_key = ""                               # Set to enable Bearer auth (recommended)
+# api_listen = "127.0.0.1:4200"              # HTTP API bind address (use 0.0.0.0 for public)
+
+# Multi-user HTTP auth (optional; works alongside or instead of global api_key)
+# Generate api_key_hash with: `rustyhand security hash-key`
+# [[users]]
+# name = "alice"
+# role = "owner"                             # owner | admin | user | viewer
+# api_key_hash = "$argon2id$..."
+
+# For Docker: set api_listen = "0.0.0.0:4200" (done automatically in Docker image)
+
+[default_model]
+provider = "minimax"                      # "minimax", "anthropic", "gemini", "openai", "groq", "ollama", etc.
+model = "MiniMax-M2.7"                    # Model identifier (M2.7-highspeed for faster inference)
+api_key_env = "MINIMAX_API_KEY"           # Environment variable holding API key
+# base_url = "https://api.minimax.io/v1"  # Optional: override API endpoint
+
+[memory]
+decay_rate = 0.05                         # Memory confidence decay rate
+# sqlite_path = "~/.rustyhand/data/rustyhand.db"   # Optional: custom DB path
+
+[network]
+listen_addr = "127.0.0.1:4200"           # RHP listen address
+# shared_secret = ""                      # Required for P2P authentication
+
+# Session compaction (LLM-based context management)
+# [compaction]
+# threshold = 80                          # Compact when messages exceed this count
+# keep_recent = 20                        # Keep this many recent messages after compaction
+# max_summary_tokens = 1024               # Max tokens for LLM summary
+
+# Usage tracking display
+# usage_footer = "Full"                   # "Off", "Tokens", "Cost", or "Full"
+
+# Channel adapters (configure tokens via environment variables)
+# [telegram]
+# bot_token_env = "TELEGRAM_BOT_TOKEN"
+# allowed_users = []                      # Empty = allow all
+
+# [discord]
+# bot_token_env = "DISCORD_BOT_TOKEN"
+# guild_ids = []                          # Empty = all guilds
+
+# [slack]
+# bot_token_env = "SLACK_BOT_TOKEN"
+# app_token_env = "SLACK_APP_TOKEN"
+
+# MCP server connections
+# [[mcp_servers]]
+# name = "filesystem"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]

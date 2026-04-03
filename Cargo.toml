@@ -1,0 +1,121 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rusty-hand-types",
+    "crates/rusty-hand-memory",
+    "crates/rusty-hand-runtime",
+    "crates/rusty-hand-wire",
+    "crates/rusty-hand-api",
+    "crates/rusty-hand-kernel",
+    "crates/rusty-hand-cli",
+    "crates/rusty-hand-channels",
+    "crates/rusty-hand-skills",
+    "crates/rusty-hand-extensions",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/ginkida/rustyhand"
+rust-version = "1.75"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+rmp-serde = "1"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Concurrency
+dashmap = "6"
+
+# Logging / Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# IDs
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled", "serde_json"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+
+# HTTP client (for LLM drivers)
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "multipart", "rustls-tls"] }
+
+# Async trait
+async-trait = "0.1"
+
+# Base64
+base64 = "0.22"
+
+# Futures
+futures = "0.3"
+
+# WebSocket client (for Discord/Slack gateway)
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+url = "2"
+
+# WASM sandbox
+wasmtime = "41"
+
+# HTTP server (for API daemon)
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip", "compression-br"] }
+
+# Home directory resolution
+dirs = "6"
+
+# YAML parsing
+serde_yaml = "0.9"
+
+# Security
+sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"
+subtle = "2"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+zeroize = { version = "1", features = ["derive"] }
+
+# Rate limiting
+governor = "0.8"
+
+# Interactive CLI
+ratatui = "0.29"
+colored = "3"
+
+# Encryption
+aes-gcm = "0.10"
+argon2 = "0.5"
+
+# Lightweight regex
+regex-lite = "0.1"
+
+# ZIP extraction
+zip = "2"
+
+# Testing
+tokio-test = "0.4"
+tempfile = "3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = 3

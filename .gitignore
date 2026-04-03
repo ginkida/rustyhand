@@ -1,0 +1,88 @@
+# Build
+/target
+**/*.rs.bk
+*.pdb
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+secrets.env
+*.secret
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# User config (may contain API keys)
+config.toml
+daemon.json
+rustyhand.toml
+
+# Credential vault
+vault.enc
+integrations.toml
+
+# Certificates & keys
+*.pem
+*.key
+*.cert
+*.p12
+*.pfx
+
+# Runtime artifacts
+collector_hand_state.json
+collector_knowledge_base.json
+predictions_database.json
+prediction_report_*.md
+BUILD_LOG.md
+
+# Agent workspaces (contain user data & sessions)
+workspaces/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE & tools
+.idea/
+.vscode/
+.claude/
+.gokin/
+.mcp.json
+*.swp
+*.swo
+*~
+
+# AI assistant instructions (may contain project-specific secrets/context)
+CLAUDE.md
+
+# Cargo lock — included for reproducible binary builds
+# (uncomment next line for library-only crates)
+# Cargo.lock
+
+# Legacy assets (pre-rename)
+public/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# Node.js
+node_modules/
+package-lock.json
+yarn.lock
+
+# Logs
+*.log
+logs/

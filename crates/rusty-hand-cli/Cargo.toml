@@ -1,0 +1,34 @@
+[package]
+name = "rusty-hand-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CLI tool for the RustyHand Agent OS"
+
+[[bin]]
+name = "rustyhand"
+path = "src/main.rs"
+
+[dependencies]
+rusty-hand-types = { path = "../rusty-hand-types" }
+rusty-hand-kernel = { path = "../rusty-hand-kernel" }
+rusty-hand-api = { path = "../rusty-hand-api" }
+rusty-hand-skills = { path = "../rusty-hand-skills" }
+rusty-hand-extensions = { path = "../rusty-hand-extensions" }
+zeroize = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+clap_complete = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+dirs = { workspace = true }
+reqwest = { workspace = true, features = ["blocking"] }
+rusty-hand-runtime = { path = "../rusty-hand-runtime" }
+uuid = { workspace = true }
+ratatui = { workspace = true }
+colored = { workspace = true }
+argon2 = { workspace = true }
+rand = { workspace = true }

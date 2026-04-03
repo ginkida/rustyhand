@@ -1,0 +1,39 @@
+[package]
+name = "rusty-hand-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "HTTP/WebSocket API server for the RustyHand Agent OS daemon"
+
+[dependencies]
+rusty-hand-types = { path = "../rusty-hand-types" }
+rusty-hand-kernel = { path = "../rusty-hand-kernel" }
+rusty-hand-runtime = { path = "../rusty-hand-runtime" }
+rusty-hand-memory = { path = "../rusty-hand-memory" }
+rusty-hand-channels = { path = "../rusty-hand-channels" }
+rusty-hand-wire = { path = "../rusty-hand-wire" }
+rusty-hand-skills = { path = "../rusty-hand-skills" }
+rusty-hand-extensions = { path = "../rusty-hand-extensions" }
+dashmap = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+tower-http = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+futures = { workspace = true }
+governor = { workspace = true }
+tokio-stream = { workspace = true }
+subtle = { workspace = true }
+base64 = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+reqwest = { workspace = true }
+tempfile = { workspace = true }
+argon2 = { workspace = true }
+rand = { workspace = true }

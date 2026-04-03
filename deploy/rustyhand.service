@@ -1,0 +1,39 @@
+[Unit]
+Description=RustyHand Agent OS Daemon
+Documentation=https://github.com/ginkida/rustyhand
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rustyhand
+Group=rustyhand
+ExecStart=/usr/local/bin/rustyhand start
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# Environment
+Environment=RUSTY_HAND_HOME=/var/lib/rustyhand
+EnvironmentFile=-/etc/rustyhand/env
+WorkingDirectory=/var/lib/rustyhand
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/rustyhand
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=false
+RestrictRealtime=true
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target

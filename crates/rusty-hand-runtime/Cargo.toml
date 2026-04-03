@@ -1,0 +1,36 @@
+[package]
+name = "rusty-hand-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Agent runtime and execution environment for RustyHand"
+
+[dependencies]
+rusty-hand-types = { path = "../rusty-hand-types" }
+rusty-hand-memory = { path = "../rusty-hand-memory" }
+rusty-hand-skills = { path = "../rusty-hand-skills" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+base64 = { workspace = true }
+wasmtime = { workspace = true }
+anyhow = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+zeroize = { workspace = true }
+dashmap = { workspace = true }
+regex-lite = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+tempfile = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
