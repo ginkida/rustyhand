@@ -19,28 +19,19 @@ RUN useradd -r -s /usr/sbin/nologin -d /data rustyhand
 
 COPY --from=builder /build/target/release/rustyhand /usr/local/bin/
 COPY agents /opt/rustyhand/agents
+COPY docker-entrypoint.sh /usr/local/bin/
 
-# Default config: bind 0.0.0.0 so the port is reachable outside container.
-# Overridden when user mounts their own /data/config.toml.
 RUN mkdir -p /data && chown rustyhand:rustyhand /data
-RUN printf '%s\n' \
-    '# Docker default — override by mounting your own config.toml' \
-    'api_listen = "0.0.0.0:4200"' \
-    '' \
-    '[default_model]' \
-    'provider = "minimax"' \
-    'model = "MiniMax-M2.7"' \
-    'api_key_env = "MINIMAX_API_KEY"' \
-    > /data/config.toml && chown rustyhand:rustyhand /data/config.toml
 
 USER rustyhand
 EXPOSE 4200
 VOLUME /data
 ENV RUSTY_HAND_HOME=/data
 ENV RUSTY_HAND_AGENTS_DIR=/opt/rustyhand/agents
+ENV RUSTYHAND_CONTAINER=1
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -sf http://127.0.0.1:4200/api/health || exit 1
 
-ENTRYPOINT ["rustyhand"]
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["start"]

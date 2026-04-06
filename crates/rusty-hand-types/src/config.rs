@@ -1141,14 +1141,49 @@ fn default_language() -> String {
     "en".to_string()
 }
 
+/// Detect if running inside a container (Docker, Podman, etc.).
+fn is_containerized() -> bool {
+    // Explicit env var (set in our Dockerfile)
+    if std::env::var("RUSTYHAND_CONTAINER").is_ok() {
+        return true;
+    }
+    // Linux: check for /.dockerenv or container cgroup
+    #[cfg(target_os = "linux")]
+    {
+        if std::path::Path::new("/.dockerenv").exists() {
+            return true;
+        }
+        if let Ok(cgroup) = std::fs::read_to_string("/proc/1/cgroup") {
+            if cgroup.contains("docker")
+                || cgroup.contains("kubepods")
+                || cgroup.contains("containerd")
+            {
+                return true;
+            }
+        }
+        // cgroup v2: /proc/self/mountinfo contains /docker/
+        if let Ok(minfo) = std::fs::read_to_string("/proc/self/mountinfo") {
+            if minfo.contains("/docker/") || minfo.contains("/containers/") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 impl Default for KernelConfig {
     fn default() -> Self {
         let home_dir = rusty_hand_home_dir();
+        let api_listen = if is_containerized() {
+            "0.0.0.0:4200".to_string()
+        } else {
+            "127.0.0.1:4200".to_string()
+        };
         Self {
             data_dir: home_dir.join("data"),
             home_dir,
             log_level: "info".to_string(),
-            api_listen: "127.0.0.1:4200".to_string(),
+            api_listen,
             network_enabled: false,
             default_model: DefaultModelConfig::default(),
             memory: MemoryConfig::default(),
@@ -1314,9 +1349,9 @@ pub struct DefaultModelConfig {
 impl Default for DefaultModelConfig {
     fn default() -> Self {
         Self {
-            provider: "anthropic".to_string(),
-            model: "claude-sonnet-4-20250514".to_string(),
-            api_key_env: "ANTHROPIC_API_KEY".to_string(),
+            provider: "minimax".to_string(),
+            model: "MiniMax-M2.7".to_string(),
+            api_key_env: "MINIMAX_API_KEY".to_string(),
             base_url: None,
         }
     }
