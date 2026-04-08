@@ -52,6 +52,7 @@ This project is based on [OpenFang](https://github.com/RightNow-AI/openfang) by 
 - [Dashboard](#dashboard)
 - [Security](#security)
 - [Deployment](#deployment)
+- [Docker Environment Variables](#docker-environment-variables)
 - [Development](#development)
 - [Benchmarks](#benchmarks)
 - [MCP Integration (for AI Agents)](#mcp-integration-for-ai-agents)
@@ -122,6 +123,36 @@ All configuration can be set via `RUSTYHAND_*` environment variables — see [Do
 
 ## Quick Start
 
+### Option A: Docker (fastest)
+
+```bash
+docker run -d --name rustyhand \
+  -p 4200:4200 \
+  -e MINIMAX_API_KEY=your-key \
+  -v rustyhand-data:/data \
+  ghcr.io/ginkida/rustyhand:latest
+
+# Dashboard: http://localhost:4200
+# API:       http://localhost:4200/api/health
+```
+
+To secure the API with a bearer token:
+
+```bash
+docker run -d --name rustyhand \
+  -p 4200:4200 \
+  -e MINIMAX_API_KEY=your-key \
+  -e RUSTYHAND_API_KEY=my-secret-token \
+  -v rustyhand-data:/data \
+  ghcr.io/ginkida/rustyhand:latest
+
+# Now all API calls require: -H "Authorization: Bearer my-secret-token"
+```
+
+See [Docker Environment Variables](#docker-environment-variables) for all options.
+
+### Option B: From binary
+
 ```bash
 # 1. Initialize — creates ~/.rustyhand/ and walks you through provider setup
 rustyhand init
@@ -136,22 +167,40 @@ rustyhand chat
 # 4. Spawn a pre-built agent
 rustyhand agent new coder
 
-# 5. Create an autonomous agent from the dashboard
-# Open http://localhost:4200 → Agents → Templates → choose an autonomous template
-
-# 6. Send a one-shot message
+# 5. Send a one-shot message
 rustyhand message researcher "What are the emerging trends in AI agent frameworks?"
 
-# 7. Launch the interactive TUI dashboard
+# 6. Launch the interactive TUI dashboard
 rustyhand tui
 
-# 8. Run diagnostics
+# 7. Run diagnostics
 rustyhand doctor
 ```
 
 ---
 
 ## Configuration
+
+RustyHand can be configured in two ways:
+- **Config file** (`~/.rustyhand/config.toml`) — for binary installs
+- **Environment variables** (`RUSTYHAND_*`) — for Docker, see [Docker Environment Variables](#docker-environment-variables)
+
+### API Authentication
+
+When `api_key` is set, all endpoints (except `/api/health`) require a Bearer token:
+
+```bash
+# In config.toml:
+api_key = "my-secret-token"
+
+# Or via env var (Docker):
+RUSTYHAND_API_KEY=my-secret-token
+
+# Clients must include the header:
+curl -H "Authorization: Bearer my-secret-token" http://localhost:4200/api/agents
+```
+
+Without `api_key`, the API is open (fine for local development).
 
 ### Config file
 
@@ -982,8 +1031,10 @@ An AI agent (Claude, GPT, etc.) can autonomously:
 
 ## REST API for Programmatic Access
 
+When `api_key` is configured, add `-H "Authorization: Bearer <token>"` to all requests (except `/api/health`).
+
 ```bash
-# Health check
+# Health check (always public)
 curl http://localhost:4200/api/health
 
 # List agents
@@ -994,17 +1045,17 @@ curl -X POST http://localhost:4200/api/agents \
   -H "Content-Type: application/json" \
   -d '{"manifest_toml": "name = \"my-agent\"\nmodule = \"builtin:chat\"\n[model]\nprovider = \"groq\"\nmodel = \"llama-3.3-70b-versatile\"\napi_key_env = \"GROQ_API_KEY\"\nsystem_prompt = \"You are a helpful assistant.\""}'
 
-# Send a message
+# Send a message (triggers LLM call, returns full response)
 curl -X POST http://localhost:4200/api/agents/{id}/message \
   -H "Content-Type: application/json" \
   -d '{"message": "Hello, what can you do?"}'
 
 # Stream a response (SSE)
-curl -X POST http://localhost:4200/api/agents/{id}/message/stream \
+curl -N -X POST http://localhost:4200/api/agents/{id}/message/stream \
   -H "Content-Type: application/json" \
   -d '{"message": "Write a haiku about Rust"}'
 
-# OpenAI-compatible endpoint (drop-in replacement)
+# OpenAI-compatible endpoint (drop-in replacement for any OpenAI client)
 curl -X POST http://localhost:4200/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "coder", "messages": [{"role": "user", "content": "Fix this bug"}]}'
@@ -1017,6 +1068,9 @@ curl -X PUT http://localhost:4200/api/memory/agents/{id}/kv/project_name \
   -H "Content-Type: application/json" \
   -d '{"value": "rustyhand"}'
 curl http://localhost:4200/api/memory/agents/{id}/kv/project_name
+
+# With auth enabled:
+curl -H "Authorization: Bearer my-secret-token" http://localhost:4200/api/agents
 ```
 
 SDKs for Python and JavaScript are included in `sdk/python/` and `sdk/javascript/`.
