@@ -106,15 +106,17 @@ docker compose up --build
 # Dashboard at http://localhost:4200
 ```
 
-Or build manually:
+Or run directly with env vars (no config.toml needed):
 
 ```bash
-docker build -t rustyhand .
 docker run -p 4200:4200 \
   -e MINIMAX_API_KEY=your-key \
+  -e RUSTYHAND_API_KEY=my-secret-bearer-token \
   -v rustyhand-data:/data \
-  rustyhand
+  ghcr.io/ginkida/rustyhand:latest
 ```
+
+All configuration can be set via `RUSTYHAND_*` environment variables — see [Docker Environment Variables](#docker-environment-variables).
 
 ---
 
@@ -684,28 +686,97 @@ sudo systemctl enable --now rustyhand
 
 The service includes security hardening: `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, and resource limits.
 
-### Docker
+### Docker Environment Variables
 
-```yaml
-# docker-compose.yml
-services:
-  rustyhand:
-    build: .
-    ports:
-      - "4200:4200"
-    volumes:
-      - rustyhand-data:/data
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
-      - GROQ_API_KEY=${GROQ_API_KEY:-}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
-    restart: unless-stopped
+The Docker entrypoint generates `config.toml` from environment variables automatically — no config file needed. If you mount your own `config.toml`, env vars are ignored.
 
-volumes:
-  rustyhand-data:
+Set `RUSTYHAND_FORCE_ENV_CONFIG=1` to always regenerate config from env vars (overrides mounted file).
+
+#### Core
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `RUSTYHAND_API_KEY` | *(none)* | **Bearer auth token.** When set, all API endpoints require `Authorization: Bearer <token>` header. Strongly recommended for non-local access. |
+| `RUSTYHAND_API_LISTEN` | `0.0.0.0:4200` | HTTP bind address |
+| `RUSTYHAND_LOG_LEVEL` | `info` | Log level: `trace`, `debug`, `info`, `warn`, `error` |
+
+#### LLM Provider
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `RUSTYHAND_PROVIDER` | `minimax` | LLM provider: `minimax`, `anthropic`, `openai`, `gemini`, `groq`, `ollama`, etc. |
+| `RUSTYHAND_MODEL` | `MiniMax-M2.7` | Model identifier |
+| `RUSTYHAND_MODEL_KEY_ENV` | `MINIMAX_API_KEY` | Which env var holds the LLM API key |
+| `RUSTYHAND_MODEL_BASE_URL` | *(auto)* | Override provider API endpoint |
+| `RUSTYHAND_FALLBACK_PROVIDER` | *(none)* | Fallback provider if primary fails |
+| `RUSTYHAND_FALLBACK_MODEL` | *(none)* | Fallback model |
+| `RUSTYHAND_FALLBACK_KEY_ENV` | *(none)* | Env var for fallback API key |
+
+#### LLM API Keys (pass through to agents)
+
+| Env var | Provider |
+|---------|----------|
+| `MINIMAX_API_KEY` | MiniMax (default) |
+| `ANTHROPIC_API_KEY` | Anthropic Claude |
+| `OPENAI_API_KEY` | OpenAI |
+| `GROQ_API_KEY` | Groq |
+| `GEMINI_API_KEY` | Google Gemini |
+| `DEEPSEEK_API_KEY` | DeepSeek |
+| `OPENROUTER_API_KEY` | OpenRouter |
+| `TOGETHER_API_KEY` | Together AI |
+| `MISTRAL_API_KEY` | Mistral |
+| `FIREWORKS_API_KEY` | Fireworks |
+
+#### Budget
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `RUSTYHAND_BUDGET_HOURLY` | `0.0` | Max spend per hour in USD (0 = unlimited) |
+| `RUSTYHAND_BUDGET_DAILY` | `0.0` | Max spend per day in USD |
+| `RUSTYHAND_BUDGET_MONTHLY` | `0.0` | Max spend per month in USD |
+
+#### Memory & Embeddings
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `RUSTYHAND_MEMORY_DECAY` | `0.05` | Memory confidence decay rate |
+| `RUSTYHAND_EMBEDDING_PROVIDER` | *(auto)* | Embedding provider: `voyage`, `openai`, `ollama` |
+| `RUSTYHAND_EMBEDDING_KEY_ENV` | *(auto)* | Env var for embedding API key |
+| `VOYAGE_API_KEY` | *(none)* | Voyage AI embeddings key |
+
+#### Channels
+
+| Env var | Description |
+|---------|-------------|
+| `TELEGRAM_BOT_TOKEN` | Telegram bot — auto-enables `[telegram]` section |
+| `DISCORD_BOT_TOKEN` | Discord bot — auto-enables `[discord]` section |
+| `SLACK_BOT_TOKEN` | Slack bot — auto-enables `[slack]` section |
+| `SLACK_APP_TOKEN` | Slack app-level token (for Socket Mode) |
+| `RUSTYHAND_TELEGRAM_USERS` | Comma-separated Telegram user IDs to allow |
+
+#### Other
+
+| Env var | Description |
+|---------|-------------|
+| `RUSTYHAND_EXEC_MODE` | Shell exec policy: `deny`, `allowlist`, `full` |
+| `RUSTYHAND_A2A_ENABLED` | Enable A2A protocol: `true` / `1` |
+| `RUSTYHAND_USAGE_FOOTER` | Response footer: `Off`, `Tokens`, `Cost`, `Full` |
+| `RUSTYHAND_FORCE_ENV_CONFIG` | Set to `1` to always regenerate config from env vars |
+
+#### Example: full Docker run
+
+```bash
+docker run -d --name rustyhand \
+  -p 4200:4200 \
+  -e RUSTYHAND_API_KEY=my-secret-token \
+  -e RUSTYHAND_PROVIDER=anthropic \
+  -e RUSTYHAND_MODEL=claude-sonnet-4-20250514 \
+  -e RUSTYHAND_MODEL_KEY_ENV=ANTHROPIC_API_KEY \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  -e RUSTYHAND_BUDGET_DAILY=5.0 \
+  -e TELEGRAM_BOT_TOKEN=123456:ABC... \
+  -v rustyhand-data:/data \
+  ghcr.io/ginkida/rustyhand:latest
 ```
 
 ### Cross-compilation

@@ -5,16 +5,38 @@ services:
       - "4200:4200"
     volumes:
       - rustyhand-data:/data
-      # Mount your own config (optional):
+      # Mount your own config (optional — overrides all RUSTYHAND_* env vars):
       # - ./my-config.toml:/data/config.toml:ro
     env_file:
       - path: .env
         required: false
     environment:
+      # ── LLM Provider API Keys (set the ones you use) ──
       - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+
+      # ── RustyHand Configuration (replaces config.toml) ──
+      # API auth — clients must send "Authorization: Bearer <token>"
+      # - RUSTYHAND_API_KEY=your-secret-token
+
+      # LLM provider & model
+      # - RUSTYHAND_PROVIDER=minimax
+      # - RUSTYHAND_MODEL=MiniMax-M2.7
+      # - RUSTYHAND_MODEL_KEY_ENV=MINIMAX_API_KEY
+
+      # Budget limits (USD, 0 = unlimited)
+      # - RUSTYHAND_BUDGET_DAILY=10.0
+      # - RUSTYHAND_BUDGET_MONTHLY=100.0
+
+      # Embedding provider for vector memory
+      # - RUSTYHAND_EMBEDDING_PROVIDER=voyage
+      # - RUSTYHAND_EMBEDDING_KEY_ENV=VOYAGE_API_KEY
+
+      # ── Channel tokens ──
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-}
