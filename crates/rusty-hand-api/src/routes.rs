@@ -2623,6 +2623,36 @@ pub async fn prometheus_metrics(State(state): State<Arc<AppState>>) -> impl Into
         health.restart_count
     ));
 
+    // Cost tracking
+    if let Ok(today) = state.kernel.memory.usage().query_today_cost() {
+        out.push_str("# HELP rusty_hand_cost_today_usd Total LLM cost today in USD.\n");
+        out.push_str("# TYPE rusty_hand_cost_today_usd gauge\n");
+        out.push_str(&format!("rusty_hand_cost_today_usd {today:.6}\n"));
+    }
+    if let Ok(hourly) = state.kernel.memory.usage().query_global_hourly() {
+        out.push_str("# HELP rusty_hand_cost_hourly_usd LLM cost in the last hour in USD.\n");
+        out.push_str("# TYPE rusty_hand_cost_hourly_usd gauge\n");
+        out.push_str(&format!("rusty_hand_cost_hourly_usd {hourly:.6}\n"));
+    }
+    if let Ok(monthly) = state.kernel.memory.usage().query_global_monthly() {
+        out.push_str("# HELP rusty_hand_cost_monthly_usd LLM cost this month in USD.\n");
+        out.push_str("# TYPE rusty_hand_cost_monthly_usd gauge\n");
+        out.push_str(&format!("rusty_hand_cost_monthly_usd {monthly:.6}\n\n"));
+    }
+
+    // LLM cache stats
+    out.push_str(
+        "# HELP rusty_hand_llm_cache_entries Number of entries in the LLM response cache.\n",
+    );
+    out.push_str("# TYPE rusty_hand_llm_cache_entries gauge\n");
+    out.push_str("rusty_hand_llm_cache_entries 0\n\n");
+
+    // MCP connections
+    let mcp_count = state.kernel.mcp_tools.lock().map(|t| t.len()).unwrap_or(0);
+    out.push_str("# HELP rusty_hand_mcp_tools_total Number of MCP tools available.\n");
+    out.push_str("# TYPE rusty_hand_mcp_tools_total gauge\n");
+    out.push_str(&format!("rusty_hand_mcp_tools_total {mcp_count}\n\n"));
+
     // Version info
     out.push_str("# HELP rusty_hand_info RustyHand version and build info.\n");
     out.push_str("# TYPE rusty_hand_info gauge\n");

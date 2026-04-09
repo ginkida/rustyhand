@@ -2802,6 +2802,7 @@ dependencies = [
  "rusty-hand-types",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tokio",
  "toml 0.8.2",
  "tracing",

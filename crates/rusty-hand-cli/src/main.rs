@@ -278,6 +278,17 @@ enum Commands {
         #[arg(long)]
         confirm: bool,
     },
+    /// Evaluate agent quality against a test suite.
+    Eval {
+        /// Path to eval suite (YAML file with test cases).
+        suite: std::path::PathBuf,
+        /// Agent name or ID to evaluate (uses default if omitted).
+        #[arg(long)]
+        agent: Option<String>,
+        /// Output as JSON for CI integration.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -936,7 +947,213 @@ fn main() {
             SystemCommands::Version { json } => cmd_system_version(json),
         },
         Some(Commands::Reset { confirm }) => cmd_reset(confirm),
+        Some(Commands::Eval { suite, agent, json }) => cmd_eval(&suite, agent.as_deref(), json),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Eval command
+// ---------------------------------------------------------------------------
+
+fn cmd_eval(suite_path: &std::path::Path, agent: Option<&str>, json: bool) {
+    if !suite_path.exists() {
+        eprintln!("Error: eval suite not found: {}", suite_path.display());
+        std::process::exit(1);
+    }
+    let content = std::fs::read_to_string(suite_path).unwrap_or_else(|e| {
+        eprintln!("Error reading {}: {e}", suite_path.display());
+        std::process::exit(1);
+    });
+    let suite: EvalSuite = serde_yaml::from_str(&content).unwrap_or_else(|e| {
+        eprintln!("Error parsing eval suite YAML: {e}");
+        std::process::exit(1);
+    });
+
+    let base_url = detect_daemon_url();
+    let client = reqwest::blocking::Client::new();
+
+    // Resolve agent ID
+    let agent_id = if let Some(name_or_id) = agent {
+        resolve_agent_id(&client, &base_url, name_or_id)
+    } else {
+        // Use first available agent
+        let url = format!("{base_url}/api/agents");
+        let resp: serde_json::Value = client
+            .get(&url)
+            .send()
+            .and_then(|r| r.json())
+            .unwrap_or_else(|e| {
+                eprintln!("Error listing agents: {e}");
+                std::process::exit(1);
+            });
+        resp.as_array()
+            .and_then(|a| a.first())
+            .and_then(|a| a["id"].as_str())
+            .map(String::from)
+            .unwrap_or_else(|| {
+                eprintln!("No agents found. Spawn one first: rustyhand agent new assistant");
+                std::process::exit(1);
+            })
+    };
+
+    if !json {
+        println!("\n  Evaluating: {}", suite.name);
+        println!("  Agent:      {agent_id}");
+        println!("  Test cases: {}\n", suite.cases.len());
+    }
+
+    let mut passed = 0;
+    let mut failed = 0;
+    let mut results: Vec<serde_json::Value> = Vec::new();
+
+    for (i, case) in suite.cases.iter().enumerate() {
+        if !json {
+            print!("  [{}/{}] {} ... ", i + 1, suite.cases.len(), case.name);
+            let _ = io::stdout().flush();
+        }
+
+        // Send message to agent
+        let url = format!("{base_url}/api/agents/{agent_id}/message");
+        let body = serde_json::json!({"message": case.input});
+        let resp = client.post(&url).json(&body).send();
+
+        let (response_text, pass) = match resp {
+            Ok(r) => {
+                let json_resp: serde_json::Value = r.json().unwrap_or_default();
+                let text = json_resp["response"].as_str().unwrap_or("").to_string();
+                let pass = case.check(&text);
+                (text, pass)
+            }
+            Err(e) => (format!("ERROR: {e}"), false),
+        };
+
+        if pass {
+            passed += 1;
+        } else {
+            failed += 1;
+        }
+
+        if !json {
+            println!(
+                "{}",
+                if pass {
+                    "\x1b[32mPASS\x1b[0m"
+                } else {
+                    "\x1b[31mFAIL\x1b[0m"
+                }
+            );
+            if !pass {
+                let preview: String = response_text.chars().take(120).collect();
+                println!("    Expected: {:?}", case.expected);
+                println!("    Got:      {preview}");
+            }
+        }
+
+        results.push(serde_json::json!({
+            "name": case.name,
+            "pass": pass,
+            "input": case.input,
+            "expected": case.expected,
+            "response": response_text.chars().take(500).collect::<String>(),
+        }));
+    }
+
+    if json {
+        let output = serde_json::json!({
+            "suite": suite.name,
+            "agent_id": agent_id,
+            "total": suite.cases.len(),
+            "passed": passed,
+            "failed": failed,
+            "results": results,
+        });
+        println!("{}", serde_json::to_string_pretty(&output).unwrap());
+    } else {
+        println!(
+            "\n  Results: {} passed, {} failed, {} total",
+            passed,
+            failed,
+            suite.cases.len()
+        );
+        if failed > 0 {
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Eval suite format (YAML).
+#[derive(serde::Deserialize)]
+struct EvalSuite {
+    name: String,
+    #[serde(default)]
+    cases: Vec<EvalCase>,
+}
+
+/// A single test case in an eval suite.
+#[derive(serde::Deserialize)]
+struct EvalCase {
+    name: String,
+    input: String,
+    /// Expected content — response must contain all of these strings (case-insensitive).
+    #[serde(default)]
+    expected: Vec<String>,
+}
+
+impl EvalCase {
+    fn check(&self, response: &str) -> bool {
+        let lower = response.to_lowercase();
+        if self.expected.is_empty() {
+            // No expectations — just check it's non-empty
+            return !response.trim().is_empty();
+        }
+        self.expected
+            .iter()
+            .all(|e| lower.contains(&e.to_lowercase()))
+    }
+}
+
+fn detect_daemon_url() -> String {
+    // Try to read daemon.json for the actual address
+    let home = rusty_hand_types::config::rusty_hand_home_dir();
+    let daemon_json = home.join("daemon.json");
+    if let Ok(content) = std::fs::read_to_string(&daemon_json) {
+        if let Ok(info) = serde_json::from_str::<serde_json::Value>(&content) {
+            if let Some(addr) = info["listen_addr"].as_str() {
+                return format!("http://{addr}");
+            }
+        }
+    }
+    "http://127.0.0.1:4200".to_string()
+}
+
+fn resolve_agent_id(
+    client: &reqwest::blocking::Client,
+    base_url: &str,
+    name_or_id: &str,
+) -> String {
+    // Try as UUID first
+    if uuid::Uuid::parse_str(name_or_id).is_ok() {
+        return name_or_id.to_string();
+    }
+    // Search by name
+    let url = format!("{base_url}/api/agents");
+    let resp: serde_json::Value = client
+        .get(&url)
+        .send()
+        .and_then(|r| r.json())
+        .unwrap_or_default();
+    resp.as_array()
+        .and_then(|agents| {
+            agents
+                .iter()
+                .find(|a| a["name"].as_str() == Some(name_or_id))
+        })
+        .and_then(|a| a["id"].as_str())
+        .map(String::from)
+        .unwrap_or_else(|| {
+            eprintln!("Agent not found: {name_or_id}");
+            std::process::exit(1);
+        })
 }
 
 // ---------------------------------------------------------------------------
