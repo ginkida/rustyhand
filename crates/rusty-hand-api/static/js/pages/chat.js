@@ -218,6 +218,16 @@ function chatPage() {
       // Start tip cycle
       this.startTipCycle();
 
+      // Restore last active agent from session
+      var savedAgentId = sessionStorage.getItem('rh-active-agent');
+      if (savedAgentId && !this.currentAgent) {
+        var agents = Alpine.store('app').agents || [];
+        var saved = agents.find(function(a) { return a.id === savedAgentId; });
+        if (saved) {
+          this.$nextTick(function() { self.selectAgent(saved); });
+        }
+      }
+
       // Fetch dynamic commands from server
       this.fetchCommands();
 
@@ -492,6 +502,7 @@ function chatPage() {
       this.groupDraft = '';
       this.messages = [];
       this.actionLog = [];
+      sessionStorage.setItem('rh-active-agent', agent.id);
       this.connectWs(agent.id);
       // Show welcome tips on first use
       if (!localStorage.getItem('rh-chat-tips-seen')) {

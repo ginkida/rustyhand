@@ -51,7 +51,7 @@
     <div class="sidebar-nav" role="navigation" aria-label="Main navigation">
       <!-- Agent bar: New + filter -->
       <div class="sidebar-agent-bar">
-        <button class="btn btn-primary btn-sm" @click="sidebarNewAgent()" style="padding:4px 10px">+ New</button>
+        <button class="btn btn-primary btn-sm" @click="sidebarNewAgent()" style="padding:4px 10px" title="Create new agent">+ New</button>
         <div style="display:flex;gap:2px;margin-left:auto">
           <button class="agent-filter-btn" :class="{ active: $store.app.filterState === 'all' }" @click="$store.app.filterState = 'all'" x-text="'All (' + $store.app.agents.length + ')'"></button>
           <button class="agent-filter-btn" :class="{ active: $store.app.filterState === 'running' }" @click="$store.app.filterState = 'running'" x-text="'Live (' + $store.app.runningCount + ')'"></button>
@@ -195,7 +195,7 @@
   <!-- Main Content -->
   <main class="main-content">
     <!-- Mobile menu button -->
-    <button class="mobile-menu-btn btn btn-ghost" @click="mobileMenuOpen = !mobileMenuOpen" style="position:fixed;top:8px;left:8px;z-index:98;padding:6px 10px">
+    <button class="mobile-menu-btn btn btn-ghost" @click="mobileMenuOpen = !mobileMenuOpen" style="position:fixed;top:8px;left:8px;z-index:98;padding:6px 10px" title="Open menu" aria-label="Open menu">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
     </button>
 
@@ -335,7 +335,7 @@
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
                   <span class="session-count-badge" x-show="actionLog.length" x-text="actionLog.length" x-transition.opacity.duration.200ms></span>
                 </button>
-                <button class="btn btn-danger btn-sm" @click="killAgent()">Stop</button>
+                <button class="btn btn-danger btn-sm" @click="killAgent()" title="Stop this agent">Stop</button>
               </div>
             </div>
 
