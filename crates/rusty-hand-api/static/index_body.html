@@ -1,4 +1,4 @@
-<body x-data="app" :data-theme="theme">
+<body x-cloak x-data="app" :data-theme="theme">
 
 <!-- Login Screen (shown when auth is required but not authenticated) -->
 <div x-show="authRequired && !authenticated" class="login-screen" x-transition>
@@ -167,6 +167,9 @@
         </button>
         <button class="sidebar-nav-icon-btn" :class="{ active: page === 'automation' }" @click="navigate('automation')" title="Automation" data-tip="Automation">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        </button>
+        <button class="sidebar-nav-icon-btn" :class="{ active: page === 'analytics' }" @click="navigate('analytics')" title="Analytics" data-tip="Analytics">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
         </button>
         <button class="sidebar-nav-icon-btn" :class="{ active: page === 'settings' }" @click="navigate('settings')" title="Settings" data-tip="Settings">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/></svg>
@@ -2296,6 +2299,145 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
           </div>
 
           </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- Page: Analytics -->
+    <template x-if="page === 'analytics'">
+      <div x-data="analyticsPage" x-init="init()">
+        <div class="page-header">
+          <div class="flex items-center gap-3">
+            <h2 style="margin:0;font-size:18px">Analytics</h2>
+            <button class="btn btn-ghost btn-sm" @click="refresh()">Refresh</button>
+          </div>
+          <p class="text-dim" style="font-size:12px;margin-top:4px">Cost tracking, usage breakdown, and agent performance</p>
+        </div>
+
+        <div class="page-body" style="padding:24px">
+          <!-- Loading -->
+          <div x-show="loading" style="text-align:center;padding:48px;color:var(--text-muted)">Loading analytics...</div>
+          <div x-show="error" style="padding:24px;color:var(--error)" x-text="error"></div>
+
+          <template x-if="!loading && !error && summary">
+            <div>
+              <!-- Summary Cards -->
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:32px">
+                <div class="card" style="padding:16px">
+                  <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em">Today's Cost</div>
+                  <div class="stat-value" style="font-size:24px;margin-top:4px" x-text="usd(summary.today_cost || summary.cost_today)"></div>
+                </div>
+                <div class="card" style="padding:16px">
+                  <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em">Total Tokens</div>
+                  <div class="stat-value" style="font-size:24px;margin-top:4px" x-text="fmt(summary.total_tokens)"></div>
+                </div>
+                <div class="card" style="padding:16px">
+                  <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em">API Calls</div>
+                  <div class="stat-value" style="font-size:24px;margin-top:4px" x-text="fmt(summary.total_calls || summary.call_count)"></div>
+                </div>
+                <div class="card" style="padding:16px">
+                  <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em">Total Cost</div>
+                  <div class="stat-value" style="font-size:24px;margin-top:4px" x-text="usd(summary.total_cost)"></div>
+                </div>
+              </div>
+
+              <!-- Budget Status -->
+              <template x-if="budget && (budget.max_daily_usd > 0 || budget.max_monthly_usd > 0)">
+                <div class="card" style="padding:20px;margin-bottom:24px">
+                  <h3 style="font-size:14px;margin-bottom:16px">Budget</h3>
+                  <div style="display:flex;gap:24px;flex-wrap:wrap">
+                    <template x-if="budget.max_daily_usd > 0">
+                      <div style="flex:1;min-width:200px">
+                        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+                          <span>Daily</span>
+                          <span x-text="usd(budget.daily_spend || 0) + ' / ' + usd(budget.max_daily_usd)"></span>
+                        </div>
+                        <div style="height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">
+                          <div style="height:100%;border-radius:3px;transition:width 0.3s"
+                               :style="'width:' + (budgetPct(budget.daily_spend || 0, budget.max_daily_usd) || 0) + '%;background:' + ((budgetPct(budget.daily_spend || 0, budget.max_daily_usd) || 0) > 80 ? 'var(--error)' : 'var(--accent)')"></div>
+                        </div>
+                      </div>
+                    </template>
+                    <template x-if="budget.max_monthly_usd > 0">
+                      <div style="flex:1;min-width:200px">
+                        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+                          <span>Monthly</span>
+                          <span x-text="usd(budget.monthly_spend || 0) + ' / ' + usd(budget.max_monthly_usd)"></span>
+                        </div>
+                        <div style="height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">
+                          <div style="height:100%;border-radius:3px;transition:width 0.3s"
+                               :style="'width:' + (budgetPct(budget.monthly_spend || 0, budget.max_monthly_usd) || 0) + '%;background:' + ((budgetPct(budget.monthly_spend || 0, budget.max_monthly_usd) || 0) > 80 ? 'var(--error)' : 'var(--accent)')"></div>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </template>
+
+              <!-- Daily Cost Chart (CSS bars) -->
+              <template x-if="daily.length > 0">
+                <div class="card" style="padding:20px;margin-bottom:24px">
+                  <h3 style="font-size:14px;margin-bottom:16px">Daily Cost (Last 7 Days)</h3>
+                  <div style="display:flex;align-items:flex-end;gap:8px;height:120px">
+                    <template x-for="day in daily" :key="day.date">
+                      <div style="flex:1;display:flex;flex-direction:column;align-items:center;height:100%">
+                        <div style="flex:1;width:100%;display:flex;align-items:flex-end">
+                          <div style="width:100%;background:var(--accent);border-radius:4px 4px 0 0;min-height:2px;transition:height 0.3s"
+                               :style="'height:' + Math.max(2, (day.cost / maxDailyCost()) * 100) + '%'"></div>
+                        </div>
+                        <div style="font-size:10px;color:var(--text-muted);margin-top:6px" x-text="day.date ? day.date.slice(5) : ''"></div>
+                        <div style="font-size:10px;color:var(--text-dim)" x-text="usd(day.cost)"></div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </template>
+
+              <!-- By Model Table -->
+              <template x-if="byModel.length > 0">
+                <div class="card" style="padding:20px;margin-bottom:24px">
+                  <h3 style="font-size:14px;margin-bottom:16px">Cost by Model</h3>
+                  <table class="table" style="width:100%">
+                    <thead><tr><th>Model</th><th style="text-align:right">Calls</th><th style="text-align:right">Tokens</th><th style="text-align:right">Cost</th></tr></thead>
+                    <tbody>
+                      <template x-for="m in byModel" :key="m.model">
+                        <tr>
+                          <td class="font-mono" style="font-size:12px" x-text="m.model"></td>
+                          <td style="text-align:right" x-text="fmt(m.calls || m.call_count)"></td>
+                          <td style="text-align:right" x-text="fmt(m.tokens || m.total_tokens)"></td>
+                          <td style="text-align:right;font-weight:600" x-text="usd(m.cost || m.total_cost)"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </template>
+
+              <!-- Top Agents by Cost -->
+              <template x-if="agentCosts.length > 0">
+                <div class="card" style="padding:20px">
+                  <h3 style="font-size:14px;margin-bottom:16px">Agent Costs</h3>
+                  <table class="table" style="width:100%">
+                    <thead><tr><th>Agent</th><th style="text-align:right">Cost</th><th style="width:40%"></th></tr></thead>
+                    <tbody>
+                      <template x-for="a in agentCosts" :key="a.agent_id || a.name">
+                        <tr>
+                          <td x-text="a.name || a.agent_id"></td>
+                          <td style="text-align:right;font-weight:600" x-text="usd(a.total_cost || a.cost)"></td>
+                          <td>
+                            <div style="height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">
+                              <div style="height:100%;background:var(--accent);border-radius:3px"
+                                   :style="'width:' + Math.max(2, ((a.total_cost || a.cost || 0) / maxAgentCost()) * 100) + '%'"></div>
+                            </div>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </template>
+            </div>
+          </template>
         </div>
       </div>
     </template>

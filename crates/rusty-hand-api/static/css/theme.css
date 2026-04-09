@@ -1,5 +1,8 @@
 /* Rusty Hand Theme — Premium design system */
 
+/* Prevent flash of unstyled content before Alpine.js initializes */
+[x-cloak] { display: none !important; }
+
 /* Font imports in index_head.html: Inter (body) + Geist Mono (code) */
 
 [data-theme="light"], :root {
