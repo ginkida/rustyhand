@@ -56,6 +56,7 @@ async fn start_test_server() -> Option<TestServer> {
         bridge_manager: tokio::sync::Mutex::new(None),
         channels_config: tokio::sync::RwLock::new(Default::default()),
         shutdown_notify: Arc::new(tokio::sync::Notify::new()),
+        allowed_ws_origins: vec![],
     });
 
     let app = Router::new()

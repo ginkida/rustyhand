@@ -39,17 +39,20 @@ function renderMarkdown(text) {
   return escapeHtml(text);
 }
 
-// Lightweight HTML sanitizer — strips script/iframe/object/event handlers from rendered markdown
+// Lightweight HTML sanitizer — strips dangerous tags/attributes from rendered markdown.
+// NOTE: For maximum protection, consider migrating to DOMPurify in the future.
 function sanitizeHtml(html) {
-  // Remove dangerous tags entirely
-  html = html.replace(/<\s*(script|iframe|object|embed|applet|form|input|button|textarea|select|style|link|meta|base)[^>]*>[\s\S]*?<\/\s*\1\s*>/gi, '');
-  html = html.replace(/<\s*(script|iframe|object|embed|applet|form|input|button|textarea|select|style|link|meta|base)[^>]*\/?>/gi, '');
-  // Remove event handler attributes (on*)
+  // Remove dangerous tags entirely (including self-closing variants)
+  var dangerousTags = 'script|iframe|object|embed|applet|form|input|button|textarea|select|style|link|meta|base|svg|math|audio|video|source|details|summary|dialog|template|slot|portal|noscript|plaintext|xmp|listing';
+  html = html.replace(new RegExp('<\\s*(' + dangerousTags + ')([^>]*)>[\\s\\S]*?<\\/\\s*\\1\\s*>', 'gi'), '');
+  html = html.replace(new RegExp('<\\s*(' + dangerousTags + ')([^>]*)\\/?>', 'gi'), '');
+  // Remove event handler attributes (on*) — covers onload, onerror, ontoggle, etc.
   html = html.replace(/\s+on\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]*)/gi, '');
-  // Remove javascript: URIs in href/src/action
-  html = html.replace(/(href|src|action)\s*=\s*["']?\s*javascript:/gi, '$1="');
-  // Remove data: URIs in src (but allow in href for downloads)
-  html = html.replace(/src\s*=\s*["']?\s*data:/gi, 'src="');
+  // Remove javascript:/vbscript: URIs and non-image data: URIs in href/src/action
+  html = html.replace(/(href|src|action)\s*=\s*["']?\s*(?:javascript|vbscript|data\s*:(?!image\/))/gi, '$1="');
+  // Strip style attributes containing dangerous CSS (url(), expression(), -moz-binding)
+  html = html.replace(/style\s*=\s*"[^"]*(?:url\s*\(|expression\s*\(|-moz-binding)[^"]*"/gi, '');
+  html = html.replace(/style\s*=\s*'[^']*(?:url\s*\(|expression\s*\(|-moz-binding)[^']*'/gi, '');
   return html;
 }
 

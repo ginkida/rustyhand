@@ -49,9 +49,17 @@ fn get_schema_version(conn: &Connection) -> u32 {
         .unwrap_or(0)
 }
 
+/// Validate that a string is a safe SQL identifier (alphanumeric + underscore only).
+fn is_safe_identifier(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 /// Check if a column exists in a table (SQLite has no ADD COLUMN IF NOT EXISTS).
 fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
-    let sql = format!("PRAGMA table_info({})", table);
+    if !is_safe_identifier(table) {
+        return false;
+    }
+    let sql = format!("PRAGMA table_info(\"{}\")", table);
     let Ok(mut stmt) = conn.prepare(&sql) else {
         return false;
     };
@@ -194,7 +202,10 @@ fn migrate_v2(conn: &Connection) -> Result<(), rusqlite::Error> {
     for (name, typedef) in &cols {
         if !column_exists(conn, "task_queue", name) {
             conn.execute(
-                &format!("ALTER TABLE task_queue ADD COLUMN {} {}", name, typedef),
+                &format!(
+                    "ALTER TABLE \"task_queue\" ADD COLUMN \"{}\" {}",
+                    name, typedef
+                ),
                 [],
             )?;
         }

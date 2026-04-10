@@ -61,13 +61,19 @@ fn validate_image_name(image: &str) -> Result<(), String> {
 }
 
 /// SECURITY: Sanitize command — reject dangerous shell metacharacters.
+///
+/// The command will be passed to `sh -c` inside a sandboxed Docker container.
+/// We block patterns that could enable injection of additional commands beyond
+/// what the agent intended. Pipes (`|`) are allowed because they are a normal
+/// part of shell usage within the sandbox.
 fn validate_command(command: &str) -> Result<(), String> {
     if command.is_empty() {
         return Err("Command cannot be empty".into());
     }
-    // Reject backticks and $() which could enable command injection
-    let dangerous = ["`", "$(", "${"];
-    for pattern in &dangerous {
+
+    // Reject command substitution patterns
+    let injection_patterns = ["`", "$(", "${"];
+    for pattern in &injection_patterns {
         if command.contains(pattern) {
             return Err(format!(
                 "Command contains disallowed pattern '{}' — potential injection",
@@ -75,6 +81,35 @@ fn validate_command(command: &str) -> Result<(), String> {
             ));
         }
     }
+
+    // Reject command chaining operators
+    let chaining_patterns = ["&&", "||", ";"];
+    for pattern in &chaining_patterns {
+        if command.contains(pattern) {
+            return Err(format!(
+                "Command contains disallowed chaining operator '{}' — use separate exec calls",
+                pattern
+            ));
+        }
+    }
+
+    // Reject output redirection (use stdout/stderr capture instead)
+    // Check >> before > so the error message is precise
+    let redirect_patterns = [">>", ">", "<"];
+    for pattern in &redirect_patterns {
+        if command.contains(pattern) {
+            return Err(format!(
+                "Command contains disallowed redirect '{}' — use stdout/stderr capture instead",
+                pattern
+            ));
+        }
+    }
+
+    // Reject embedded newlines (could bypass single-line validation)
+    if command.contains('\n') || command.contains('\r') {
+        return Err("Command contains newline — potential injection".into());
+    }
+
     Ok(())
 }
 
@@ -510,6 +545,26 @@ mod tests {
     #[test]
     fn test_validate_command_dollar_brace() {
         assert!(validate_command("echo ${HOME}").is_err());
+    }
+
+    #[test]
+    fn test_validate_command_chaining() {
+        assert!(validate_command("echo a; echo b").is_err());
+        assert!(validate_command("true && rm -rf /").is_err());
+        assert!(validate_command("false || malicious").is_err());
+    }
+
+    #[test]
+    fn test_validate_command_redirect() {
+        assert!(validate_command("echo secret > /tmp/leak").is_err());
+        assert!(validate_command("echo data >> /tmp/append").is_err());
+        assert!(validate_command("cat < /etc/passwd").is_err());
+    }
+
+    #[test]
+    fn test_validate_command_newlines() {
+        assert!(validate_command("echo hello\nrm -rf /").is_err());
+        assert!(validate_command("line1\r\nline2").is_err());
     }
 
     #[tokio::test]

@@ -271,21 +271,22 @@ impl UsageStore {
             .lock()
             .map_err(|e| RustyHandError::Internal(e.to_string()))?;
 
+        let interval = format!("-{days} days");
         let mut stmt = conn
-            .prepare(&format!(
+            .prepare(
                 "SELECT date(timestamp) as day,
                             COALESCE(SUM(cost_usd), 0.0),
                             COALESCE(SUM(input_tokens) + SUM(output_tokens), 0),
                             COUNT(*)
                      FROM usage_events
-                     WHERE timestamp > datetime('now', '-{days} days')
+                     WHERE timestamp > datetime('now', ?1)
                      GROUP BY day
-                     ORDER BY day ASC"
-            ))
+                     ORDER BY day ASC",
+            )
             .map_err(|e| RustyHandError::Memory(e.to_string()))?;
 
         let rows = stmt
-            .query_map([], |row| {
+            .query_map([&interval], |row| {
                 Ok(DailyBreakdown {
                     date: row.get(0)?,
                     cost_usd: row.get(1)?,
@@ -339,12 +340,11 @@ impl UsageStore {
             .conn
             .lock()
             .map_err(|e| RustyHandError::Internal(e.to_string()))?;
+        let interval = format!("-{days} days");
         let deleted = conn
             .execute(
-                &format!(
-                    "DELETE FROM usage_events WHERE timestamp < datetime('now', '-{days} days')"
-                ),
-                [],
+                "DELETE FROM usage_events WHERE timestamp < datetime('now', ?1)",
+                [&interval],
             )
             .map_err(|e| RustyHandError::Memory(e.to_string()))?;
         Ok(deleted)

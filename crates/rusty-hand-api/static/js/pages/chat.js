@@ -676,7 +676,7 @@ function chatPage() {
           } else if (data.state === 'tool') {
             var typingMsg = this.messages.length ? this.messages[this.messages.length - 1] : null;
             if (typingMsg && (typingMsg.thinking || typingMsg.streaming)) {
-              typingMsg.text = 'Using ' + (data.tool || 'tool') + '...';
+              typingMsg.text = 'Using ' + escapeHtml(data.tool || 'tool') + '...';
             }
             this._resetTypingTimeout();
           } else if (data.state === 'stop') {
@@ -881,7 +881,7 @@ function chatPage() {
         case 'error':
           this._clearTypingTimeout();
           this.messages = this.messages.filter(function(m) { return !m.thinking && !m.streaming; });
-          this.messages.push({ id: ++msgId, role: 'system', text: 'Error: ' + data.content, meta: '', tools: [], ts: Date.now(), retryable: true });
+          this.messages.push({ id: ++msgId, role: 'system', text: 'Error: ' + escapeHtml(data.content || ''), meta: '', tools: [], ts: Date.now(), retryable: true });
           this.sending = false;
           this.tokenCount = 0;
           this.scrollToBottom();
@@ -912,8 +912,8 @@ function chatPage() {
           // Agent presented an interactive canvas — render it in an iframe sandbox
           var canvasHtml = '<div class="canvas-panel" style="border:1px solid var(--border);border-radius:8px;margin:8px 0;overflow:hidden;">';
           canvasHtml += '<div style="padding:6px 12px;background:var(--surface);border-bottom:1px solid var(--border);font-size:0.85em;display:flex;justify-content:space-between;align-items:center;">';
-          canvasHtml += '<span>' + (data.title || 'Canvas') + '</span>';
-          canvasHtml += '<span style="opacity:0.5;font-size:0.8em;">' + (data.canvas_id || '').substring(0, 8) + '</span></div>';
+          canvasHtml += '<span>' + escapeHtml(data.title || 'Canvas') + '</span>';
+          canvasHtml += '<span style="opacity:0.5;font-size:0.8em;">' + escapeHtml((data.canvas_id || '').substring(0, 8)) + '</span></div>';
           canvasHtml += '<iframe sandbox="allow-scripts" srcdoc="' + (data.html || '').replace(/"/g, '&quot;') + '" ';
           canvasHtml += 'style="width:100%;min-height:300px;border:none;background:#fff;" loading="lazy"></iframe></div>';
           this.messages.push({ id: ++msgId, role: 'agent', text: canvasHtml, meta: 'canvas', isHtml: true, tools: [] });

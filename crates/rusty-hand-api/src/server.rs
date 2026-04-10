@@ -42,12 +42,27 @@ pub async fn build_router(
     let bridge = channel_bridge::start_channel_bridge(kernel.clone()).await;
 
     let channels_config = kernel.config.channels.clone();
+    // Build allowed WebSocket origins (same logic as CORS origins)
+    let ws_port = listen_addr.port();
+    let mut allowed_ws_origins = vec![
+        format!("http://{listen_addr}"),
+        format!("http://localhost:{ws_port}"),
+        format!("http://127.0.0.1:{ws_port}"),
+    ];
+    for p in [3000u16, 4200, 8080] {
+        if p != ws_port {
+            allowed_ws_origins.push(format!("http://localhost:{p}"));
+            allowed_ws_origins.push(format!("http://127.0.0.1:{p}"));
+        }
+    }
+
     let state = Arc::new(AppState {
         kernel: kernel.clone(),
         started_at: Instant::now(),
         bridge_manager: tokio::sync::Mutex::new(bridge),
         channels_config: tokio::sync::RwLock::new(channels_config),
         shutdown_notify: Arc::new(tokio::sync::Notify::new()),
+        allowed_ws_origins,
     });
 
     // CORS: allow localhost origins by default. If API key is set, the API

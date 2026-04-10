@@ -164,6 +164,16 @@ pub async fn agent_ws(
         }
     }
 
+    // SECURITY: Validate Origin header to prevent cross-site WebSocket hijacking.
+    // Non-browser clients (no Origin header) are allowed through — CSRF only
+    // applies to browser-initiated requests.
+    if let Some(origin) = headers.get("origin").and_then(|v| v.to_str().ok()) {
+        if !state.allowed_ws_origins.iter().any(|o| o == origin) {
+            warn!(origin = %origin, "WebSocket upgrade rejected: disallowed origin");
+            return axum::http::StatusCode::FORBIDDEN.into_response();
+        }
+    }
+
     // SECURITY: Enforce per-IP WebSocket connection limit
     let ip = addr.ip();
 

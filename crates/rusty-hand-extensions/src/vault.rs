@@ -107,15 +107,29 @@ impl CredentialVault {
                     info!("Vault master key stored in OS keyring");
                 }
                 Err(e) => {
-                    warn!(
-                        "Could not store in OS keyring: {e}. Set {} env var instead.",
-                        VAULT_KEY_ENV
-                    );
-                    eprintln!(
-                        "Vault key (save this as {}): {}",
-                        VAULT_KEY_ENV,
-                        key_b64.as_str()
-                    );
+                    warn!("Could not store in OS keyring: {e}. Saving key to file fallback.",);
+                    // Save key to a dedicated file instead of printing to stderr
+                    let key_file = self.path.with_file_name("vault-key.b64");
+                    if let Err(write_err) = std::fs::write(&key_file, key_b64.as_bytes()) {
+                        warn!(
+                            "Could not write vault key file: {write_err}. Set {} env var manually.",
+                            VAULT_KEY_ENV
+                        );
+                    } else {
+                        // Restrict permissions to owner-only on Unix
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            let _ = std::fs::set_permissions(
+                                &key_file,
+                                std::fs::Permissions::from_mode(0o600),
+                            );
+                        }
+                        warn!(
+                            "Vault key saved to {:?} — move it to {} env var for production use.",
+                            key_file, VAULT_KEY_ENV
+                        );
+                    }
                 }
             }
             kb
@@ -252,6 +266,15 @@ impl CredentialVault {
         // Try OS keyring first
         if let Ok(key_b64) = load_keyring_key() {
             return decode_master_key(&key_b64);
+        }
+
+        // Try key file fallback (created when keyring is unavailable)
+        let key_file = self.path.with_file_name("vault-key.b64");
+        if key_file.exists() {
+            if let Ok(contents) = std::fs::read_to_string(&key_file) {
+                let key_b64 = Zeroizing::new(contents.trim().to_string());
+                return decode_master_key(&key_b64);
+            }
         }
 
         // Fallback to env var

@@ -81,6 +81,7 @@ async fn start_test_server_with_provider(
         bridge_manager: tokio::sync::Mutex::new(None),
         channels_config: tokio::sync::RwLock::new(Default::default()),
         shutdown_notify: Arc::new(tokio::sync::Notify::new()),
+        allowed_ws_origins: vec![],
     });
 
     let app = Router::new()
@@ -1030,6 +1031,7 @@ async fn start_test_server_with_auth(api_key: &str) -> Option<TestServer> {
         bridge_manager: tokio::sync::Mutex::new(None),
         channels_config: tokio::sync::RwLock::new(Default::default()),
         shutdown_notify: Arc::new(tokio::sync::Notify::new()),
+        allowed_ws_origins: vec![],
     });
 
     let app = Router::new()
@@ -1156,6 +1158,7 @@ async fn start_test_server_with_user_auth() -> Option<TestServer> {
         bridge_manager: tokio::sync::Mutex::new(None),
         channels_config: tokio::sync::RwLock::new(Default::default()),
         shutdown_notify: Arc::new(tokio::sync::Notify::new()),
+        allowed_ws_origins: vec![],
     });
 
     let app = Router::new()

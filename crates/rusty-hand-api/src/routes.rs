@@ -34,6 +34,8 @@ pub struct AppState {
     pub channels_config: tokio::sync::RwLock<rusty_hand_types::config::ChannelsConfig>,
     /// Notify handle to trigger graceful HTTP server shutdown from the API.
     pub shutdown_notify: Arc<tokio::sync::Notify>,
+    /// Allowed origins for WebSocket upgrade validation (prevents cross-site WS hijacking).
+    pub allowed_ws_origins: Vec<String>,
 }
 
 #[derive(serde::Deserialize)]

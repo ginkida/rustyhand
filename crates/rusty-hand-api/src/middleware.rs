@@ -13,6 +13,7 @@ use axum::middleware::Next;
 use rusty_hand_kernel::auth::UserRole;
 use rusty_hand_runtime::audit::AuditAction;
 use rusty_hand_types::agent::UserId;
+use sha2::{Digest, Sha256};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Instant;
@@ -520,11 +521,16 @@ pub(crate) fn authenticate_token(state: &AppState, token: &str) -> Option<Authen
     }
 
     let api_key = state.kernel.config.api_key.trim();
-    if api_key.is_empty() || token.len() != api_key.len() {
+    if api_key.is_empty() {
         return None;
     }
 
-    if token.as_bytes().ct_eq(api_key.as_bytes()).into() {
+    // Hash both values so ct_eq always compares 32-byte slices,
+    // preventing length-based timing side-channel leaks.
+    let token_hash = Sha256::digest(token.as_bytes());
+    let key_hash = Sha256::digest(api_key.as_bytes());
+
+    if token_hash.ct_eq(&key_hash).into() {
         Some(AuthenticatedUser::implicit_owner(AuthSource::GlobalApiKey))
     } else {
         None
