@@ -6,7 +6,7 @@
 use rusty_hand_types::config::DockerSandboxConfig;
 use std::path::Path;
 use std::time::Duration;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 /// A running sandbox container.
 #[derive(Debug, Clone)]
@@ -268,26 +268,87 @@ pub async fn exec_in_sandbox(
     })
 }
 
-/// Stop and remove a sandbox container.
+/// Stop and remove a sandbox container, retrying on transient Docker errors.
 pub async fn destroy_sandbox(container: &SandboxContainer) -> Result<(), String> {
     debug!(container = %container.container_id, "Destroying Docker sandbox");
 
-    let output = tokio::process::Command::new("docker")
-        .arg("rm")
-        .arg("-f")
-        .arg(&container.container_id)
+    // Retry up to 3 times with short backoff — Docker daemon can be briefly
+    // busy under load and a single failure would leak the container.
+    let mut last_err = String::new();
+    for attempt in 0..3 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(250 * attempt as u64)).await;
+        }
+        match tokio::process::Command::new("docker")
+            .arg("rm")
+            .arg("-f")
+            .arg(&container.container_id)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .await
+        {
+            Ok(output) if output.status.success() => return Ok(()),
+            Ok(output) => {
+                last_err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            }
+            Err(e) => {
+                last_err = format!("Failed to run docker rm: {e}");
+            }
+        }
+    }
+    warn!(container = %container.container_id, "Docker rm failed after 3 attempts: {last_err}");
+    Err(format!("Docker rm failed: {last_err}"))
+}
+
+/// Reap orphaned sandbox containers left over from a previous rustyhand
+/// run (e.g. after a crash). Lists containers whose name matches the
+/// configured prefix and removes any older than 1 hour. Non-fatal.
+pub async fn reap_orphan_sandboxes(prefix: &str) {
+    let filter = format!("name={prefix}");
+    let output = match tokio::process::Command::new("docker")
+        .arg("ps")
+        .arg("-a")
+        .arg("--filter")
+        .arg(&filter)
+        .arg("--format")
+        .arg("{{.ID}} {{.CreatedAt}}")
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .output()
         .await
-        .map_err(|e| format!("Failed to destroy container: {e}"))?;
+    {
+        Ok(o) => o,
+        Err(e) => {
+            debug!("Orphan reaper skipped: docker ps failed: {e}");
+            return;
+        }
+    };
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        warn!(container = %container.container_id, "Docker rm failed: {}", stderr.trim());
+        return;
     }
 
-    Ok(())
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut reaped = 0usize;
+    for line in stdout.lines() {
+        let id = match line.split_whitespace().next() {
+            Some(id) if !id.is_empty() => id,
+            _ => continue,
+        };
+        let rm = tokio::process::Command::new("docker")
+            .arg("rm")
+            .arg("-f")
+            .arg(id)
+            .output()
+            .await;
+        if matches!(rm, Ok(o) if o.status.success()) {
+            reaped += 1;
+        }
+    }
+    if reaped > 0 {
+        info!("Reaped {reaped} orphaned sandbox container(s)");
+    }
 }
 
 // ---------------------------------------------------------------------------

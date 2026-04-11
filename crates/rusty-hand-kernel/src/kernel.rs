@@ -1049,6 +1049,15 @@ impl RustyHandKernel {
             }
         }
 
+        // Reap orphaned Docker sandbox containers from previous runs
+        // (non-blocking; fire and forget — failures are logged internally).
+        if kernel.config.docker.enabled {
+            let prefix = kernel.config.docker.container_prefix.clone();
+            tokio::spawn(async move {
+                rusty_hand_runtime::docker_sandbox::reap_orphan_sandboxes(&prefix).await;
+            });
+        }
+
         info!("RustyHand kernel booted successfully");
         Ok(kernel)
     }
@@ -3433,6 +3442,27 @@ impl RustyHandKernel {
             "RustyHand kernel shut down ({} agents preserved)",
             self.registry.list().len()
         );
+    }
+
+    /// Drain all MCP subprocess connections, ensuring each child process is
+    /// signalled and reaped before shutdown completes.
+    ///
+    /// Intended to be called BEFORE [`shutdown`] during a graceful exit so
+    /// that MCP server subprocesses don't linger as zombies on kernel
+    /// restarts within the same process.
+    pub async fn close_mcp_connections(&self) {
+        let mut conns = self.mcp_connections.lock().await;
+        let count = conns.len();
+        if count > 0 {
+            info!("Closing {count} MCP connection(s)");
+        }
+        // Dropping each McpConnection triggers its Drop impl, which spawns
+        // a reaper task for the child process. Clearing the Vec releases
+        // all of them at once.
+        conns.clear();
+        if let Ok(mut tools) = self.mcp_tools.lock() {
+            tools.clear();
+        }
     }
 
     /// Resolve the LLM driver for an agent.

@@ -61,6 +61,12 @@ fn is_private_url(url: &str) -> bool {
         authority.split(':').next().unwrap_or("")
     };
 
+    // SECURITY: Reject malformed URLs that yielded an empty host
+    // (e.g. "http://", "http:///path", "http://:8080") — fail closed.
+    if host.is_empty() {
+        return true;
+    }
+
     let host_lower = host.to_lowercase();
 
     // Block common SSRF targets
@@ -177,6 +183,15 @@ mod tests {
         assert!(!is_private_url("https://example.com/page"));
         assert!(!is_private_url("https://api.github.com/repos"));
         assert!(!is_private_url("https://docs.rust-lang.org/"));
+    }
+
+    #[test]
+    fn test_ssrf_empty_host_blocked() {
+        // Malformed URLs with empty host must fail closed (return true)
+        assert!(is_private_url("http://"));
+        assert!(is_private_url("http:///path"));
+        assert!(is_private_url("https://:8080/"));
+        assert!(is_private_url("http://[]/"));
     }
 
     #[test]

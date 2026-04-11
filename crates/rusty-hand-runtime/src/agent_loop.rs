@@ -40,6 +40,19 @@ const MAX_RETRIES: u32 = 3;
 /// Base delay for exponential backoff (milliseconds).
 const BASE_RETRY_DELAY_MS: u64 = 1000;
 
+/// Compute retry delay with exponential backoff + jitter.
+///
+/// The jitter adds a random amount up to 50% of the delay, preventing
+/// thundering-herd behavior when many agents recover from the same rate
+/// limit simultaneously. Respects `retry_after_ms` from the provider if
+/// it is larger than the computed delay.
+fn retry_delay_with_jitter(retry_after_ms: u64, attempt: u32) -> u64 {
+    use rand::Rng;
+    let base = std::cmp::max(retry_after_ms, BASE_RETRY_DELAY_MS * 2u64.pow(attempt));
+    let jitter = rand::thread_rng().gen_range(0..=base / 2);
+    base + jitter
+}
+
 /// Timeout for individual tool executions (seconds).
 /// Raised from 60s to 120s for browser automation and long-running builds.
 const TOOL_TIMEOUT_SECS: u64 = 120;
@@ -813,7 +826,7 @@ async fn call_with_retry(
                         MAX_RETRIES
                     )));
                 }
-                let delay = std::cmp::max(retry_after_ms, BASE_RETRY_DELAY_MS * 2u64.pow(attempt));
+                let delay = retry_delay_with_jitter(retry_after_ms, attempt);
                 warn!(
                     attempt,
                     delay_ms = delay,
@@ -832,7 +845,7 @@ async fn call_with_retry(
                         MAX_RETRIES
                     )));
                 }
-                let delay = std::cmp::max(retry_after_ms, BASE_RETRY_DELAY_MS * 2u64.pow(attempt));
+                let delay = retry_delay_with_jitter(retry_after_ms, attempt);
                 warn!(
                     attempt,
                     delay_ms = delay,
@@ -924,7 +937,7 @@ async fn stream_with_retry(
                         MAX_RETRIES
                     )));
                 }
-                let delay = std::cmp::max(retry_after_ms, BASE_RETRY_DELAY_MS * 2u64.pow(attempt));
+                let delay = retry_delay_with_jitter(retry_after_ms, attempt);
                 warn!(
                     attempt,
                     delay_ms = delay,
@@ -943,7 +956,7 @@ async fn stream_with_retry(
                         MAX_RETRIES
                     )));
                 }
-                let delay = std::cmp::max(retry_after_ms, BASE_RETRY_DELAY_MS * 2u64.pow(attempt));
+                let delay = retry_delay_with_jitter(retry_after_ms, attempt);
                 warn!(
                     attempt,
                     delay_ms = delay,

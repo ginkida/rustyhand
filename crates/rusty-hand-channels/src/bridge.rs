@@ -317,10 +317,21 @@ impl BridgeManager {
     }
 
     /// Stop all adapters and wait for dispatch tasks to finish.
+    ///
+    /// Each task is awaited with a 10s timeout. If a task is stuck in a
+    /// blocking network call (e.g. Telegram long-poll), it is aborted so
+    /// shutdown cannot hang indefinitely.
     pub async fn stop(&mut self) {
         let _ = self.shutdown_tx.send(true);
         for task in self.tasks.drain(..) {
-            let _ = task.await;
+            let abort_handle = task.abort_handle();
+            match tokio::time::timeout(std::time::Duration::from_secs(10), task).await {
+                Ok(_) => {}
+                Err(_) => {
+                    warn!("Channel adapter task did not stop within 10s — aborting");
+                    abort_handle.abort();
+                }
+            }
         }
     }
 }

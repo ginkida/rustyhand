@@ -722,6 +722,10 @@ pub async fn run_daemon(
         b.stop().await;
     }
 
+    // Drain MCP subprocess connections before final kernel shutdown so
+    // their child processes are reaped cleanly.
+    kernel.close_mcp_connections().await;
+
     // Shutdown kernel
     kernel.shutdown();
 

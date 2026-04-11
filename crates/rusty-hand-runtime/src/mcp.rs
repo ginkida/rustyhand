@@ -68,7 +68,9 @@ pub struct McpConnection {
 /// Transport handle — abstraction over stdio subprocess or HTTP.
 enum McpTransportHandle {
     Stdio {
-        child: Box<tokio::process::Child>,
+        /// Child process handle. Wrapped in `Option` so `Drop` can `take()`
+        /// and move it into a spawned task that performs proper async reaping.
+        child: Option<Box<tokio::process::Child>>,
         stdin: tokio::process::ChildStdin,
         stdout: BufReader<tokio::process::ChildStdout>,
     },
@@ -425,7 +427,7 @@ impl McpConnection {
             .ok_or("Failed to capture MCP server stdout")?;
 
         Ok(McpTransportHandle::Stdio {
-            child: Box::new(child),
+            child: Some(Box::new(child)),
             stdin,
             stdout: BufReader::new(stdout),
         })
@@ -453,8 +455,21 @@ impl McpConnection {
 impl Drop for McpConnection {
     fn drop(&mut self) {
         if let McpTransportHandle::Stdio { ref mut child, .. } = self.transport {
-            // Best-effort kill of the subprocess
-            let _ = child.start_kill();
+            // Signal the child immediately (sync) and, if a tokio runtime
+            // is available, spawn a task to reap the zombie via wait().
+            // Without the reap, the subprocess stays as a zombie until the
+            // whole rustyhand process exits.
+            if let Some(mut taken) = child.take() {
+                let _ = taken.start_kill();
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    handle.spawn(async move {
+                        let _ = taken.wait().await;
+                    });
+                }
+                // If no runtime is available (e.g. dropped from sync code
+                // outside tokio), start_kill will still terminate the child
+                // and it will be reaped by the OS on rustyhand exit.
+            }
         }
     }
 }

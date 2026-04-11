@@ -142,6 +142,15 @@ impl LlmCache {
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
+
+    /// Clear all cached entries.
+    ///
+    /// Intended for config hot-reload: when the default model or provider
+    /// changes, previously cached responses belong to a different model
+    /// and must be invalidated to avoid stale reads.
+    pub fn clear(&self) {
+        self.entries.clear();
+    }
 }
 
 #[cfg(test)]

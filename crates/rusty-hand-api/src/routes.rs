@@ -602,6 +602,8 @@ pub async fn shutdown(
         "shutdown requested via API",
         "ok",
     );
+    // Drain MCP connections first (async), then fall through to sync shutdown.
+    state.kernel.close_mcp_connections().await;
     state.kernel.shutdown();
     // Signal the HTTP server to initiate graceful shutdown so the process exits.
     state.shutdown_notify.notify_one();

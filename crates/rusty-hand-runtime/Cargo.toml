@@ -27,6 +27,7 @@ hex = { workspace = true }
 zeroize = { workspace = true }
 dashmap = { workspace = true }
 regex-lite = { workspace = true }
+rand = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
