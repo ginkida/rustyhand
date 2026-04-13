@@ -181,6 +181,13 @@ pub trait ChannelBridgeHandle: Send + Sync {
         "No approvals pending.".to_string()
     }
 
+    /// List pending approvals as structured data for interactive UIs.
+    ///
+    /// Returns `(display_text, id_prefix, tool_name, risk_emoji)` tuples.
+    async fn list_approval_details(&self) -> Vec<(String, String, String, String)> {
+        vec![]
+    }
+
     /// Approve or reject a pending approval by UUID prefix.
     async fn resolve_approval_text(&self, _id_prefix: &str, _approve: bool) -> String {
         "Approvals not available.".to_string()
@@ -451,6 +458,40 @@ async fn dispatch_message(
         }
     }
 
+    // --- Inline keyboard callback handling (approval buttons, etc.) ---
+    if let ChannelContent::CallbackQuery {
+        ref data,
+        ref callback_id,
+    } = message.content
+    {
+        let response_text = if let Some(id_prefix) = data.strip_prefix("approve:") {
+            let result = handle.resolve_approval_text(id_prefix, true).await;
+            let _ = adapter
+                .answer_callback(callback_id, Some("✅ Approved"))
+                .await;
+            result
+        } else if let Some(id_prefix) = data.strip_prefix("reject:") {
+            let result = handle.resolve_approval_text(id_prefix, false).await;
+            let _ = adapter
+                .answer_callback(callback_id, Some("❌ Rejected"))
+                .await;
+            result
+        } else {
+            let _ = adapter.answer_callback(callback_id, None).await;
+            // Forward unknown callbacks to the agent as text
+            format!("[callback: {data}]")
+        };
+        send_response(
+            adapter,
+            &message.sender,
+            response_text,
+            thread_id,
+            output_format,
+        )
+        .await;
+        return;
+    }
+
     let text = match &message.content {
         ChannelContent::Text(t) => t.clone(),
         ChannelContent::Command { name, args } => {
@@ -470,6 +511,39 @@ async fn dispatch_message(
             return;
         }
     };
+
+    // Special handling: /approvals with inline keyboard buttons
+    if text == "/approvals" {
+        let details = handle.list_approval_details().await;
+        if details.is_empty() {
+            send_response(
+                adapter,
+                &message.sender,
+                "No approvals pending.".to_string(),
+                thread_id,
+                output_format,
+            )
+            .await;
+        } else {
+            for (display, id_prefix, _tool, risk_emoji) in &details {
+                let buttons = vec![vec![
+                    crate::types::InlineButton {
+                        text: "✅ Approve".to_string(),
+                        callback_data: format!("approve:{id_prefix}"),
+                    },
+                    crate::types::InlineButton {
+                        text: "❌ Reject".to_string(),
+                        callback_data: format!("reject:{id_prefix}"),
+                    },
+                ]];
+                let text = format!("{risk_emoji} {display}");
+                let _ = adapter
+                    .send_with_buttons(&message.sender, &text, &buttons)
+                    .await;
+            }
+        }
+        return;
+    }
 
     // Check if it's a slash command embedded in text (e.g. "/agents")
     if text.starts_with('/') {
@@ -633,10 +707,58 @@ async fn dispatch_message(
     // Send typing indicator (best-effort)
     let _ = adapter.send_typing(&message.sender).await;
 
-    // Send to agent and relay response
-    match handle.send_message(agent_id, &text).await {
+    // Send to agent and relay response.
+    // For adapters with streaming support, use the streaming path so
+    // the user sees progressive tool-use updates in the chat.
+    let result = if adapter.supports_streaming() {
+        let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
+
+        // Spawn a task to collect streaming chunks from the kernel callback
+        let stream_handle = tokio::spawn(async move {
+            let mut all_chunks = Vec::new();
+            let mut rx = rx;
+            while let Some(chunk) = rx.recv().await {
+                all_chunks.push(chunk);
+            }
+            all_chunks.join("")
+        });
+
+        let on_chunk = {
+            let tx = tx.clone();
+            Box::new(move |chunk: &str| {
+                let _ = tx.try_send(chunk.to_string());
+            }) as Box<dyn Fn(&str) + Send + Sync>
+        };
+
+        let response = handle
+            .send_message_streaming(agent_id, &text, on_chunk)
+            .await;
+
+        // Drop sender so stream_handle completes
+        drop(tx);
+        let _ = stream_handle.await;
+
+        // For streaming adapters, also send the response via streaming channel
+        // if the adapter has a streaming receiver (Telegram edit flow).
+        if let Ok(ref resp) = response {
+            if !resp.is_empty() {
+                let (chunk_tx, chunk_rx) = tokio::sync::mpsc::channel::<String>(64);
+                // Send the full response as a single chunk — the adapter handles it
+                let _ = chunk_tx.send(resp.clone()).await;
+                drop(chunk_tx);
+                let _ = adapter.send_streaming(&message.sender, chunk_rx).await;
+            }
+        }
+        response
+    } else {
+        handle.send_message(agent_id, &text).await
+    };
+
+    match result {
         Ok(response) => {
-            send_response(adapter, &message.sender, response, thread_id, output_format).await;
+            if !adapter.supports_streaming() {
+                send_response(adapter, &message.sender, response, thread_id, output_format).await;
+            }
             handle
                 .record_delivery(agent_id, ct_str, &message.sender.platform_id, true, None)
                 .await;

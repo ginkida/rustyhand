@@ -520,6 +520,27 @@ impl ChannelBridgeHandle for KernelBridgeAdapter {
         }
     }
 
+    async fn list_approval_details(&self) -> Vec<(String, String, String, String)> {
+        self.kernel
+            .approval_manager
+            .list_pending()
+            .iter()
+            .map(|req| {
+                let id_short = req.id.to_string()[..8].to_string();
+                let display = if req.action_summary.is_empty() {
+                    format!(
+                        "Agent **{}** wants to execute **{}**",
+                        req.agent_id, req.tool_name
+                    )
+                } else {
+                    format!("Agent **{}**: `{}`", req.agent_id, req.action_summary)
+                };
+                let emoji = req.risk_level.emoji().to_string();
+                (display, id_short, req.tool_name.clone(), emoji)
+            })
+            .collect()
+    }
+
     async fn list_approvals_text(&self) -> String {
         let pending = self.kernel.approval_manager.list_pending();
         if pending.is_empty() {

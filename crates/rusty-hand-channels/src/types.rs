@@ -61,6 +61,22 @@ pub enum ChannelContent {
         name: String,
         args: Vec<String>,
     },
+    /// Callback from an inline keyboard button press.
+    CallbackQuery {
+        /// The callback data payload (max 64 bytes from Telegram).
+        data: String,
+        /// Platform-specific callback ID (needed for answerCallbackQuery).
+        callback_id: String,
+    },
+}
+
+/// An inline keyboard button for interactive messages.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineButton {
+    /// Display label on the button.
+    pub text: String,
+    /// Callback data sent when the button is pressed (max 64 bytes for Telegram).
+    pub callback_data: String,
 }
 
 /// A unified message from any channel.
@@ -250,6 +266,34 @@ pub trait ChannelAdapter: Send + Sync {
     /// Get the current health status of this adapter (optional — default returns disconnected).
     fn status(&self) -> ChannelStatus {
         ChannelStatus::default()
+    }
+
+    /// Send a message with inline keyboard buttons (optional — default falls back to text-only).
+    ///
+    /// `buttons` is a grid of rows, each containing one or more buttons.
+    /// Returns the platform-specific message ID (for later edits) if available.
+    async fn send_with_buttons(
+        &self,
+        user: &ChannelUser,
+        text: &str,
+        _buttons: &[Vec<InlineButton>],
+    ) -> Result<Option<String>, Box<dyn std::error::Error>> {
+        // Default: send as plain text, ignoring buttons
+        self.send(user, ChannelContent::Text(text.to_string()))
+            .await?;
+        Ok(None)
+    }
+
+    /// Answer an incoming callback query (optional — default no-op).
+    ///
+    /// Telegram requires `answerCallbackQuery` within 30s or the spinner
+    /// stays visible. Other platforms may not need this.
+    async fn answer_callback(
+        &self,
+        _callback_id: &str,
+        _text: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
     }
 
     /// Whether this adapter supports progressive streaming (editMessageText-style).

@@ -152,6 +152,193 @@ impl TelegramAdapter {
         Ok(())
     }
 
+    /// Call `sendMessage` with an inline keyboard and return the message ID.
+    async fn api_send_message_with_keyboard(
+        &self,
+        chat_id: i64,
+        text: &str,
+        buttons: &[Vec<crate::types::InlineButton>],
+    ) -> Result<i64, Box<dyn std::error::Error>> {
+        let url = format!(
+            "https://api.telegram.org/bot{}/sendMessage",
+            self.token.as_str()
+        );
+        let inline_keyboard: Vec<Vec<serde_json::Value>> = buttons
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|btn| {
+                        serde_json::json!({
+                            "text": btn.text,
+                            "callback_data": btn.callback_data,
+                        })
+                    })
+                    .collect()
+            })
+            .collect();
+        let body = serde_json::json!({
+            "chat_id": chat_id,
+            "text": text,
+            "reply_markup": { "inline_keyboard": inline_keyboard },
+        });
+        let resp: serde_json::Value = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await?
+            .json()
+            .await?;
+        let msg_id = resp["result"]["message_id"]
+            .as_i64()
+            .ok_or("Missing message_id in sendMessage response")?;
+        Ok(msg_id)
+    }
+
+    /// Call `answerCallbackQuery` to dismiss the button spinner.
+    async fn api_answer_callback_query(
+        &self,
+        callback_query_id: &str,
+        text: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let url = format!(
+            "https://api.telegram.org/bot{}/answerCallbackQuery",
+            self.token.as_str()
+        );
+        let mut body = serde_json::json!({
+            "callback_query_id": callback_query_id,
+        });
+        if let Some(t) = text {
+            body["text"] = serde_json::json!(t);
+        }
+        let _ = self.client.post(&url).json(&body).send().await?;
+        Ok(())
+    }
+
+    /// Call `editMessageReplyMarkup` to remove inline keyboard after user clicks.
+    /// Used by the approval callback handler in bridge.rs.
+    #[allow(dead_code)]
+    async fn api_remove_keyboard(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let url = format!(
+            "https://api.telegram.org/bot{}/editMessageReplyMarkup",
+            self.token.as_str()
+        );
+        let body = serde_json::json!({
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "reply_markup": { "inline_keyboard": [] },
+        });
+        let _ = self.client.post(&url).json(&body).send().await?;
+        Ok(())
+    }
+
+    /// Send a file via `sendDocument` (multipart form-data).
+    async fn api_send_document(
+        &self,
+        chat_id: i64,
+        file_path: &str,
+        caption: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let url = format!(
+            "https://api.telegram.org/bot{}/sendDocument",
+            self.token.as_str()
+        );
+        let file_bytes = tokio::fs::read(file_path).await?;
+        let file_name = std::path::Path::new(file_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file")
+            .to_string();
+        let file_part = reqwest::multipart::Part::bytes(file_bytes).file_name(file_name);
+        let mut form = reqwest::multipart::Form::new()
+            .text("chat_id", chat_id.to_string())
+            .part("document", file_part);
+        if let Some(cap) = caption {
+            form = form.text("caption", cap.to_string());
+        }
+        let resp = self.client.post(&url).multipart(form).send().await?;
+        if !resp.status().is_success() {
+            let body_text = resp.text().await.unwrap_or_default();
+            warn!("Telegram sendDocument failed: {body_text}");
+        }
+        Ok(())
+    }
+
+    /// Send a photo via `sendPhoto` — accepts file path or URL.
+    async fn api_send_photo(
+        &self,
+        chat_id: i64,
+        photo: &str,
+        caption: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let url = format!(
+            "https://api.telegram.org/bot{}/sendPhoto",
+            self.token.as_str()
+        );
+        // If it looks like a URL, send as string; otherwise read from disk
+        if photo.starts_with("http://") || photo.starts_with("https://") {
+            let mut body = serde_json::json!({
+                "chat_id": chat_id,
+                "photo": photo,
+            });
+            if let Some(cap) = caption {
+                body["caption"] = serde_json::json!(cap);
+            }
+            let resp = self.client.post(&url).json(&body).send().await?;
+            if !resp.status().is_success() {
+                let body_text = resp.text().await.unwrap_or_default();
+                warn!("Telegram sendPhoto (URL) failed: {body_text}");
+            }
+        } else {
+            let file_bytes = tokio::fs::read(photo).await?;
+            let file_name = std::path::Path::new(photo)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("photo.jpg")
+                .to_string();
+            let file_part = reqwest::multipart::Part::bytes(file_bytes).file_name(file_name);
+            let mut form = reqwest::multipart::Form::new()
+                .text("chat_id", chat_id.to_string())
+                .part("photo", file_part);
+            if let Some(cap) = caption {
+                form = form.text("caption", cap.to_string());
+            }
+            let resp = self.client.post(&url).multipart(form).send().await?;
+            if !resp.status().is_success() {
+                let body_text = resp.text().await.unwrap_or_default();
+                warn!("Telegram sendPhoto (file) failed: {body_text}");
+            }
+        }
+        Ok(())
+    }
+
+    /// Send a voice message via `sendVoice` (multipart).
+    async fn api_send_voice(
+        &self,
+        chat_id: i64,
+        file_path: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let url = format!(
+            "https://api.telegram.org/bot{}/sendVoice",
+            self.token.as_str()
+        );
+        let file_bytes = tokio::fs::read(file_path).await?;
+        let file_part = reqwest::multipart::Part::bytes(file_bytes).file_name("voice.ogg");
+        let form = reqwest::multipart::Form::new()
+            .text("chat_id", chat_id.to_string())
+            .part("voice", file_part);
+        let resp = self.client.post(&url).multipart(form).send().await?;
+        if !resp.status().is_success() {
+            let body_text = resp.text().await.unwrap_or_default();
+            warn!("Telegram sendVoice failed: {body_text}");
+        }
+        Ok(())
+    }
+
     /// Call `sendChatAction` to show "typing..." indicator.
     async fn api_send_typing(&self, chat_id: i64) -> Result<(), Box<dyn std::error::Error>> {
         let url = format!(
@@ -216,7 +403,7 @@ impl ChannelAdapter for TelegramAdapter {
                 let url = format!("https://api.telegram.org/bot{}/getUpdates", token.as_str());
                 let mut params = serde_json::json!({
                     "timeout": LONG_POLL_TIMEOUT,
-                    "allowed_updates": ["message", "edited_message"],
+                    "allowed_updates": ["message", "edited_message", "callback_query"],
                 });
                 if let Some(off) = offset {
                     params["offset"] = serde_json::json!(off);
@@ -349,6 +536,17 @@ impl ChannelAdapter for TelegramAdapter {
             ChannelContent::Text(text) => {
                 self.api_send_message(chat_id, &text).await?;
             }
+            ChannelContent::Image { url, caption } => {
+                self.api_send_photo(chat_id, &url, caption.as_deref())
+                    .await?;
+            }
+            ChannelContent::File { url, filename } => {
+                self.api_send_document(chat_id, &url, Some(&filename))
+                    .await?;
+            }
+            ChannelContent::Voice { url, .. } => {
+                self.api_send_voice(chat_id, &url).await?;
+            }
             _ => {
                 self.api_send_message(chat_id, "(Unsupported content type)")
                     .await?;
@@ -363,6 +561,30 @@ impl ChannelAdapter for TelegramAdapter {
             .parse()
             .map_err(|_| format!("Invalid Telegram chat_id: {}", user.platform_id))?;
         self.api_send_typing(chat_id).await
+    }
+
+    async fn send_with_buttons(
+        &self,
+        user: &ChannelUser,
+        text: &str,
+        buttons: &[Vec<crate::types::InlineButton>],
+    ) -> Result<Option<String>, Box<dyn std::error::Error>> {
+        let chat_id: i64 = user
+            .platform_id
+            .parse()
+            .map_err(|_| format!("Invalid Telegram chat_id: {}", user.platform_id))?;
+        let msg_id = self
+            .api_send_message_with_keyboard(chat_id, text, buttons)
+            .await?;
+        Ok(Some(msg_id.to_string()))
+    }
+
+    async fn answer_callback(
+        &self,
+        callback_id: &str,
+        text: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.api_answer_callback_query(callback_id, text).await
     }
 
     fn supports_streaming(&self) -> bool {
@@ -447,11 +669,42 @@ impl ChannelAdapter for TelegramAdapter {
 }
 
 /// Parse a Telegram update JSON into a `ChannelMessage`, or `None` if filtered/unparseable.
-/// Handles both `message` and `edited_message` update types.
+/// Handles `message`, `edited_message`, and `callback_query` update types.
 fn parse_telegram_update(
     update: &serde_json::Value,
     allowed_users: &[i64],
 ) -> Option<ChannelMessage> {
+    // Handle callback_query (inline keyboard button press)
+    if let Some(callback) = update.get("callback_query") {
+        let from = callback.get("from")?;
+        let user_id = from["id"].as_i64()?;
+        if !allowed_users.is_empty() && !allowed_users.contains(&user_id) {
+            return None;
+        }
+        let chat_id = callback["message"]["chat"]["id"].as_i64()?;
+        let callback_id = callback["id"].as_str()?.to_string();
+        let data = callback["data"].as_str().unwrap_or("").to_string();
+        let first_name = from["first_name"].as_str().unwrap_or("Unknown");
+        return Some(ChannelMessage {
+            channel: ChannelType::Telegram,
+            platform_message_id: callback["message"]["message_id"]
+                .as_i64()
+                .unwrap_or(0)
+                .to_string(),
+            sender: ChannelUser {
+                platform_id: chat_id.to_string(),
+                display_name: first_name.to_string(),
+                rusty_hand_user: None,
+            },
+            content: ChannelContent::CallbackQuery { data, callback_id },
+            target_agent: None,
+            timestamp: chrono::Utc::now(),
+            is_group: false,
+            thread_id: None,
+            metadata: HashMap::new(),
+        });
+    }
+
     let message = update
         .get("message")
         .or_else(|| update.get("edited_message"))?;
