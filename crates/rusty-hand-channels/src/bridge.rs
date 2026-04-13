@@ -726,7 +726,9 @@ async fn dispatch_message(
         let on_chunk = {
             let tx = tx.clone();
             Box::new(move |chunk: &str| {
-                let _ = tx.try_send(chunk.to_string());
+                if let Err(e) = tx.try_send(chunk.to_string()) {
+                    debug!("Streaming chunk dropped (channel full): {e}");
+                }
             }) as Box<dyn Fn(&str) + Send + Sync>
         };
 
@@ -746,7 +748,9 @@ async fn dispatch_message(
                 // Send the full response as a single chunk — the adapter handles it
                 let _ = chunk_tx.send(resp.clone()).await;
                 drop(chunk_tx);
-                let _ = adapter.send_streaming(&message.sender, chunk_rx).await;
+                if let Err(e) = adapter.send_streaming(&message.sender, chunk_rx).await {
+                    warn!("Streaming send to {} failed: {e}", adapter.name());
+                }
             }
         }
         response

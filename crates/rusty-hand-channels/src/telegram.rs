@@ -947,4 +947,62 @@ mod tests {
             other => unreachable!("Expected Command, got {other:?}"),
         }
     }
+
+    #[test]
+    fn test_parse_callback_query() {
+        let update = serde_json::json!({
+            "update_id": 999,
+            "callback_query": {
+                "id": "cb_12345",
+                "from": { "id": 111, "first_name": "User", "is_bot": false },
+                "message": {
+                    "message_id": 42,
+                    "chat": { "id": 111, "type": "private" }
+                },
+                "data": "approve:abc12345"
+            }
+        });
+        let msg = parse_telegram_update(&update, &[]).unwrap();
+        assert_eq!(msg.sender.platform_id, "111");
+        match &msg.content {
+            ChannelContent::CallbackQuery { data, callback_id } => {
+                assert_eq!(data, "approve:abc12345");
+                assert_eq!(callback_id, "cb_12345");
+            }
+            other => unreachable!("Expected CallbackQuery, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_callback_query_filtered_by_allowed_users() {
+        let update = serde_json::json!({
+            "update_id": 1000,
+            "callback_query": {
+                "id": "cb_999",
+                "from": { "id": 999, "first_name": "Stranger" },
+                "message": {
+                    "message_id": 42,
+                    "chat": { "id": 999, "type": "private" }
+                },
+                "data": "approve:x"
+            }
+        });
+        // Stranger not in allowed_users → filtered out
+        assert!(parse_telegram_update(&update, &[111]).is_none());
+    }
+
+    #[test]
+    fn test_parse_callback_query_null_message() {
+        // Telegram can send callback_query with null message (if original was deleted)
+        let update = serde_json::json!({
+            "update_id": 1001,
+            "callback_query": {
+                "id": "cb_888",
+                "from": { "id": 111, "first_name": "User" },
+                "data": "reject:xyz"
+            }
+        });
+        // Missing message → None (graceful drop)
+        assert!(parse_telegram_update(&update, &[]).is_none());
+    }
 }
