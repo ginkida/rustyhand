@@ -5,16 +5,23 @@ use dashmap::DashMap;
 use rusty_hand_types::approval::{
     ApprovalDecision, ApprovalPolicy, ApprovalRequest, ApprovalResponse, RiskLevel,
 };
+use std::sync::Arc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 /// Max pending requests per agent.
 const MAX_PENDING_PER_AGENT: usize = 5;
 
+/// Callback type for push notifications when new approvals are created.
+pub type ApprovalNotifyCallback = Arc<dyn Fn(&ApprovalRequest) + Send + Sync>;
+
 /// Manages approval requests with oneshot channels for blocking resolution.
 pub struct ApprovalManager {
     pending: DashMap<Uuid, PendingRequest>,
     policy: std::sync::RwLock<ApprovalPolicy>,
+    /// Optional callback fired when a new approval request is created.
+    /// Used by the channel bridge to push notifications to Telegram/etc.
+    on_new_request: std::sync::RwLock<Option<ApprovalNotifyCallback>>,
 }
 
 struct PendingRequest {
@@ -27,7 +34,19 @@ impl ApprovalManager {
         Self {
             pending: DashMap::new(),
             policy: std::sync::RwLock::new(policy),
+            on_new_request: std::sync::RwLock::new(None),
         }
+    }
+
+    /// Register a callback that fires when a new approval request is created.
+    ///
+    /// Used by the channel bridge to push inline-keyboard notifications
+    /// to Telegram/Discord/etc. without polling.
+    pub fn set_notification_callback(&self, cb: ApprovalNotifyCallback) {
+        *self
+            .on_new_request
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = Some(cb);
     }
 
     /// Check if a tool requires approval based on current policy.
@@ -62,6 +81,17 @@ impl ApprovalManager {
         );
 
         info!(request_id = %id, "Approval request submitted, waiting for resolution");
+
+        // Fire notification callback BEFORE blocking on the oneshot.
+        // This lets the bridge push a Telegram message with approve/reject buttons.
+        if let Ok(guard) = self.on_new_request.read() {
+            if let Some(cb) = guard.as_ref() {
+                // Retrieve the request from pending for the callback
+                if let Some(entry) = self.pending.get(&id) {
+                    cb(&entry.value().request);
+                }
+            }
+        }
 
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(decision)) => {

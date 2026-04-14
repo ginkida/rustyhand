@@ -277,6 +277,16 @@ impl ChannelRateLimiter {
     }
 }
 
+/// Lightweight approval notification for push to channels.
+#[derive(Debug, Clone)]
+pub struct ApprovalNotification {
+    pub agent_id: String,
+    pub id_prefix: String,
+    pub summary: String,
+    pub risk_emoji: String,
+    pub timeout_secs: u64,
+}
+
 /// Owns all running channel adapters and dispatches messages to agents.
 pub struct BridgeManager {
     handle: Arc<dyn ChannelBridgeHandle>,
@@ -345,6 +355,68 @@ impl BridgeManager {
 
         self.tasks.push(task);
         Ok(())
+    }
+
+    /// Start a background task that receives approval notifications and
+    /// sends inline-keyboard messages to the appropriate Telegram chat.
+    ///
+    /// The `rx` channel receives `ApprovalRequest` from the kernel's
+    /// `ApprovalManager` notification callback. The router's `last_sender`
+    /// map is used to find which chat to notify.
+    pub fn start_approval_notifier(
+        &mut self,
+        mut rx: tokio::sync::mpsc::Receiver<ApprovalNotification>,
+        adapters: Vec<Arc<dyn ChannelAdapter>>,
+    ) {
+        let router = self.router.clone();
+        let mut shutdown = self.shutdown_rx.clone();
+
+        let task = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    notification = rx.recv() => {
+                        let Some(notif) = notification else { break };
+                        // Find the chat that last talked to this agent
+                        let Some((_channel, platform_id)) = router.last_sender_for_agent(&notif.agent_id) else {
+                            debug!("Approval notification: no known chat for agent {}", notif.agent_id);
+                            continue;
+                        };
+
+                        let user = crate::types::ChannelUser {
+                            platform_id: platform_id.clone(),
+                            display_name: String::new(),
+                            rusty_hand_user: None,
+                        };
+                        let buttons = vec![vec![
+                            crate::types::InlineButton {
+                                text: "✅ Approve".to_string(),
+                                callback_data: format!("approve:{}", notif.id_prefix),
+                            },
+                            crate::types::InlineButton {
+                                text: "❌ Reject".to_string(),
+                                callback_data: format!("reject:{}", notif.id_prefix),
+                            },
+                        ]];
+                        let text = format!(
+                            "{} Agent **{}** wants to execute:\n`{}`\n⏱️ {}s timeout",
+                            notif.risk_emoji, notif.agent_id, notif.summary, notif.timeout_secs,
+                        );
+
+                        // Try each adapter until one can send
+                        for adapter in &adapters {
+                            if adapter.send_with_buttons(&user, &text, &buttons).await.is_ok() {
+                                break;
+                            }
+                        }
+                    }
+                    _ = shutdown.changed() => {
+                        if *shutdown.borrow() { break; }
+                    }
+                }
+            }
+        });
+
+        self.tasks.push(task);
     }
 
     /// Stop all adapters and wait for dispatch tasks to finish.
@@ -795,6 +867,9 @@ async fn dispatch_message(
             return;
         }
     };
+
+    // Track the last sender for this agent (used for approval push notifications)
+    router.track_sender(agent_id, ct_str, &message.sender.platform_id);
 
     // RBAC: authorize the user before forwarding to agent
     if let Err(denied) = handle

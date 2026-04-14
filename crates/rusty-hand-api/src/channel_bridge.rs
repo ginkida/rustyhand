@@ -93,8 +93,6 @@ impl ChannelBridgeHandle for KernelBridgeAdapter {
         message: &str,
         tx: tokio::sync::mpsc::Sender<String>,
     ) -> Result<String, String> {
-        use rusty_hand_runtime::llm_driver::StreamEvent;
-
         let kernel = Arc::clone(&self.kernel);
         let msg_owned = message.to_string();
         let (mut rx, join_handle) = kernel
@@ -104,12 +102,13 @@ impl ChannelBridgeHandle for KernelBridgeAdapter {
         // Pipe StreamEvent → tx channel as text chunks in real-time.
         // TextDelta passes through; tool events emit status markers
         // (⚙️/✅/❌) that the Telegram adapter shows as progressive edits.
+        //
+        // Don't break on ContentComplete — the agent loop may execute tools
+        // and call the LLM again (multiple iterations). The channel is closed
+        // by the kernel when the entire agent loop finishes.
         while let Some(event) = rx.recv().await {
             if let Some(text) = stream_event_to_text(&event) {
                 let _ = tx.send(text).await;
-            }
-            if matches!(&event, StreamEvent::ContentComplete { .. }) {
-                break;
             }
         }
 
@@ -1607,12 +1606,14 @@ pub async fn start_channel_bridge_with_config(
     let mut manager = BridgeManager::new(bridge_handle, router);
 
     let mut started_names = Vec::new();
+    let mut started_adapters: Vec<Arc<dyn ChannelAdapter>> = Vec::new();
     for (adapter, _) in adapters {
         let name = adapter.name().to_string();
-        match manager.start_adapter(adapter).await {
+        match manager.start_adapter(adapter.clone()).await {
             Ok(()) => {
                 info!("{name} channel bridge started");
                 started_names.push(name);
+                started_adapters.push(adapter);
             }
             Err(e) => {
                 error!("Failed to start {name} bridge: {e}");
@@ -1623,6 +1624,34 @@ pub async fn start_channel_bridge_with_config(
     if started_names.is_empty() {
         (None, Vec::new())
     } else {
+        // Wire approval push notifications: when the kernel creates a new
+        // approval request, the callback sends it through the channel to
+        // the bridge's background task, which pushes inline keyboards to
+        // the user's Telegram/Discord/etc. chat.
+        let (approval_tx, approval_rx) =
+            tokio::sync::mpsc::channel::<rusty_hand_channels::bridge::ApprovalNotification>(32);
+
+        // Collect started adapters for the notifier
+        // (re-start is not possible, so we clone the adapter list from the bridge)
+        // For simplicity, we only support push notifications on adapters that
+        // support inline keyboards. Currently: Telegram.
+        // The notifier tries each adapter in turn.
+        manager.start_approval_notifier(approval_rx, started_adapters);
+
+        // Register the callback on the kernel's approval manager
+        kernel.approval_manager.set_notification_callback(Arc::new(
+            move |req: &rusty_hand_types::approval::ApprovalRequest| {
+                let notif = rusty_hand_channels::bridge::ApprovalNotification {
+                    agent_id: req.agent_id.clone(),
+                    id_prefix: req.id.to_string()[..8].to_string(),
+                    summary: req.action_summary.clone(),
+                    risk_emoji: req.risk_level.emoji().to_string(),
+                    timeout_secs: req.timeout_secs,
+                };
+                let _ = approval_tx.try_send(notif);
+            },
+        ));
+
         (Some(manager), started_names)
     }
 }

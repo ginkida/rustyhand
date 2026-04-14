@@ -38,6 +38,9 @@ pub struct AgentRouter {
     broadcast: Mutex<BroadcastConfig>,
     /// Agent name -> AgentId cache for binding resolution.
     agent_name_cache: DashMap<String, AgentId>,
+    /// Last seen sender per agent — for push notifications (approval, proactive).
+    /// Maps agent_id → (channel_type_str, platform_id).
+    last_sender: DashMap<AgentId, (String, String)>,
 }
 
 impl AgentRouter {
@@ -50,6 +53,29 @@ impl AgentRouter {
             bindings: Mutex::new(Vec::new()),
             broadcast: Mutex::new(BroadcastConfig::default()),
             agent_name_cache: DashMap::new(),
+            last_sender: DashMap::new(),
+        }
+    }
+
+    /// Record the last sender for an agent (for push notifications).
+    pub fn track_sender(&self, agent_id: AgentId, channel: &str, platform_id: &str) {
+        self.last_sender
+            .insert(agent_id, (channel.to_string(), platform_id.to_string()));
+    }
+
+    /// Look up the last sender for an agent (for push notifications).
+    pub fn last_sender_for_agent(&self, agent_id: &str) -> Option<(String, String)> {
+        // AgentId is a UUID wrapper — try to parse from the string
+        if let Ok(id) = agent_id.parse::<uuid::Uuid>() {
+            self.last_sender
+                .get(&AgentId(id))
+                .map(|r| r.value().clone())
+        } else {
+            // Fallback: search by agent_id string prefix
+            self.last_sender
+                .iter()
+                .find(|r| r.key().0.to_string().starts_with(agent_id))
+                .map(|r| r.value().clone())
         }
     }
 
