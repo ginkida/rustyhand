@@ -19,14 +19,14 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT" />
-  <img src="https://img.shields.io/badge/version-0.4.0-green?style=flat-square" alt="v0.4.0" />
-  <img src="https://img.shields.io/badge/tests-1,712%20passing-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/version-0.5.0-green?style=flat-square" alt="v0.5.0" />
+  <img src="https://img.shields.io/badge/tests-1,718%20passing-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/clippy-0%20warnings-brightgreen?style=flat-square" alt="Clippy" />
 </p>
 
 ---
 
-> **v0.4.0 — Autonomous Telegram Agent (April 2026)**
+> **v0.5.0 — Production-Ready Autonomous Agent (April 2026)**
 >
 > RustyHand agents now work autonomously through Telegram: they see photos, hear voice, ask permission with inline buttons, show real-time progress, and push results from background tasks. 26 LLM providers auto-detected. [Report issues here.](https://github.com/ginkida/rustyhand/issues)
 
@@ -81,7 +81,10 @@ Telegram is the primary interface for RustyHand agents. Your agent can:
 | **Ask permission** | Inline keyboard buttons (Approve/Reject) pushed automatically |
 | **Show progress** | Real-time tool-use updates: "⚙️ web_search..." → "✅ Done" |
 | **Report autonomously** | Background tasks push results to your chat without prompting |
-| **57 built-in tools** | Shell exec, web search, browser automation, RAG, knowledge graph, and more |
+| **61 built-in tools** | Shell, web/news search, browser (wait, JS exec, scroll, download), RAG, knowledge graph |
+| **Markdown formatting** | Bold, italic, code blocks render natively in Telegram |
+| **Reply threading** | Responses reply to the user's message for clean conversation flow |
+| **Sticker/GIF/Location** | Agent understands stickers, animations, and shared locations |
 
 The entire system compiles to a **single ~32MB binary**. One install, one command, your agents are live.
 
