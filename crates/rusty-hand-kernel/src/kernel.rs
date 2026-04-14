@@ -36,6 +36,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, Weak};
 use tracing::{debug, info, warn};
 
+/// Callback type for autonomous agent responses (continuous/periodic ticks).
+pub type AutonomousResponseCallback = Arc<dyn Fn(AgentId, &str) + Send + Sync>;
+
 /// The main RustyHand kernel — coordinates all subsystems.
 pub struct RustyHandKernel {
     /// Kernel configuration.
@@ -128,6 +131,10 @@ pub struct RustyHandKernel {
     pub booted_at: std::time::Instant,
     /// Weak self-reference for trigger dispatch (set after Arc wrapping).
     self_handle: OnceLock<Weak<RustyHandKernel>>,
+    /// Optional callback for autonomous agent responses (continuous/periodic ticks).
+    /// The bridge registers this to push responses to Telegram/Discord/etc.
+    /// Signature: (agent_id, response_text) → ().
+    on_autonomous_response: std::sync::RwLock<Option<AutonomousResponseCallback>>,
 }
 
 /// Result of executing a cron job immediately.
@@ -991,6 +998,7 @@ impl RustyHandKernel {
             peer_node: std::sync::RwLock::new(None),
             booted_at: std::time::Instant::now(),
             self_handle: OnceLock::new(),
+            on_autonomous_response: std::sync::RwLock::new(None),
         };
 
         // Restore persisted agents from SQLite
@@ -3409,15 +3417,33 @@ impl RustyHandKernel {
                 let k = Arc::clone(&kernel);
                 tokio::spawn(async move {
                     match k.send_message(aid, &msg).await {
-                        Ok(_) => {}
+                        Ok(result) => {
+                            // Push autonomous response to channel (Telegram, etc.)
+                            if !result.response.is_empty() {
+                                let guard = k
+                                    .on_autonomous_response
+                                    .read()
+                                    .unwrap_or_else(|e| e.into_inner());
+                                if let Some(cb) = guard.as_ref() {
+                                    cb(aid, &result.response);
+                                }
+                            }
+                        }
                         Err(e) => {
-                            // send_message already records the panic in supervisor,
-                            // just log the background context here
                             warn!(agent_id = %aid, error = %e, "Background tick failed");
                         }
                     }
                 })
             });
+    }
+
+    /// Register a callback that fires when an autonomous agent (continuous/periodic)
+    /// generates a response. Used by the channel bridge to push responses to Telegram.
+    pub fn set_autonomous_response_callback(&self, cb: AutonomousResponseCallback) {
+        *self
+            .on_autonomous_response
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = Some(cb);
     }
 
     /// Gracefully shutdown the kernel.

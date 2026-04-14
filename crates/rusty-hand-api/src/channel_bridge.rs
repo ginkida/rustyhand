@@ -569,6 +569,33 @@ impl ChannelBridgeHandle for KernelBridgeAdapter {
         }
     }
 
+    async fn describe_image(&self, file_path: &str) -> Result<String, String> {
+        use rusty_hand_types::media::{MediaAttachment, MediaSource, MediaType};
+
+        let size = tokio::fs::metadata(file_path)
+            .await
+            .map(|m| m.len())
+            .unwrap_or(0);
+
+        let attachment = MediaAttachment {
+            media_type: MediaType::Image,
+            mime_type: "image/jpeg".to_string(),
+            source: MediaSource::FilePath {
+                path: file_path.to_string(),
+            },
+            size_bytes: size,
+        };
+
+        let result = self
+            .kernel
+            .media_engine
+            .describe_image(&attachment)
+            .await
+            .map_err(|e| format!("Image description failed: {e}"))?;
+
+        Ok(result.description)
+    }
+
     async fn transcribe_audio(&self, file_path: &str) -> Result<String, String> {
         use rusty_hand_types::media::{MediaAttachment, MediaSource, MediaType};
 
@@ -1603,7 +1630,7 @@ pub async fn start_channel_bridge_with_config(
         started_at: Instant::now(),
     });
     let router = Arc::new(router);
-    let mut manager = BridgeManager::new(bridge_handle, router);
+    let mut manager = BridgeManager::new(bridge_handle, router.clone());
 
     let mut started_names = Vec::new();
     let mut started_adapters: Vec<Arc<dyn ChannelAdapter>> = Vec::new();
@@ -1636,6 +1663,7 @@ pub async fn start_channel_bridge_with_config(
         // For simplicity, we only support push notifications on adapters that
         // support inline keyboards. Currently: Telegram.
         // The notifier tries each adapter in turn.
+        let started_adapters_clone = started_adapters.clone();
         manager.start_approval_notifier(approval_rx, started_adapters);
 
         // Register the callback on the kernel's approval manager
@@ -1651,6 +1679,39 @@ pub async fn start_channel_bridge_with_config(
                 let _ = approval_tx.try_send(notif);
             },
         ));
+
+        // Wire autonomous response push: when an agent running in
+        // continuous/periodic mode generates a response, push it to the
+        // last known Telegram/Discord chat for that agent.
+        {
+            let adapters_for_push = started_adapters_clone.clone();
+            let router_for_push = router.clone();
+            kernel.set_autonomous_response_callback(Arc::new(
+                move |agent_id: AgentId, response: &str| {
+                    let Some((_, platform_id)) =
+                        router_for_push.last_sender_for_agent(&agent_id.0.to_string())
+                    else {
+                        return;
+                    };
+                    let user = rusty_hand_channels::types::ChannelUser {
+                        platform_id,
+                        display_name: String::new(),
+                        rusty_hand_user: None,
+                    };
+                    let content =
+                        rusty_hand_channels::types::ChannelContent::Text(response.to_string());
+                    let adapters = adapters_for_push.clone();
+                    // Fire-and-forget: spawn a task to send the response
+                    tokio::spawn(async move {
+                        for adapter in &adapters {
+                            if adapter.send(&user, content.clone()).await.is_ok() {
+                                break;
+                            }
+                        }
+                    });
+                },
+            ));
+        }
 
         (Some(manager), started_names)
     }

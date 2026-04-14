@@ -192,6 +192,14 @@ pub trait ChannelBridgeHandle: Send + Sync {
         "Schedules not available.".to_string()
     }
 
+    /// Describe an image (for photo understanding).
+    ///
+    /// Used by the bridge to auto-describe photos from Telegram before
+    /// forwarding the description to the agent.
+    async fn describe_image(&self, _file_path: &str) -> Result<String, String> {
+        Err("Image description not available.".to_string())
+    }
+
     /// Transcribe an audio file to text (speech-to-text).
     ///
     /// Used by the bridge to auto-transcribe Telegram voice messages before
@@ -670,10 +678,15 @@ async fn dispatch_message(
                             }
                         }
                     } else if media_type == "photo" {
+                        // Auto-describe the photo for the agent
+                        let description = match handle.describe_image(&local_path).await {
+                            Ok(desc) => desc,
+                            Err(_) => "Image received (description unavailable)".to_string(),
+                        };
                         if caption_text.is_empty() {
-                            format!("[Photo received, saved to {local_path}]")
+                            format!("[Photo: {description}]")
                         } else {
-                            format!("[Photo received with caption: {caption_text}. Saved to {local_path}]")
+                            format!("[Photo with caption \"{caption_text}\": {description}]")
                         }
                     } else {
                         let filename = match &message.content {
