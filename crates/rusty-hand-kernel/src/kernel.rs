@@ -3453,6 +3453,25 @@ impl RustyHandKernel {
     pub fn shutdown(&self) {
         info!("Shutting down RustyHand kernel...");
 
+        // Drain running agent tasks with a timeout so in-flight LLM calls
+        // can finish gracefully instead of being aborted mid-response.
+        let running_count = self.running_tasks.len();
+        if running_count > 0 {
+            info!("Waiting for {running_count} running agent task(s) to finish (5s timeout)...");
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !self.running_tasks.is_empty() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            let remaining = self.running_tasks.len();
+            if remaining > 0 {
+                warn!("{remaining} agent task(s) still running — aborting");
+                for entry in self.running_tasks.iter() {
+                    entry.value().abort();
+                }
+            }
+            self.running_tasks.clear();
+        }
+
         self.supervisor.shutdown();
 
         // Update agent states to Suspended in persistent storage (not delete)

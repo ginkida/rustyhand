@@ -83,8 +83,18 @@ impl WebSearchEngine {
 
     /// Perform a web search using the configured provider (or auto-fallback).
     pub async fn search(&self, query: &str, max_results: usize) -> Result<String, String> {
+        self.search_typed(query, max_results, "web").await
+    }
+
+    /// Perform a typed search (web, news, or images).
+    pub async fn search_typed(
+        &self,
+        query: &str,
+        max_results: usize,
+        search_type: &str,
+    ) -> Result<String, String> {
         // Check cache first
-        let cache_key = format!("search:{}:{}", query, max_results);
+        let cache_key = format!("search:{}:{}:{}", search_type, query, max_results);
         if let Some(cached) = self.cache.get(&cache_key) {
             debug!(query, "Search cache hit");
             return Ok(cached);
@@ -95,8 +105,37 @@ impl WebSearchEngine {
             self.rate_limiter.check(&provider_name)?;
         }
 
+        // News/images search: Brave has native support; others fall back to web search
+        // with the type prepended to the query for better results.
+        let effective_query;
+        let (query, search_type_override) = match search_type {
+            "news" | "images"
+                if matches!(
+                    self.config.search_provider,
+                    SearchProvider::Brave | SearchProvider::Auto
+                ) =>
+            {
+                (query, Some(search_type))
+            }
+            "news" => {
+                effective_query = format!("{query} latest news");
+                (effective_query.as_str(), None)
+            }
+            "images" => {
+                effective_query = format!("{query} images");
+                (effective_query.as_str(), None)
+            }
+            _ => (query, None),
+        };
+
         let result = match self.config.search_provider {
-            SearchProvider::Brave => self.search_brave(query, max_results).await,
+            SearchProvider::Brave => {
+                if search_type_override == Some("news") {
+                    self.search_brave_news(query, max_results).await
+                } else {
+                    self.search_brave(query, max_results).await
+                }
+            }
             SearchProvider::Tavily => self.search_tavily(query, max_results).await,
             SearchProvider::Perplexity => self.search_perplexity(query).await,
             SearchProvider::DuckDuckGo => self.search_duckduckgo(query, max_results).await,
@@ -212,6 +251,59 @@ impl WebSearchEngine {
         }
 
         Ok(wrap_external_content("brave-search", &output))
+    }
+
+    /// Search Brave News API.
+    async fn search_brave_news(&self, query: &str, max_results: usize) -> Result<String, String> {
+        let api_key =
+            resolve_api_key(&self.config.brave.api_key_env).ok_or("Brave API key not set")?;
+
+        let params = vec![("q", query.to_string()), ("count", max_results.to_string())];
+
+        let resp = self
+            .client
+            .get("https://api.search.brave.com/res/v1/news/search")
+            .query(&params)
+            .header("X-Subscription-Token", api_key.as_str())
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .map_err(|e| format!("Brave News request failed: {e}"))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("Brave News API returned {}", resp.status()));
+        }
+
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("Brave News JSON parse failed: {e}"))?;
+
+        let results = body["results"].as_array().cloned().unwrap_or_default();
+
+        if results.is_empty() {
+            return Ok(format!("No news found for '{query}' (Brave News)."));
+        }
+
+        let mut output = format!("News results for '{query}' (Brave News):\n\n");
+        for (i, r) in results.iter().enumerate().take(max_results) {
+            let title = r["title"].as_str().unwrap_or("");
+            let url = r["url"].as_str().unwrap_or("");
+            let desc = r["description"].as_str().unwrap_or("");
+            let age = r["age"].as_str().unwrap_or("");
+            let source = r["meta_url"]["hostname"].as_str().unwrap_or("");
+            output.push_str(&format!(
+                "{}. {}\n   Source: {} | {}\n   URL: {}\n   {}\n\n",
+                i + 1,
+                title,
+                source,
+                age,
+                url,
+                desc
+            ));
+        }
+
+        Ok(wrap_external_content("brave-news", &output))
     }
 
     /// Search via Tavily API (AI-agent-native search).

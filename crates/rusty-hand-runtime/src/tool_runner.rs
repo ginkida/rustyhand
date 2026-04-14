@@ -247,7 +247,10 @@ pub async fn execute_tool(
             if let Some(ctx) = web_ctx {
                 let query = input["query"].as_str().unwrap_or("");
                 let max_results = input["max_results"].as_u64().unwrap_or(5) as usize;
-                ctx.search.search(query, max_results).await
+                let search_type = input["search_type"].as_str().unwrap_or("web");
+                ctx.search
+                    .search_typed(query, max_results, search_type)
+                    .await
             } else {
                 tool_web_search_legacy(input).await
             }
@@ -611,12 +614,13 @@ pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "web_search".to_string(),
-            description: "Search the web using multiple providers (Tavily, Brave, Perplexity, DuckDuckGo) with automatic fallback. Returns structured results with titles, URLs, and snippets.".to_string(),
+            description: "Search the web using multiple providers (Tavily, Brave, Perplexity, DuckDuckGo) with automatic fallback. Supports web, news, and image search types.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "query": { "type": "string", "description": "The search query" },
-                    "max_results": { "type": "integer", "description": "Maximum number of results to return (default: 5, max: 20)" }
+                    "max_results": { "type": "integer", "description": "Maximum number of results to return (default: 5, max: 20)" },
+                    "search_type": { "type": "string", "enum": ["web", "news", "images"], "description": "Type of search (default: web). News search uses Brave News API when available." }
                 },
                 "required": ["query"]
             }),
