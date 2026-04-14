@@ -363,29 +363,35 @@ impl TelegramAdapter {
             .await?
             .json()
             .await?;
+
+        if resp["ok"].as_bool() != Some(true) {
+            let desc = resp["description"].as_str().unwrap_or("unknown error");
+            return Err(format!("Telegram getFile failed: {desc}").into());
+        }
+
         let file_path = resp["result"]["file_path"]
             .as_str()
             .ok_or("Missing file_path in getFile response")?;
 
-        // Step 2: Download file content
+        // Step 2: Download file content with size limit
         let download_url = format!(
             "https://api.telegram.org/file/bot{}/{}",
             self.token.as_str(),
             file_path
         );
-        let bytes = self.client.get(&download_url).send().await?.bytes().await?;
+        const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024; // 50 MB
+        let response = self.client.get(&download_url).send().await?;
+        if let Some(len) = response.content_length() {
+            if len > MAX_FILE_SIZE {
+                return Err(format!("File too large: {len} bytes (max {MAX_FILE_SIZE})").into());
+            }
+        }
+        let bytes = response.bytes().await?;
 
-        // Save to temp directory
+        // Save to temp directory (full UUID to prevent collisions)
         let dir = std::env::temp_dir().join("rusty_hand_telegram_media");
         tokio::fs::create_dir_all(&dir).await?;
-        let local_path = dir.join(format!(
-            "{}.{extension}",
-            uuid::Uuid::new_v4()
-                .to_string()
-                .split('-')
-                .next()
-                .unwrap_or("file")
-        ));
+        let local_path = dir.join(format!("{}.{extension}", uuid::Uuid::new_v4()));
         tokio::fs::write(&local_path, &bytes).await?;
 
         Ok(local_path.to_string_lossy().to_string())
@@ -1155,6 +1161,117 @@ mod tests {
             }
         });
         // Missing message → None (graceful drop)
+        assert!(parse_telegram_update(&update, &[]).is_none());
+    }
+
+    #[test]
+    fn test_parse_photo_with_caption() {
+        let update = serde_json::json!({
+            "update_id": 123460,
+            "message": {
+                "message_id": 50,
+                "from": { "id": 111, "first_name": "Alice" },
+                "chat": { "id": 111, "type": "private" },
+                "date": 1700000010,
+                "photo": [
+                    { "file_id": "small_id", "width": 90, "height": 90 },
+                    { "file_id": "large_id", "width": 800, "height": 600 }
+                ],
+                "caption": "Look at this"
+            }
+        });
+        let msg = parse_telegram_update(&update, &[]).unwrap();
+        // Should take highest resolution (last element)
+        match &msg.content {
+            ChannelContent::Image { url, caption } => {
+                assert_eq!(url, "large_id");
+                assert_eq!(caption, &Some("Look at this".to_string()));
+            }
+            other => unreachable!("Expected Image, got {other:?}"),
+        }
+        // Caption also in metadata
+        assert_eq!(
+            msg.metadata.get("caption").and_then(|v| v.as_str()),
+            Some("Look at this")
+        );
+        assert_eq!(
+            msg.metadata.get("media_type").and_then(|v| v.as_str()),
+            Some("photo")
+        );
+    }
+
+    #[test]
+    fn test_parse_voice_message() {
+        let update = serde_json::json!({
+            "update_id": 123461,
+            "message": {
+                "message_id": 51,
+                "from": { "id": 111, "first_name": "Alice" },
+                "chat": { "id": 111, "type": "private" },
+                "date": 1700000011,
+                "voice": {
+                    "file_id": "voice_file_id",
+                    "duration": 5,
+                    "mime_type": "audio/ogg"
+                }
+            }
+        });
+        let msg = parse_telegram_update(&update, &[]).unwrap();
+        match &msg.content {
+            ChannelContent::Voice {
+                url,
+                duration_seconds,
+            } => {
+                assert_eq!(url, "voice_file_id");
+                assert_eq!(*duration_seconds, 5);
+            }
+            other => unreachable!("Expected Voice, got {other:?}"),
+        }
+        assert_eq!(
+            msg.metadata.get("media_type").and_then(|v| v.as_str()),
+            Some("voice")
+        );
+    }
+
+    #[test]
+    fn test_parse_document_message() {
+        let update = serde_json::json!({
+            "update_id": 123462,
+            "message": {
+                "message_id": 52,
+                "from": { "id": 111, "first_name": "Alice" },
+                "chat": { "id": 111, "type": "private" },
+                "date": 1700000012,
+                "document": {
+                    "file_id": "doc_file_id",
+                    "file_name": "report.pdf",
+                    "mime_type": "application/pdf"
+                }
+            }
+        });
+        let msg = parse_telegram_update(&update, &[]).unwrap();
+        match &msg.content {
+            ChannelContent::File { url, filename } => {
+                assert_eq!(url, "doc_file_id");
+                assert_eq!(filename, "report.pdf");
+            }
+            other => unreachable!("Expected File, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_unsupported_message_type() {
+        // Sticker: no text, no photo, no voice, no document → None
+        let update = serde_json::json!({
+            "update_id": 123463,
+            "message": {
+                "message_id": 53,
+                "from": { "id": 111, "first_name": "Alice" },
+                "chat": { "id": 111, "type": "private" },
+                "date": 1700000013,
+                "sticker": { "file_id": "sticker_id" }
+            }
+        });
         assert!(parse_telegram_update(&update, &[]).is_none());
     }
 }

@@ -585,7 +585,8 @@ async fn dispatch_message(
                             }
                             Err(e) => {
                                 warn!("Voice transcription failed: {e}");
-                                format!("[Voice message received, transcription failed: {e}]")
+                                let _ = tokio::fs::remove_file(&local_path).await;
+                                "[Voice message received, but transcription failed. Please try again.]".to_string()
                             }
                         }
                     } else if media_type == "photo" {
@@ -603,10 +604,15 @@ async fn dispatch_message(
                     }
                 }
                 Err(e) => {
-                    let err_msg = format!("Could not download media: {e}");
-                    warn!("{err_msg}");
-                    send_response(adapter, &message.sender, err_msg, thread_id, output_format)
-                        .await;
+                    warn!("Media download failed for file_id={file_id}: {e}");
+                    send_response(
+                        adapter,
+                        &message.sender,
+                        "Could not download media file. Please try again.".to_string(),
+                        thread_id,
+                        output_format,
+                    )
+                    .await;
                     return;
                 }
             }
