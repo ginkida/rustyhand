@@ -36,6 +36,22 @@ pub trait ChannelBridgeHandle: Send + Sync {
         self.send_message(agent_id, message).await
     }
 
+    /// Send a message and pipe streaming text chunks through a channel.
+    ///
+    /// Unlike `send_message_streaming` (callback-based), this uses an owned
+    /// `Sender<String>` which avoids async_trait lifetime issues with `Fn(&str)`.
+    /// Default: falls back to `send_message()` and sends the full response as one chunk.
+    async fn send_message_to_stream(
+        &self,
+        agent_id: AgentId,
+        message: &str,
+        tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Result<String, String> {
+        let response = self.send_message(agent_id, message).await?;
+        let _ = tx.send(response.clone()).await;
+        Ok(response)
+    }
+
     /// Find an agent by name, returning its ID.
     async fn find_agent_by_name(&self, name: &str) -> Result<Option<AgentId>, String>;
 
@@ -299,7 +315,7 @@ impl BridgeManager {
                                     &message,
                                     &handle,
                                     &router,
-                                    adapter_clone.as_ref(),
+                                    &adapter_clone,
                                     &rate_limiter,
                                 ).await;
                             }
@@ -390,9 +406,10 @@ async fn dispatch_message(
     message: &ChannelMessage,
     handle: &Arc<dyn ChannelBridgeHandle>,
     router: &Arc<AgentRouter>,
-    adapter: &dyn ChannelAdapter,
+    adapter_arc: &Arc<dyn ChannelAdapter>,
     rate_limiter: &ChannelRateLimiter,
 ) {
+    let adapter: &dyn ChannelAdapter = adapter_arc.as_ref();
     let ct_str = channel_type_str(&message.channel);
 
     // Fetch per-channel overrides (if configured)
@@ -708,51 +725,37 @@ async fn dispatch_message(
     let _ = adapter.send_typing(&message.sender).await;
 
     // Send to agent and relay response.
-    // For adapters with streaming support, use the streaming path so
-    // the user sees progressive tool-use updates in the chat.
+    // For adapters with streaming support, pipe chunks in real-time so
+    // the user sees progressive tool-use updates (e.g. "⚙️ web_search...").
     let result = if adapter.supports_streaming() {
-        let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
+        let (chunk_tx, chunk_rx) = tokio::sync::mpsc::channel::<String>(64);
 
-        // Spawn a task to collect streaming chunks from the kernel callback
-        let stream_handle = tokio::spawn(async move {
-            let mut all_chunks = Vec::new();
-            let mut rx = rx;
-            while let Some(chunk) = rx.recv().await {
-                all_chunks.push(chunk);
+        // Start adapter streaming consumer in parallel — it will
+        // progressively edit the Telegram message as chunks arrive.
+        let user_for_stream = message.sender.clone();
+        let adapter_for_stream = Arc::clone(adapter_arc);
+        let stream_task = tokio::spawn(async move {
+            if let Err(e) = adapter_for_stream
+                .send_streaming(&user_for_stream, chunk_rx)
+                .await
+            {
+                warn!(
+                    "Streaming send to {} failed: {e}",
+                    adapter_for_stream.name()
+                );
             }
-            all_chunks.join("")
         });
 
-        let on_chunk = {
-            let tx = tx.clone();
-            Box::new(move |chunk: &str| {
-                if let Err(e) = tx.try_send(chunk.to_string()) {
-                    debug!("Streaming chunk dropped (channel full): {e}");
-                }
-            }) as Box<dyn Fn(&str) + Send + Sync>
-        };
-
+        // Drive the agent loop; chunks are piped to chunk_tx in real-time
+        // by KernelBridgeAdapter.send_message_to_stream(), which reads
+        // StreamEvent from the kernel and converts tool markers to text.
         let response = handle
-            .send_message_streaming(agent_id, &text, on_chunk)
+            .send_message_to_stream(agent_id, &text, chunk_tx)
             .await;
 
-        // Drop sender so stream_handle completes
-        drop(tx);
-        let _ = stream_handle.await;
+        // Wait for adapter to finish editing the last message
+        let _ = stream_task.await;
 
-        // For streaming adapters, also send the response via streaming channel
-        // if the adapter has a streaming receiver (Telegram edit flow).
-        if let Ok(ref resp) = response {
-            if !resp.is_empty() {
-                let (chunk_tx, chunk_rx) = tokio::sync::mpsc::channel::<String>(64);
-                // Send the full response as a single chunk — the adapter handles it
-                let _ = chunk_tx.send(resp.clone()).await;
-                drop(chunk_tx);
-                if let Err(e) = adapter.send_streaming(&message.sender, chunk_rx).await {
-                    warn!("Streaming send to {} failed: {e}", adapter.name());
-                }
-            }
-        }
         response
     } else {
         handle.send_message(agent_id, &text).await

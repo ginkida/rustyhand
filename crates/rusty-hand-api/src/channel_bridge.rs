@@ -53,6 +53,23 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 
+/// Convert a `StreamEvent` to a text string for streaming adapters.
+///
+/// Returns `Some(text)` for events that should be displayed (text deltas,
+/// tool status markers), or `None` for events the adapter should skip.
+fn stream_event_to_text(event: &rusty_hand_runtime::llm_driver::StreamEvent) -> Option<String> {
+    use rusty_hand_runtime::llm_driver::StreamEvent;
+    match event {
+        StreamEvent::TextDelta { text } => Some(text.clone()),
+        StreamEvent::ToolUseStart { name, .. } => Some(format!("\n⚙️ {name}...\n")),
+        StreamEvent::ToolExecutionResult { name, is_error, .. } => {
+            let icon = if *is_error { "❌" } else { "✅" };
+            Some(format!("\n{icon} {name}\n"))
+        }
+        _ => None,
+    }
+}
+
 /// Wraps `RustyHandKernel` to implement `ChannelBridgeHandle`.
 pub struct KernelBridgeAdapter {
     kernel: Arc<RustyHandKernel>,
@@ -66,6 +83,39 @@ impl ChannelBridgeHandle for KernelBridgeAdapter {
             .kernel
             .send_message(agent_id, message)
             .await
+            .map_err(|e| format!("{e}"))?;
+        Ok(result.response)
+    }
+
+    async fn send_message_to_stream(
+        &self,
+        agent_id: AgentId,
+        message: &str,
+        tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Result<String, String> {
+        use rusty_hand_runtime::llm_driver::StreamEvent;
+
+        let kernel = Arc::clone(&self.kernel);
+        let msg_owned = message.to_string();
+        let (mut rx, join_handle) = kernel
+            .send_message_streaming(agent_id, &msg_owned, Some(kernel.clone()))
+            .map_err(|e| format!("{e}"))?;
+
+        // Pipe StreamEvent → tx channel as text chunks in real-time.
+        // TextDelta passes through; tool events emit status markers
+        // (⚙️/✅/❌) that the Telegram adapter shows as progressive edits.
+        while let Some(event) = rx.recv().await {
+            if let Some(text) = stream_event_to_text(&event) {
+                let _ = tx.send(text).await;
+            }
+            if matches!(&event, StreamEvent::ContentComplete { .. }) {
+                break;
+            }
+        }
+
+        let result = join_handle
+            .await
+            .map_err(|e| format!("Task join: {e}"))?
             .map_err(|e| format!("{e}"))?;
         Ok(result.response)
     }
