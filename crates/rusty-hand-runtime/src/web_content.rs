@@ -169,6 +169,9 @@ fn convert_elements(html: &str) -> String {
     result = convert_inline_tag(&result, "<ol", "</ol>", "\n", "\n");
     result = convert_inline_tag(&result, "<li", "</li>", "- ", "\n");
 
+    // Tables: <table>...<tr><th>...<td>... → Markdown table
+    result = convert_tables(&result);
+
     // Links: <a href="url">text</a> → [text](url)
     result = convert_links(&result);
 
@@ -286,6 +289,137 @@ fn extract_attribute(tag: &str, attr: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Convert HTML tables to Markdown tables.
+///
+/// Handles `<table>`, `<tr>`, `<th>`, `<td>`. Produces:
+/// ```markdown
+/// | Header1 | Header2 |
+/// | --- | --- |
+/// | Cell1 | Cell2 |
+/// ```
+fn convert_tables(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let lower = html.to_lowercase();
+    let mut pos = 0;
+
+    while pos < html.len() {
+        if let Some(table_start) = lower[pos..].find("<table") {
+            let abs_start = pos + table_start;
+            result.push_str(&html[pos..abs_start]);
+
+            if let Some(table_end) = lower[abs_start..].find("</table>") {
+                let table_html = &html[abs_start..abs_start + table_end + 8];
+                let md_table = table_to_markdown(table_html);
+                result.push_str("\n\n");
+                result.push_str(&md_table);
+                result.push_str("\n\n");
+                pos = abs_start + table_end + 8;
+            } else {
+                result.push_str(&html[abs_start..abs_start + 1]);
+                pos = abs_start + 1;
+            }
+        } else {
+            result.push_str(&html[pos..]);
+            break;
+        }
+    }
+    result
+}
+
+/// Convert a single `<table>...</table>` block into a Markdown table.
+fn table_to_markdown(table_html: &str) -> String {
+    let lower = table_html.to_lowercase();
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut has_header = false;
+    let mut pos = 0;
+
+    while pos < lower.len() {
+        if let Some(tr_start) = lower[pos..].find("<tr") {
+            let abs_tr = pos + tr_start;
+            if let Some(tr_end) = lower[abs_tr..].find("</tr>") {
+                let row_html = &table_html[abs_tr..abs_tr + tr_end + 5];
+                let row_lower = row_html.to_lowercase();
+                let mut cells = Vec::new();
+                let mut is_header_row = false;
+                let mut cell_pos = 0;
+
+                while cell_pos < row_lower.len() {
+                    // Match <th or <td
+                    let th_pos = row_lower[cell_pos..].find("<th");
+                    let td_pos = row_lower[cell_pos..].find("<td");
+                    let (cell_start, is_th) = match (th_pos, td_pos) {
+                        (Some(th), Some(td)) if th < td => (cell_pos + th, true),
+                        (Some(th), None) => (cell_pos + th, true),
+                        (_, Some(td)) => (cell_pos + td, false),
+                        (None, None) => break,
+                    };
+                    if is_th {
+                        is_header_row = true;
+                    }
+                    let close_tag = if is_th { "</th>" } else { "</td>" };
+                    if let Some(gt) = row_html[cell_start..].find('>') {
+                        let content_start = cell_start + gt + 1;
+                        if let Some(close) = row_lower[content_start..].find(close_tag) {
+                            let cell_text =
+                                strip_all_tags(&row_html[content_start..content_start + close])
+                                    .trim()
+                                    .to_string();
+                            cells.push(cell_text);
+                            cell_pos = content_start + close + close_tag.len();
+                        } else {
+                            cell_pos = content_start;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+
+                if !cells.is_empty() {
+                    if is_header_row {
+                        has_header = true;
+                    }
+                    rows.push(cells);
+                }
+                pos = abs_tr + tr_end + 5;
+            } else {
+                pos = abs_tr + 1;
+            }
+        } else {
+            break;
+        }
+    }
+
+    if rows.is_empty() {
+        return String::new();
+    }
+
+    // Determine column count
+    let max_cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    if max_cols == 0 {
+        return String::new();
+    }
+
+    let mut md = String::new();
+    for (i, row) in rows.iter().enumerate() {
+        md.push('|');
+        for col in 0..max_cols {
+            let cell = row.get(col).map(|s| s.as_str()).unwrap_or("");
+            md.push_str(&format!(" {} |", cell));
+        }
+        md.push('\n');
+
+        // Add separator after header row (first row if has_header, or after first row always)
+        if i == 0 && (has_header || rows.len() > 1) {
+            md.push('|');
+            for _ in 0..max_cols {
+                md.push_str(" --- |");
+            }
+            md.push('\n');
+        }
+    }
+    md
 }
 
 /// Strip all remaining HTML tags.

@@ -441,6 +441,27 @@ pub async fn execute_tool(
             }
             None => Err("Browser tools not available.".to_string()),
         },
+        "browser_wait" => match browser_ctx {
+            Some(mgr) => {
+                let aid = caller_agent_id.unwrap_or("default");
+                crate::browser::tool_browser_wait(input, mgr, aid).await
+            }
+            None => Err("Browser tools not available.".to_string()),
+        },
+        "browser_execute_script" => match browser_ctx {
+            Some(mgr) => {
+                let aid = caller_agent_id.unwrap_or("default");
+                crate::browser::tool_browser_execute_script(input, mgr, aid).await
+            }
+            None => Err("Browser tools not available.".to_string()),
+        },
+        "browser_scroll" => match browser_ctx {
+            Some(mgr) => {
+                let aid = caller_agent_id.unwrap_or("default");
+                crate::browser::tool_browser_scroll(input, mgr, aid).await
+            }
+            None => Err("Browser tools not available.".to_string()),
+        },
 
         // Canvas / A2UI tool
         "canvas_present" => tool_canvas_present(input, workspace_root).await,
@@ -991,6 +1012,40 @@ pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {}
+            }),
+        },
+        ToolDefinition {
+            name: "browser_wait".to_string(),
+            description: "Wait for a CSS selector to appear on the page. Essential for SPAs where content loads asynchronously. Polls every 500ms until found or timeout.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "selector": { "type": "string", "description": "CSS selector to wait for (e.g., '#results', '.loaded', '[data-ready]')" },
+                    "timeout_ms": { "type": "integer", "description": "Max wait time in milliseconds (default: 10000)" }
+                },
+                "required": ["selector"]
+            }),
+        },
+        ToolDefinition {
+            name: "browser_execute_script".to_string(),
+            description: "Execute JavaScript on the current page and return the result. Use for extracting data, triggering actions, or interacting with page APIs.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "script": { "type": "string", "description": "JavaScript code to execute (e.g., 'document.title', 'window.scrollTo(0, 0)')" }
+                },
+                "required": ["script"]
+            }),
+        },
+        ToolDefinition {
+            name: "browser_scroll".to_string(),
+            description: "Scroll the page in a direction by a given number of pixels.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "direction": { "type": "string", "enum": ["up", "down", "left", "right"], "description": "Scroll direction (default: down)" },
+                    "amount": { "type": "integer", "description": "Pixels to scroll (default: 500)" }
+                }
             }),
         },
         // --- Media understanding tools ---

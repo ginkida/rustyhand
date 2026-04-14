@@ -14,11 +14,49 @@ use std::sync::Arc;
 use tracing::{debug, warn};
 use zeroize::Zeroizing;
 
+/// Simple per-provider rate limiter: tracks timestamps of recent requests
+/// and rejects if too many in the window.
+struct SearchRateLimiter {
+    /// (provider_name → Vec<Instant>) — recent request timestamps.
+    buckets: dashmap::DashMap<String, Vec<std::time::Instant>>,
+    /// Max requests per minute.
+    max_per_minute: u32,
+}
+
+impl SearchRateLimiter {
+    fn new(max_per_minute: u32) -> Self {
+        Self {
+            buckets: dashmap::DashMap::new(),
+            max_per_minute,
+        }
+    }
+
+    /// Check rate limit. Returns Ok if allowed, Err with wait message if exceeded.
+    fn check(&self, provider: &str) -> Result<(), String> {
+        if self.max_per_minute == 0 {
+            return Ok(());
+        }
+        let now = std::time::Instant::now();
+        let window = std::time::Duration::from_secs(60);
+        let mut entry = self.buckets.entry(provider.to_string()).or_default();
+        entry.retain(|ts| now.duration_since(*ts) < window);
+        if entry.len() >= self.max_per_minute as usize {
+            return Err(format!(
+                "Search rate limit exceeded for {provider} ({} req/min). Try again shortly.",
+                self.max_per_minute
+            ));
+        }
+        entry.push(now);
+        Ok(())
+    }
+}
+
 /// Multi-provider web search engine.
 pub struct WebSearchEngine {
     config: WebConfig,
     client: reqwest::Client,
     cache: Arc<WebCache>,
+    rate_limiter: SearchRateLimiter,
 }
 
 /// Context that bundles both search and fetch engines for passing through the tool runner.
@@ -38,6 +76,8 @@ impl WebSearchEngine {
             config,
             client,
             cache,
+            // Default: 30 requests/min per provider (generous but protective)
+            rate_limiter: SearchRateLimiter::new(30),
         }
     }
 
@@ -48,6 +88,11 @@ impl WebSearchEngine {
         if let Some(cached) = self.cache.get(&cache_key) {
             debug!(query, "Search cache hit");
             return Ok(cached);
+        }
+
+        let provider_name = format!("{:?}", self.config.search_provider);
+        if !matches!(self.config.search_provider, SearchProvider::Auto) {
+            self.rate_limiter.check(&provider_name)?;
         }
 
         let result = match self.config.search_provider {
@@ -70,7 +115,9 @@ impl WebSearchEngine {
     /// Priority: Tavily → Brave → Perplexity → DuckDuckGo
     async fn search_auto(&self, query: &str, max_results: usize) -> Result<String, String> {
         // Tavily first (AI-agent-native)
-        if resolve_api_key(&self.config.tavily.api_key_env).is_some() {
+        if resolve_api_key(&self.config.tavily.api_key_env).is_some()
+            && self.rate_limiter.check("Tavily").is_ok()
+        {
             debug!("Auto: trying Tavily");
             match self.search_tavily(query, max_results).await {
                 Ok(result) => return Ok(result),
@@ -79,7 +126,9 @@ impl WebSearchEngine {
         }
 
         // Brave second
-        if resolve_api_key(&self.config.brave.api_key_env).is_some() {
+        if resolve_api_key(&self.config.brave.api_key_env).is_some()
+            && self.rate_limiter.check("Brave").is_ok()
+        {
             debug!("Auto: trying Brave");
             match self.search_brave(query, max_results).await {
                 Ok(result) => return Ok(result),
@@ -88,7 +137,9 @@ impl WebSearchEngine {
         }
 
         // Perplexity third
-        if resolve_api_key(&self.config.perplexity.api_key_env).is_some() {
+        if resolve_api_key(&self.config.perplexity.api_key_env).is_some()
+            && self.rate_limiter.check("Perplexity").is_ok()
+        {
             debug!("Auto: trying Perplexity");
             match self.search_perplexity(query).await {
                 Ok(result) => return Ok(result),

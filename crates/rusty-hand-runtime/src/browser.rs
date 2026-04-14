@@ -402,6 +402,86 @@ pub async fn tool_browser_read_page(
     ))
 }
 
+/// browser_wait — Wait for a selector to appear on the page.
+///
+/// Essential for SPAs where content loads asynchronously after navigation.
+/// Polls the page at 500ms intervals until the selector is found or timeout.
+pub async fn tool_browser_wait(
+    input: &serde_json::Value,
+    mgr: &BrowserManager,
+    agent_id: &str,
+) -> Result<String, String> {
+    let selector = input["selector"]
+        .as_str()
+        .ok_or("Missing 'selector' parameter")?;
+    let timeout_ms = input["timeout_ms"].as_u64().unwrap_or(10_000);
+    let poll_interval = std::time::Duration::from_millis(500);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+
+    loop {
+        // Check if element exists via snapshot with selector filter
+        let resp = mgr
+            .run_command(agent_id, &["snapshot", "-s", selector])
+            .await;
+        if let Ok(ref r) = resp {
+            let snapshot = r["data"]["snapshot"]
+                .as_str()
+                .or_else(|| r["snapshot"].as_str())
+                .unwrap_or("");
+            // If snapshot contains any element refs, the selector matched
+            if snapshot.contains("@e") || !snapshot.trim().is_empty() {
+                return Ok(format!("Element '{selector}' found on page."));
+            }
+        }
+
+        if std::time::Instant::now() >= deadline {
+            return Err(format!(
+                "Timeout: element '{selector}' not found within {timeout_ms}ms"
+            ));
+        }
+        tokio::time::sleep(poll_interval).await;
+    }
+}
+
+/// browser_execute_script — Execute JavaScript on the current page.
+///
+/// Returns the result of the script as a string. Useful for extracting
+/// data, triggering actions, or interacting with page APIs.
+pub async fn tool_browser_execute_script(
+    input: &serde_json::Value,
+    mgr: &BrowserManager,
+    agent_id: &str,
+) -> Result<String, String> {
+    let script = input["script"]
+        .as_str()
+        .ok_or("Missing 'script' parameter")?;
+    let resp = mgr.run_command(agent_id, &["execute", script]).await?;
+    let result = resp["data"]["result"]
+        .as_str()
+        .or_else(|| resp["result"].as_str())
+        .or_else(|| resp["data"].as_str())
+        .unwrap_or("(no result)");
+    Ok(result.to_string())
+}
+
+/// browser_scroll — Scroll the page by a given amount.
+pub async fn tool_browser_scroll(
+    input: &serde_json::Value,
+    mgr: &BrowserManager,
+    agent_id: &str,
+) -> Result<String, String> {
+    let direction = input["direction"].as_str().unwrap_or("down");
+    let amount = input["amount"].as_u64().unwrap_or(500);
+    let script = match direction {
+        "up" => format!("window.scrollBy(0, -{})", amount),
+        "left" => format!("window.scrollBy(-{}, 0)", amount),
+        "right" => format!("window.scrollBy({}, 0)", amount),
+        _ => format!("window.scrollBy(0, {})", amount), // down
+    };
+    mgr.run_command(agent_id, &["execute", &script]).await?;
+    Ok(format!("Scrolled {direction} by {amount}px."))
+}
+
 /// browser_close — Close the browser session for this agent.
 pub async fn tool_browser_close(
     _input: &serde_json::Value,
