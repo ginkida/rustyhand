@@ -147,7 +147,8 @@ impl WebSearchEngine {
             }
         }
 
-        // DuckDuckGo always available as zero-config fallback
+        // DuckDuckGo always available as zero-config fallback (still rate-limited)
+        self.rate_limiter.check("DuckDuckGo")?;
         debug!("Auto: falling back to DuckDuckGo");
         self.search_duckduckgo(query, max_results).await
     }

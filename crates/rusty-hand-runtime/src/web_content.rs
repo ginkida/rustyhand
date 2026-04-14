@@ -523,4 +523,54 @@ mod tests {
         assert!(result.contains("Keep"));
         assert!(result.contains("this"));
     }
+
+    #[test]
+    fn test_table_to_markdown_with_header() {
+        let html = r#"<table><tr><th>Name</th><th>Age</th></tr><tr><td>Alice</td><td>30</td></tr><tr><td>Bob</td><td>25</td></tr></table>"#;
+        let md = table_to_markdown(html);
+        assert!(md.contains("| Name |"), "Expected header: {md}");
+        assert!(md.contains("| --- |"), "Expected separator: {md}");
+        assert!(md.contains("| Alice |"), "Expected cell: {md}");
+        assert!(md.contains("| Bob |"), "Expected cell: {md}");
+    }
+
+    #[test]
+    fn test_table_to_markdown_no_header() {
+        let html = r#"<table><tr><td>A</td><td>B</td></tr><tr><td>C</td><td>D</td></tr></table>"#;
+        let md = table_to_markdown(html);
+        assert!(md.contains("| A |"), "Expected cell A: {md}");
+        assert!(
+            md.contains("| --- |"),
+            "Expected separator even without th: {md}"
+        );
+    }
+
+    #[test]
+    fn test_table_to_markdown_inline_tags_stripped() {
+        let html = r#"<table><tr><td><strong>Bold</strong></td><td><a href="x">Link</a></td></tr></table>"#;
+        let md = table_to_markdown(html);
+        assert!(md.contains("Bold"), "Expected stripped bold: {md}");
+        assert!(md.contains("Link"), "Expected stripped link: {md}");
+        assert!(!md.contains("<strong>"), "Tags should be stripped: {md}");
+    }
+
+    #[test]
+    fn test_table_to_markdown_empty_table() {
+        let html = r#"<table></table>"#;
+        let md = table_to_markdown(html);
+        assert!(
+            md.trim().is_empty(),
+            "Empty table should produce empty output: {md}"
+        );
+    }
+
+    #[test]
+    fn test_html_to_markdown_with_table() {
+        let html = r#"<html><body><p>Before</p><table><tr><th>X</th></tr><tr><td>1</td></tr></table><p>After</p></body></html>"#;
+        let md = html_to_markdown(html);
+        assert!(md.contains("Before"), "Text before table: {md}");
+        assert!(md.contains("| X |"), "Table header: {md}");
+        assert!(md.contains("| 1 |"), "Table cell: {md}");
+        assert!(md.contains("After"), "Text after table: {md}");
+    }
 }

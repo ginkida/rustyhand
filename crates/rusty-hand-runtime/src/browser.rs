@@ -428,8 +428,9 @@ pub async fn tool_browser_wait(
                 .as_str()
                 .or_else(|| r["snapshot"].as_str())
                 .unwrap_or("");
-            // If snapshot contains any element refs, the selector matched
-            if snapshot.contains("@e") || !snapshot.trim().is_empty() {
+            // Element refs (@e1, @e2, ...) confirm the selector matched.
+            // Don't use !is_empty() — error responses would false-positive.
+            if snapshot.contains("@e") {
                 return Ok(format!("Element '{selector}' found on page."));
             }
         }
