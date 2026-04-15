@@ -553,6 +553,9 @@ impl ChannelBridgeHandle for KernelBridgeAdapter {
                             rusty_hand_types::scheduler::CronAction::SystemEvent { text } => {
                                 text.clone()
                             }
+                            rusty_hand_types::scheduler::CronAction::WorkflowRun {
+                                input, ..
+                            } => input.clone(),
                         };
                         match self.kernel.send_message(j.agent_id, &message).await {
                             Ok(result) => {

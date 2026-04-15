@@ -7495,6 +7495,19 @@ pub async fn run_cron_job(
                         })),
                     )
                 }
+                Ok(rusty_hand_kernel::kernel::CronRunOutcome::WorkflowRun {
+                    workflow_id,
+                    output,
+                }) => (
+                    StatusCode::OK,
+                    Json(serde_json::json!({
+                        "status": "completed",
+                        "job_id": id,
+                        "mode": "workflow_run",
+                        "workflow_id": workflow_id,
+                        "output": output,
+                    })),
+                ),
                 Err(error) => (
                     if error.timed_out {
                         StatusCode::GATEWAY_TIMEOUT

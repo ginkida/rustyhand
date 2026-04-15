@@ -145,6 +145,7 @@ pub struct RustyHandKernel {
 pub enum CronRunOutcome {
     SystemEvent { event_type: String },
     AgentTurn { agent_id: AgentId, response: String },
+    WorkflowRun { workflow_id: String, output: String },
 }
 
 /// Error returned when a cron job execution fails.
@@ -2217,6 +2218,47 @@ impl RustyHandKernel {
                     Err(_) => {
                         let err_msg = format!("timed out after {timeout_s}s");
                         tracing::warn!(job = %job_name, timeout_s, "Cron job timed out (transient — will retry at next interval)");
+                        self.cron_scheduler.record_failure(job_id, &err_msg, true);
+                        Err(CronRunError::timed_out(err_msg))
+                    }
+                }
+            }
+            rusty_hand_types::scheduler::CronAction::WorkflowRun {
+                workflow_id,
+                input,
+                timeout_secs,
+            } => {
+                tracing::debug!(job = %job_name, workflow = %workflow_id, "Cron: firing workflow run");
+                let timeout_s = timeout_secs.unwrap_or(300);
+                let timeout = std::time::Duration::from_secs(timeout_s);
+
+                let wf_id = match workflow_id.parse::<uuid::Uuid>() {
+                    Ok(u) => WorkflowId(u),
+                    Err(e) => {
+                        let err_msg = format!("Invalid workflow ID: {e}");
+                        self.cron_scheduler.record_failure(job_id, &err_msg, false);
+                        return Err(CronRunError::failed(err_msg));
+                    }
+                };
+
+                match tokio::time::timeout(timeout, self.run_workflow(wf_id, input.clone())).await {
+                    Ok(Ok((_run_id, output))) => {
+                        tracing::info!(job = %job_name, workflow = %workflow_id, "Cron workflow completed");
+                        self.cron_scheduler.record_success(job_id);
+                        Ok(CronRunOutcome::WorkflowRun {
+                            workflow_id: workflow_id.clone(),
+                            output,
+                        })
+                    }
+                    Ok(Err(e)) => {
+                        let err_msg = format!("{e}");
+                        tracing::warn!(job = %job_name, workflow = %workflow_id, error = %err_msg, "Cron workflow failed");
+                        self.cron_scheduler.record_failure(job_id, &err_msg, true);
+                        Err(CronRunError::failed(err_msg))
+                    }
+                    Err(_) => {
+                        let err_msg = format!("workflow timed out after {timeout_s}s");
+                        tracing::warn!(job = %job_name, workflow = %workflow_id, "Cron workflow timed out");
                         self.cron_scheduler.record_failure(job_id, &err_msg, true);
                         Err(CronRunError::timed_out(err_msg))
                     }

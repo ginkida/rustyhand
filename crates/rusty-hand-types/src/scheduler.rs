@@ -122,6 +122,15 @@ pub enum CronAction {
         /// Timeout in seconds (10..=600).
         timeout_secs: Option<u64>,
     },
+    /// Execute a workflow with the given input.
+    WorkflowRun {
+        /// Workflow ID to execute.
+        workflow_id: String,
+        /// Input text for the workflow.
+        input: String,
+        /// Timeout in seconds (default 300).
+        timeout_secs: Option<u64>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +294,27 @@ impl CronJob {
                         "agent turn message too long ({} chars, max {MAX_TURN_MESSAGE_LEN})",
                         message.len()
                     ));
+                }
+                if let Some(t) = timeout_secs {
+                    if *t < MIN_TIMEOUT_SECS {
+                        return Err(format!(
+                            "timeout_secs too small ({t}, min {MIN_TIMEOUT_SECS})"
+                        ));
+                    }
+                    if *t > MAX_TIMEOUT_SECS {
+                        return Err(format!(
+                            "timeout_secs too large ({t}, max {MAX_TIMEOUT_SECS})"
+                        ));
+                    }
+                }
+            }
+            CronAction::WorkflowRun {
+                workflow_id,
+                timeout_secs,
+                ..
+            } => {
+                if workflow_id.is_empty() {
+                    return Err("workflow_id must not be empty".into());
                 }
                 if let Some(t) = timeout_secs {
                     if *t < MIN_TIMEOUT_SECS {

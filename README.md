@@ -19,20 +19,19 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT" />
-  <img src="https://img.shields.io/badge/version-0.5.1-green?style=flat-square" alt="v0.5.1" />
-  <img src="https://img.shields.io/badge/tests-1,730%2B%20passing-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/version-0.6.0-green?style=flat-square" alt="v0.6.0" />
+  <img src="https://img.shields.io/badge/tests-1,740%2B%20passing-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/clippy-0%20warnings-brightgreen?style=flat-square" alt="Clippy" />
 </p>
 
 ---
 
-> **v0.5.1 — Hardening Release (April 2026)**
+> **v0.6.0 — Performance & Scale (April 2026)**
 >
-> Comprehensive security, reliability, and UX hardening across all 10 crates.
-> 70 files improved: error body preservation in 45+ API error paths, SSRF streaming body limit,
-> HTTP client timeouts on all LLM drivers, graceful shutdown of background tasks, dashboard
-> accessibility (WCAG), keyboard shortcuts, API latency indicator, SSE stream timeout,
-> and 800+ lines of defensive improvements. [Report issues here.](https://github.com/ginkida/rustyhand/issues)
+> Major performance and feature release. N+1 query elimination (100 agents: 100 queries → 1),
+> session index + message_count column, API pagination (?limit=&offset=), agent export/import,
+> server-side search API, workflow scheduling via cron, and comprehensive hardening from v0.5.1.
+> [Report issues here.](https://github.com/ginkida/rustyhand/issues)
 
 ---
 
