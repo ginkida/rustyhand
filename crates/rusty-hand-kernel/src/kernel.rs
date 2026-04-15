@@ -2253,7 +2253,9 @@ impl RustyHandKernel {
         }
 
         // Delete the old session
-        let _ = self.memory.delete_session(entry.session_id);
+        if let Err(e) = self.memory.delete_session(entry.session_id) {
+            warn!(session_id = %entry.session_id, error = %e, "Failed to delete old session during reset");
+        }
 
         // Create a fresh session
         let new_session = self
@@ -2726,7 +2728,9 @@ impl RustyHandKernel {
         self.triggers.remove_agent_triggers(agent_id);
 
         // Remove from persistent storage
-        let _ = self.memory.remove_agent(agent_id);
+        if let Err(e) = self.memory.remove_agent(agent_id) {
+            warn!(agent_id = %agent_id, error = %e, "Failed to remove agent from persistent storage");
+        }
 
         // SECURITY: Record agent kill in audit trail
         self.audit_log.record(
@@ -3202,7 +3206,9 @@ impl RustyHandKernel {
                     interval.tick().await;
                     if kernel.supervisor.is_shutting_down() {
                         // Persist on shutdown
-                        let _ = kernel.cron_scheduler.persist();
+                        if let Err(e) = kernel.cron_scheduler.persist() {
+                            warn!(error = %e, "Failed to persist cron schedule at shutdown");
+                        }
                         break;
                     }
 

@@ -2723,7 +2723,9 @@ pub async fn prometheus_metrics(State(state): State<Arc<AppState>>) -> impl Into
 pub async fn list_skills(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let skills_dir = state.kernel.config.home_dir.join("skills");
     let mut registry = rusty_hand_skills::registry::SkillRegistry::new(skills_dir);
-    let _ = registry.load_all();
+    if let Err(e) = registry.load_all() {
+        tracing::warn!(error = %e, "Failed to load skills registry");
+    }
 
     let skills: Vec<serde_json::Value> = registry
         .list()
@@ -2797,7 +2799,9 @@ pub async fn uninstall_skill(
 ) -> impl IntoResponse {
     let skills_dir = state.kernel.config.home_dir.join("skills");
     let mut registry = rusty_hand_skills::registry::SkillRegistry::new(skills_dir);
-    let _ = registry.load_all();
+    if let Err(e) = registry.load_all() {
+        tracing::warn!(error = %e, "Failed to load skills registry");
+    }
 
     match registry.remove(&req.name) {
         Ok(()) => {
@@ -5657,7 +5661,9 @@ pub async fn remove_integration(
     state.kernel.extension_health.unregister(&id);
 
     // Hot-disconnect the removed MCP server
-    let _ = state.kernel.reload_extension_mcps().await;
+    if let Err(e) = state.kernel.reload_extension_mcps().await {
+        tracing::warn!(error = %e, "Failed to reload MCP servers after extension removal");
+    }
 
     (
         StatusCode::OK,
