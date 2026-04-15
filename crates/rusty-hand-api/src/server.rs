@@ -152,6 +152,18 @@ pub async fn build_router(
             axum::routing::get(routes::list_agents).post(routes::spawn_agent),
         )
         .route(
+            "/api/agents/export",
+            axum::routing::get(routes::export_agents),
+        )
+        .route(
+            "/api/agents/import",
+            axum::routing::post(routes::import_agents),
+        )
+        .route(
+            "/api/agents/search",
+            axum::routing::get(routes::search_agents),
+        )
+        .route(
             "/api/agents/{id}",
             axum::routing::get(routes::get_agent).delete(routes::kill_agent),
         )

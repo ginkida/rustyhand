@@ -255,6 +255,210 @@ pub async fn list_agents(
     }))
 }
 
+/// GET /api/agents/export — Export all agent manifests as JSON for backup/migration.
+pub async fn export_agents(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let agents: Vec<serde_json::Value> = state
+        .kernel
+        .registry
+        .list()
+        .into_iter()
+        .map(|e| {
+            serde_json::json!({
+                "id": e.id.to_string(),
+                "name": e.name,
+                "state": format!("{:?}", e.state),
+                "mode": e.mode,
+                "group": e.manifest.group,
+                "description": e.manifest.description,
+                "model": {
+                    "provider": e.manifest.model.provider,
+                    "model": e.manifest.model.model,
+                    "system_prompt": e.manifest.model.system_prompt,
+                    "temperature": e.manifest.model.temperature,
+                    "max_tokens": e.manifest.model.max_tokens,
+                },
+                "profile": e.manifest.profile,
+                "skills": e.manifest.skills,
+                "identity": {
+                    "emoji": e.identity.emoji,
+                    "color": e.identity.color,
+                    "archetype": e.identity.archetype,
+                    "vibe": e.identity.vibe,
+                },
+                "resources": {
+                    "max_cost_per_hour_usd": e.manifest.resources.max_cost_per_hour_usd,
+                    "max_cost_per_day_usd": e.manifest.resources.max_cost_per_day_usd,
+                },
+                "created_at": e.created_at.to_rfc3339(),
+            })
+        })
+        .collect();
+
+    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    let filename = format!("rustyhand-agents-{timestamp}.json");
+
+    (
+        StatusCode::OK,
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                "application/json".to_string(),
+            ),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{filename}\""),
+            ),
+        ],
+        Json(serde_json::json!({
+            "version": "1.0",
+            "exported_at": chrono::Utc::now().to_rfc3339(),
+            "agent_count": agents.len(),
+            "agents": agents,
+        })),
+    )
+}
+
+/// POST /api/agents/import — Bulk import agents from a JSON export.
+pub async fn import_agents(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let agents = match req.get("agents").and_then(|a| a.as_array()) {
+        Some(a) => a,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Missing 'agents' array in import data"})),
+            );
+        }
+    };
+
+    let mut imported = 0u32;
+    let mut errors = Vec::new();
+
+    for agent_json in agents {
+        let name = agent_json["name"].as_str().unwrap_or("imported-agent");
+        let provider = agent_json["model"]["provider"]
+            .as_str()
+            .unwrap_or("anthropic");
+        let model = agent_json["model"]["model"]
+            .as_str()
+            .unwrap_or("claude-sonnet-4-20250514");
+        let system_prompt = agent_json["model"]["system_prompt"].as_str().unwrap_or("");
+        let group = agent_json["group"].as_str().unwrap_or("");
+        let description = agent_json["description"].as_str().unwrap_or("");
+
+        #[allow(clippy::field_reassign_with_default)]
+        let manifest = {
+            let mut m = rusty_hand_types::agent::AgentManifest::default();
+            m.name = name.to_string();
+            m.model.provider = provider.to_string();
+            m.model.model = model.to_string();
+            m.model.system_prompt = system_prompt.to_string();
+            m.group = Some(group.to_string());
+            m.description = description.to_string();
+            m
+        };
+
+        match state.kernel.spawn_agent(manifest) {
+            Ok(id) => {
+                imported += 1;
+                tracing::info!(agent_id = %id, name, "Imported agent");
+            }
+            Err(e) => {
+                errors.push(format!("Failed to import '{}': {}", name, e));
+            }
+        }
+    }
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "imported": imported,
+            "errors": errors,
+            "total_in_file": agents.len(),
+        })),
+    )
+}
+
+/// GET /api/agents/search — Server-side agent search with filters.
+///
+/// Query params: q (text search), model (provider filter), state (Running/Idle/Suspended),
+/// group (group name filter).
+pub async fn search_agents(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let query = params.get("q").map(|s| s.to_lowercase());
+    let model_filter = params.get("model").map(|s| s.to_lowercase());
+    let state_filter = params.get("state").map(|s| s.to_lowercase());
+    let group_filter = params.get("group").cloned();
+
+    let agents: Vec<serde_json::Value> = state
+        .kernel
+        .registry
+        .list()
+        .into_iter()
+        .filter(|e| {
+            // Text search across name, description, group, model
+            if let Some(ref q) = query {
+                let name_match = e.name.to_lowercase().contains(q);
+                let desc_match = e.manifest.description.to_lowercase().contains(q);
+                let group_match = e
+                    .manifest
+                    .group
+                    .as_deref()
+                    .map(|g| g.to_lowercase().contains(q))
+                    .unwrap_or(false);
+                let model_match = e.manifest.model.model.to_lowercase().contains(q)
+                    || e.manifest.model.provider.to_lowercase().contains(q);
+                if !(name_match || desc_match || group_match || model_match) {
+                    return false;
+                }
+            }
+            // Model/provider filter
+            if let Some(ref m) = model_filter {
+                if !e.manifest.model.provider.to_lowercase().contains(m)
+                    && !e.manifest.model.model.to_lowercase().contains(m)
+                {
+                    return false;
+                }
+            }
+            // State filter
+            if let Some(ref s) = state_filter {
+                let agent_state = format!("{:?}", e.state).to_lowercase();
+                if !agent_state.contains(s) {
+                    return false;
+                }
+            }
+            // Group filter
+            if let Some(ref g) = group_filter {
+                let agent_group = e.manifest.group.as_deref().unwrap_or("");
+                if agent_group != g {
+                    return false;
+                }
+            }
+            true
+        })
+        .map(|e| {
+            serde_json::json!({
+                "id": e.id.to_string(),
+                "name": e.name,
+                "state": format!("{:?}", e.state),
+                "group": e.manifest.group,
+                "model_provider": e.manifest.model.provider,
+                "model_name": e.manifest.model.model,
+                "description": e.manifest.description,
+            })
+        })
+        .collect();
+
+    Json(serde_json::json!({
+        "results": agents,
+        "total": agents.len(),
+    }))
+}
+
 /// Resolve uploaded file attachments into ContentBlock::Image blocks.
 ///
 /// Reads each file from the upload directory, base64-encodes it, and
