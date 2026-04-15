@@ -2083,7 +2083,9 @@ pub async fn remove_channel(
     // Remove all secret env vars for this channel
     for field_def in meta.fields {
         if let Some(env_var) = field_def.env_var {
-            let _ = remove_secret_env(&secrets_path, env_var);
+            if let Err(e) = remove_secret_env(&secrets_path, env_var) {
+                tracing::warn!(env_var, error = %e, "Failed to remove secret from secrets.env");
+            }
             std::env::remove_var(env_var);
         }
     }
@@ -5361,11 +5363,13 @@ fn write_secret_env(path: &std::path::Path, key: &str, value: &str) -> Result<()
 
     std::fs::write(path, lines.join("\n") + "\n")?;
 
-    // SECURITY: Restrict file permissions on Unix
+    // SECURITY: Restrict file permissions on Unix — secrets must not be world-readable
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+            tracing::error!(path = %path.display(), error = %e, "SECURITY: Failed to set 0600 permissions on secrets file");
+        }
     }
 
     Ok(())

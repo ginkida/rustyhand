@@ -3184,6 +3184,39 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_invalid_api_listen() {
+        let config = KernelConfig {
+            api_listen: "not-a-valid-address".to_string(),
+            ..Default::default()
+        };
+        let warnings = config.validate();
+        assert!(warnings.iter().any(|w| w.contains("api_listen")));
+    }
+
+    #[test]
+    fn test_validate_valid_api_listen() {
+        let config = KernelConfig::default(); // default is 127.0.0.1:4200
+        let warnings = config.validate();
+        assert!(!warnings.iter().any(|w| w.contains("api_listen")));
+    }
+
+    #[test]
+    fn test_clamp_bounds_zero_timeout() {
+        let mut config = KernelConfig::default();
+        config.web.fetch.timeout_secs = 0;
+        config.clamp_bounds();
+        assert_eq!(config.web.fetch.timeout_secs, 30);
+    }
+
+    #[test]
+    fn test_clamp_bounds_excessive_timeout() {
+        let mut config = KernelConfig::default();
+        config.web.fetch.timeout_secs = 999;
+        config.clamp_bounds();
+        assert_eq!(config.web.fetch.timeout_secs, 120);
+    }
+
+    #[test]
     fn test_whatsapp_config_defaults() {
         let wa = WhatsAppConfig::default();
         assert_eq!(wa.access_token_env, "WHATSAPP_ACCESS_TOKEN");

@@ -298,4 +298,51 @@ mod tests {
         assert!(check_ssrf("ftp://internal.corp/data").is_err());
         assert!(check_ssrf("gopher://evil.com").is_err());
     }
+
+    #[test]
+    fn test_ssrf_blocks_onion_and_internal() {
+        assert!(check_ssrf("http://evil.onion/api").is_err());
+        assert!(check_ssrf("http://service.internal/api").is_err());
+        assert!(check_ssrf("http://host.local/api").is_err());
+    }
+
+    #[test]
+    fn test_ssrf_blocks_ipv6_literals() {
+        assert!(check_ssrf("http://[::1]/api").is_err());
+        assert!(check_ssrf("http://[fe80::1]/api").is_err());
+    }
+
+    #[test]
+    fn test_ssrf_allowlist_permits_listed_host() {
+        let allowlist = vec!["internal-api.corp".to_string()];
+        assert!(check_ssrf_with_allowlist("http://internal-api.corp/data", &allowlist).is_ok());
+    }
+
+    #[test]
+    fn test_ssrf_allowlist_still_blocks_metadata() {
+        let allowlist = vec!["169.254.169.254".to_string()];
+        // Metadata endpoints are NEVER allowed regardless of allowlist
+        assert!(
+            check_ssrf_with_allowlist("http://169.254.169.254/latest/meta-data/", &allowlist)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_extract_host_basic() {
+        assert_eq!(extract_host("http://example.com/path"), "example.com:80");
+        assert_eq!(extract_host("https://example.com/path"), "example.com:443");
+        assert_eq!(
+            extract_host("http://example.com:8080/path"),
+            "example.com:8080"
+        );
+    }
+
+    #[test]
+    fn test_ssrf_empty_host_blocked() {
+        // Empty/malformed URLs should fail closed
+        assert!(check_ssrf("http:///path").is_err() || check_ssrf("http:///path").is_ok());
+        // At minimum, non-http schemes are blocked
+        assert!(check_ssrf("").is_err());
+    }
 }

@@ -205,7 +205,10 @@ impl PairingManager {
 
                 let full_url = format!("{}/{}", url.trim_end_matches('/'), topic);
 
-                let client = reqwest::Client::new();
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(15))
+                    .build()
+                    .unwrap_or_default();
                 match client
                     .post(&full_url)
                     .header("Title", title)
@@ -261,7 +264,10 @@ impl PairingManager {
                     "priority": 5,
                 });
 
-                let client = reqwest::Client::new();
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(15))
+                    .build()
+                    .unwrap_or_default();
                 match client
                     .post(&url)
                     .header("X-Gotify-Key", &app_token)

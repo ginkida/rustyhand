@@ -196,7 +196,10 @@ pub async fn run_pkce_flow(oauth: &OAuthTemplate, client_id: &str) -> ExtensionR
     debug!("Received authorization code, exchanging for tokens...");
 
     // Exchange code for tokens
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap_or_default();
     let mut params = HashMap::new();
     params.insert("grant_type", "authorization_code");
     params.insert("code", &code);
