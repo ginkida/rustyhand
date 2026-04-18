@@ -17,6 +17,7 @@ pub mod model_catalog;
 pub mod scheduler;
 pub mod serde_compat;
 pub mod taint;
+pub mod text;
 pub mod tool;
 pub mod tool_compat;
 pub mod webhook;

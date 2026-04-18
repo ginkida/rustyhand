@@ -117,7 +117,7 @@ impl TtsEngine {
                 .text()
                 .await
                 .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
-            let truncated = if err.len() > 500 { &err[..500] } else { &err };
+            let truncated = rusty_hand_types::text::truncate_bytes(&err, 500);
             return Err(format!("OpenAI TTS failed (HTTP {status}): {truncated}"));
         }
 
@@ -192,7 +192,7 @@ impl TtsEngine {
                 .text()
                 .await
                 .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
-            let truncated = if err.len() > 500 { &err[..500] } else { &err };
+            let truncated = rusty_hand_types::text::truncate_bytes(&err, 500);
             return Err(format!(
                 "ElevenLabs TTS failed (HTTP {status}): {truncated}"
             ));

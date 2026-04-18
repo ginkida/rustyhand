@@ -3257,8 +3257,37 @@ impl RustyHandKernel {
                     let due = kernel.cron_scheduler.claim_due_jobs();
                     for job in due {
                         let kernel = Arc::clone(&kernel);
+                        let job_id = job.id;
+                        let job_name = job.name.clone();
+                        // AssertUnwindSafe: we only touch owned data across the catch boundary;
+                        // on panic we just need to record failure and let the task end.
                         tokio::spawn(async move {
-                            let _ = kernel.execute_cron_job(&job).await;
+                            use futures::FutureExt;
+                            let fut = std::panic::AssertUnwindSafe(kernel.execute_cron_job(&job));
+                            match fut.catch_unwind().await {
+                                Ok(Ok(_)) => {}
+                                Ok(Err(e)) => {
+                                    tracing::debug!(
+                                        job = %job_name,
+                                        error = %e.message,
+                                        "Cron job returned error"
+                                    );
+                                }
+                                Err(_panic) => {
+                                    // Panic inside execute_cron_job — record failure so the
+                                    // job doesn't stay claimed forever (claim_due_jobs set
+                                    // next_run=None and nothing else would reset it).
+                                    tracing::error!(
+                                        job = %job_name,
+                                        "Cron job panicked during execution — recording failure"
+                                    );
+                                    kernel.cron_scheduler.record_failure(
+                                        job_id,
+                                        "panic during execution",
+                                        false,
+                                    );
+                                }
+                            }
                         });
                     }
 

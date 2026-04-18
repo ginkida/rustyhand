@@ -48,11 +48,7 @@ pub async fn generate_image(request: &ImageGenRequest) -> Result<ImageGenResult,
             .await
             .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
         // SECURITY: don't include full error body which might contain key info
-        let truncated = if error_body.len() > 500 {
-            &error_body[..500]
-        } else {
-            &error_body
-        };
+        let truncated = rusty_hand_types::text::truncate_bytes(&error_body, 500);
         return Err(format!(
             "Image generation failed (HTTP {}): {}",
             status, truncated

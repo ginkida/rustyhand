@@ -373,7 +373,10 @@ fn build_conversation_text(messages: &[Message], config: &CompactionConfig) -> S
                         ContentBlock::ToolUse { name, input, .. } => {
                             let input_str = serde_json::to_string(input).unwrap_or_default();
                             let input_preview = if input_str.len() > 200 {
-                                format!("{}...", &input_str[..200])
+                                format!(
+                                    "{}...",
+                                    rusty_hand_types::text::truncate_bytes(&input_str, 200)
+                                )
                             } else {
                                 input_str
                             };
@@ -388,7 +391,10 @@ fn build_conversation_text(messages: &[Message], config: &CompactionConfig) -> S
                             // Strip base64 blobs and injection markers before compaction
                             let cleaned = crate::session_repair::strip_tool_result_details(content);
                             let preview = if cleaned.len() > 2000 {
-                                format!("{}...", &cleaned[..2000])
+                                format!(
+                                    "{}...",
+                                    rusty_hand_types::text::truncate_bytes(&cleaned, 2000)
+                                )
                             } else {
                                 cleaned
                             };

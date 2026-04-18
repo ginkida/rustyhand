@@ -229,8 +229,10 @@ impl SessionStore {
             .conn
             .lock()
             .map_err(|e| RustyHandError::Internal(e.to_string()))?;
+        // ORDER BY ensures we see the most recent session first; combined with
+        // or_insert below this keeps the newest preview per agent.
         let mut stmt = conn
-            .prepare("SELECT agent_id, messages, updated_at FROM sessions")
+            .prepare("SELECT agent_id, messages, updated_at FROM sessions ORDER BY updated_at DESC")
             .map_err(|e| RustyHandError::Memory(e.to_string()))?;
 
         let mut map = std::collections::HashMap::new();
@@ -246,25 +248,36 @@ impl SessionStore {
         for row in rows {
             let (agent_id, blob, updated_at) =
                 row.map_err(|e| RustyHandError::Memory(e.to_string()))?;
-            let preview = rmp_serde::from_slice::<Vec<Message>>(&blob)
-                .ok()
-                .and_then(|msgs| {
-                    msgs.iter()
-                        .rev()
-                        .find(|m| matches!(m.role, Role::Assistant))
-                        .map(|m| {
-                            let text = m.content.text_content();
-                            let clean = text.trim();
+            let preview = match rmp_serde::from_slice::<Vec<Message>>(&blob) {
+                Ok(msgs) => msgs
+                    .iter()
+                    .rev()
+                    .find(|m| matches!(m.role, Role::Assistant))
+                    .map(|m| {
+                        let text = m.content.text_content();
+                        let clean = text.trim();
+                        // Count chars consistently on both sides (len() is bytes, not chars)
+                        let total_chars = clean.chars().count();
+                        if total_chars > 80 {
                             let truncated: String = clean.chars().take(80).collect();
-                            if truncated.len() < clean.len() {
-                                format!("{truncated}...")
-                            } else {
-                                truncated
-                            }
-                        })
-                })
-                .unwrap_or_default();
-            map.insert(agent_id, (preview, updated_at));
+                            format!("{truncated}...")
+                        } else {
+                            clean.to_string()
+                        }
+                    })
+                    .unwrap_or_default(),
+                Err(e) => {
+                    tracing::warn!(
+                        agent_id = %agent_id,
+                        error = %e,
+                        "Failed to deserialize session messages blob — session may be corrupted"
+                    );
+                    String::new()
+                }
+            };
+            // or_insert keeps the first entry per agent; since rows are ORDER BY
+            // updated_at DESC, that is the most recent session.
+            map.entry(agent_id).or_insert((preview, updated_at));
         }
         Ok(map)
     }
@@ -534,7 +547,7 @@ impl SessionStore {
                     if !text.is_empty() {
                         // Truncate individual messages in summary to keep it compact
                         let truncated = if text.len() > 200 {
-                            format!("{}...", &text[..200])
+                            format!("{}...", rusty_hand_types::text::truncate_bytes(&text, 200))
                         } else {
                             text
                         };
@@ -671,7 +684,7 @@ impl SessionStore {
                             ContentBlock::Thinking { thinking } => {
                                 text_parts.push(format!(
                                     "[thinking: {}]",
-                                    &thinking[..thinking.len().min(200)]
+                                    rusty_hand_types::text::truncate_bytes(thinking, 200)
                                 ));
                             }
                             ContentBlock::Unknown => {}

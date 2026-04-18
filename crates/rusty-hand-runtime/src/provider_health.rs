@@ -189,7 +189,10 @@ pub async fn probe_model(
             .text()
             .await
             .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
-        Err(format!("HTTP {status}: {}", &body[..body.len().min(200)]))
+        Err(format!(
+            "HTTP {status}: {}",
+            rusty_hand_types::text::truncate_bytes(&body, 200)
+        ))
     }
 }
 

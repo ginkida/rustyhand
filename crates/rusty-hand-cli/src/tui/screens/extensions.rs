@@ -535,7 +535,10 @@ fn draw_health(f: &mut Frame, area: Rect, state: &mut ExtensionsState) {
                 let error_display = if h.last_error.is_empty() {
                     "\u{2014}".to_string()
                 } else if h.last_error.len() > 30 {
-                    format!("{}...", &h.last_error[..27])
+                    format!(
+                        "{}...",
+                        rusty_hand_types::text::truncate_bytes(&h.last_error, 27)
+                    )
                 } else {
                     h.last_error.clone()
                 };

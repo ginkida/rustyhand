@@ -983,11 +983,7 @@ pub async fn run_workflow(
         Err(e) => {
             tracing::warn!(workflow_id = %id, error = %e, "Workflow run failed");
             let error_msg = format!("Workflow execution failed: {e}");
-            let truncated = if error_msg.len() > 500 {
-                &error_msg[..500]
-            } else {
-                &error_msg
-            };
+            let truncated = rusty_hand_types::text::truncate_bytes(&error_msg, 500);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": truncated})),

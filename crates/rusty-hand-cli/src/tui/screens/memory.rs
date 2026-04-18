@@ -405,7 +405,10 @@ fn draw_kv_browser(f: &mut Frame, area: Rect, state: &mut MemoryState) {
             .iter()
             .map(|kv| {
                 let val_display = if kv.value.len() > 40 {
-                    format!("{}\u{2026}", &kv.value[..39])
+                    format!(
+                        "{}\u{2026}",
+                        rusty_hand_types::text::truncate_bytes(&kv.value, 39)
+                    )
                 } else {
                     kv.value.clone()
                 };

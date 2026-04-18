@@ -144,9 +144,12 @@ impl WorkspaceContext {
         let file_names: Vec<String> = self.cache.keys().cloned().collect();
         for name in file_names {
             if let Some(content) = self.get_file(&name) {
-                // Take first 200 chars as preview
+                // Take first 200 bytes as preview (safe for multi-byte UTF-8)
                 let preview = if content.len() > 200 {
-                    format!("{}...", &content[..200])
+                    format!(
+                        "{}...",
+                        rusty_hand_types::text::truncate_bytes(content, 200)
+                    )
                 } else {
                     content.to_string()
                 };

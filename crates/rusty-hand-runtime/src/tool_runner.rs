@@ -49,7 +49,7 @@ fn check_taint_shell_exec(command: &str) -> Option<String> {
             labels.insert(TaintLabel::ExternalNetwork);
             let tainted = TaintedValue::new(command, labels, "llm_tool_call");
             if let Err(violation) = tainted.check_sink(&TaintSink::shell_exec()) {
-                warn!(command = &command[..command.len().min(80)], %violation, "Shell taint check failed");
+                warn!(command = rusty_hand_types::text::truncate_bytes(command, 80), %violation, "Shell taint check failed");
                 return Some(violation.to_string());
             }
         }
@@ -93,7 +93,7 @@ fn check_taint_net_fetch(url: &str, trusted_hosts: &[String]) -> Option<String> 
             labels.insert(TaintLabel::Secret);
             let tainted = TaintedValue::new(url, labels, "llm_tool_call");
             if let Err(violation) = tainted.check_sink(&TaintSink::net_fetch()) {
-                warn!(url = &url[..url.len().min(80)], %violation, "Net fetch taint check failed");
+                warn!(url = rusty_hand_types::text::truncate_bytes(url, 80), %violation, "Net fetch taint check failed");
                 return Some(violation.to_string());
             }
         }
@@ -188,7 +188,7 @@ pub async fn execute_tool(
             let summary = format!(
                 "{}: {}",
                 tool_name,
-                &input.to_string()[..input.to_string().len().min(200)]
+                rusty_hand_types::text::truncate_bytes(&input.to_string(), 200)
             );
             match kh.request_approval(agent_id_str, tool_name, &summary).await {
                 Ok(true) => {

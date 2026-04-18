@@ -1005,7 +1005,7 @@ impl ChannelBridgeHandle for KernelBridgeAdapter {
             let desc = &card.description;
             if !desc.is_empty() {
                 let short = if desc.len() > 60 {
-                    &desc[..60]
+                    rusty_hand_types::text::truncate_bytes(desc, 60)
                 } else {
                     desc.as_str()
                 };
