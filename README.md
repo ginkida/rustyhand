@@ -19,18 +19,19 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT" />
-  <img src="https://img.shields.io/badge/version-0.6.0-green?style=flat-square" alt="v0.6.0" />
-  <img src="https://img.shields.io/badge/tests-1,740%2B%20passing-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/version-0.6.1-green?style=flat-square" alt="v0.6.1" />
+  <img src="https://img.shields.io/badge/tests-1,749%2B%20passing-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/clippy-0%20warnings-brightgreen?style=flat-square" alt="Clippy" />
 </p>
 
 ---
 
-> **v0.6.0 — Performance & Scale (April 2026)**
+> **v0.6.1 — Bug Fix Release (April 2026)**
 >
-> Major performance and feature release. N+1 query elimination (100 agents: 100 queries → 1),
-> session index + message_count column, API pagination (?limit=&offset=), agent export/import,
-> server-side search API, workflow scheduling via cron, and comprehensive hardening from v0.5.1.
+> Fixes 10 bugs found during post-v0.6.0 audit: UTF-8 byte-slicing panics,
+> TOCTOU race in registry rename, stale session previews, cron job panic recovery,
+> workflow UUID validation, import deduplication, saturating token counters.
+> Adds UTF-8-safe truncation helpers + 11 regression tests.
 > [Report issues here.](https://github.com/ginkida/rustyhand/issues)
 
 ---
