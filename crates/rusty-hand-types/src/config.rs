@@ -1170,6 +1170,11 @@ pub struct KernelConfig {
     /// Disabled by default — when configured, all proxy-aware clients route through it.
     #[serde(default)]
     pub proxy: ProxyConfig,
+    /// Configuration for the RustyHand MCP server endpoint (POST /mcp).
+    /// Controls which tools remote MCP clients can invoke. See `McpServerConfig`
+    /// — by default only safe read-only and messaging tools are allowed.
+    #[serde(default)]
+    pub mcp_server: McpServerConfig,
 }
 
 /// Global spending budget configuration.
@@ -1201,6 +1206,110 @@ impl Default for BudgetConfig {
 
 fn default_max_cron_jobs() -> usize {
     500
+}
+
+/// Configuration for RustyHand's own MCP server endpoint (POST /mcp).
+///
+/// This controls what tools external MCP clients (Claude Desktop, etc.) can
+/// invoke. By default, only safe read-only + basic-messaging tools are allowed.
+/// Privileged tools (`shell_exec`, `file_write`, `skill_install`, `agent_spawn`,
+/// `agent_kill`, `apply_patch`) require explicit allowlisting.
+///
+/// Rationale: an MCP request carries an API key but no agent identity, so the
+/// usual manifest-based capability check is bypassed. Without this allowlist,
+/// an attacker who obtained the API key could install arbitrary Python into
+/// `~/.rustyhand/skills/` via `skill_install` — effectively a remote code
+/// execution channel.
+///
+/// Example to also allow skill_install (needed if you run capability-builder
+/// remotely via an MCP client):
+/// ```toml
+/// [mcp_server]
+/// extra_allowed_tools = ["skill_install"]
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct McpServerConfig {
+    /// Whether the /mcp endpoint is enabled at all.
+    /// Default: true (it's gated by api_key auth anyway).
+    pub enabled: bool,
+    /// Additional tools to allow beyond the safe defaults.
+    /// Use with care — each entry can be a vector for remote code execution
+    /// depending on the tool. See `safe_default_tools()` for the baseline set.
+    pub extra_allowed_tools: Vec<String>,
+    /// If true, allow ANY tool (disables the allowlist). Intended for
+    /// trusted local development only — never enable on a public server.
+    pub allow_all_tools: bool,
+}
+
+impl Default for McpServerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            extra_allowed_tools: Vec::new(),
+            allow_all_tools: false,
+        }
+    }
+}
+
+impl McpServerConfig {
+    /// Safe tools that don't let a remote caller exfiltrate data or modify
+    /// the host filesystem. These are always allowed when `enabled = true`.
+    ///
+    /// Deliberately excluded: shell_exec, file_write, apply_patch,
+    /// skill_install, agent_spawn, agent_kill, browser_*, image_generate,
+    /// media_transcribe (can leak audio content), self_update.
+    pub fn safe_default_tools() -> &'static [&'static str] {
+        &[
+            // Read-only filesystem
+            "file_read",
+            "file_list",
+            // Search & fetch — already SSRF-protected
+            "web_search",
+            "web_fetch",
+            // Agent introspection
+            "agent_list",
+            "agent_find",
+            "agent_send",
+            // Memory (scoped per agent anyway)
+            "memory_store",
+            "memory_recall",
+            // Self-observation
+            "self_history",
+            "self_metrics",
+            // Documents
+            "doc_ingest",
+            "doc_search",
+            // Knowledge graph
+            "knowledge_add_entity",
+            "knowledge_add_relation",
+            "knowledge_query",
+            // Collaboration
+            "task_post",
+            "task_claim",
+            "task_complete",
+            "task_list",
+            "event_publish",
+            // Scheduling
+            "schedule_create",
+            "schedule_list",
+            "schedule_delete",
+        ]
+    }
+
+    /// Check whether a tool may be called from an MCP request.
+    pub fn is_tool_allowed(&self, tool_name: &str) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        if self.allow_all_tools {
+            return true;
+        }
+        if Self::safe_default_tools().contains(&tool_name) {
+            return true;
+        }
+        self.extra_allowed_tools.iter().any(|t| t == tool_name)
+    }
 }
 
 /// Configuration entry for an MCP server.
@@ -1350,6 +1459,7 @@ impl Default for KernelConfig {
             thinking: None,
             budget: BudgetConfig::default(),
             proxy: ProxyConfig::default(),
+            mcp_server: McpServerConfig::default(),
         }
     }
 }
@@ -3525,6 +3635,89 @@ mod tests {
         config.web.fetch.timeout_secs = 999;
         config.clamp_bounds();
         assert_eq!(config.web.fetch.timeout_secs, 120);
+    }
+
+    // ── MCP server allowlist (security) ─────────────────────────────
+
+    #[test]
+    fn mcp_server_default_blocks_privileged_tools() {
+        let cfg = McpServerConfig::default();
+        assert!(cfg.enabled, "default must be enabled (auth-gated)");
+        assert!(!cfg.allow_all_tools, "default must NOT allow everything");
+        // The privileged tools an attacker would target:
+        for privileged in &[
+            "shell_exec",
+            "file_write",
+            "apply_patch",
+            "skill_install",
+            "agent_spawn",
+            "agent_kill",
+            "browser_execute_script",
+            "self_update",
+        ] {
+            assert!(
+                !cfg.is_tool_allowed(privileged),
+                "{privileged} must be blocked by default — not in safe list"
+            );
+        }
+    }
+
+    #[test]
+    fn mcp_server_default_allows_safe_tools() {
+        let cfg = McpServerConfig::default();
+        for safe in &[
+            "agent_list",
+            "agent_send",
+            "memory_recall",
+            "memory_store",
+            "web_search",
+            "web_fetch",
+            "self_history",
+            "task_list",
+        ] {
+            assert!(
+                cfg.is_tool_allowed(safe),
+                "{safe} must be allowed by default"
+            );
+        }
+    }
+
+    #[test]
+    fn mcp_server_extra_allowed_tools_grants_access() {
+        let cfg = McpServerConfig {
+            enabled: true,
+            extra_allowed_tools: vec!["skill_install".to_string(), "shell_exec".to_string()],
+            allow_all_tools: false,
+        };
+        assert!(cfg.is_tool_allowed("skill_install"));
+        assert!(cfg.is_tool_allowed("shell_exec"));
+        // Other privileged tools still blocked.
+        assert!(!cfg.is_tool_allowed("file_write"));
+    }
+
+    #[test]
+    fn mcp_server_disabled_blocks_everything() {
+        let cfg = McpServerConfig {
+            enabled: false,
+            extra_allowed_tools: vec!["agent_list".to_string()],
+            allow_all_tools: true,
+        };
+        // Disabled overrides both allowlist AND allow_all_tools.
+        assert!(!cfg.is_tool_allowed("agent_list"));
+        assert!(!cfg.is_tool_allowed("skill_install"));
+    }
+
+    #[test]
+    fn mcp_server_allow_all_permits_everything() {
+        let cfg = McpServerConfig {
+            enabled: true,
+            extra_allowed_tools: vec![],
+            allow_all_tools: true,
+        };
+        // Escape hatch for trusted local dev.
+        assert!(cfg.is_tool_allowed("skill_install"));
+        assert!(cfg.is_tool_allowed("shell_exec"));
+        assert!(cfg.is_tool_allowed("any_tool_name_at_all"));
     }
 
     #[test]

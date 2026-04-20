@@ -4848,7 +4848,18 @@ pub async fn mcp_http(
     State(state): State<Arc<AppState>>,
     Json(request): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    // Gather all available tools (builtin + skills + MCP)
+    // SECURITY: MCP server disabled by config → reject all requests.
+    if !state.kernel.config.mcp_server.enabled {
+        return Json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": request.get("id").cloned(),
+            "error": {"code": -32000, "message": "MCP server is disabled by config (mcp_server.enabled = false)"}
+        }));
+    }
+
+    // Gather all available tools (builtin + skills + external MCP),
+    // then filter to the allowlist so tools/list only shows callable tools.
+    let mcp_cfg = &state.kernel.config.mcp_server;
     let mut tools = builtin_tool_definitions();
     {
         let registry = state
@@ -4867,6 +4878,10 @@ pub async fn mcp_http(
     if let Ok(mcp_tools) = state.kernel.mcp_tools.lock() {
         tools.extend(mcp_tools.iter().cloned());
     }
+    // Apply the MCP allowlist BEFORE exposing tools/list or executing calls.
+    // Without this, any authenticated MCP client could call shell_exec,
+    // skill_install, file_write etc. — effectively unscoped RCE.
+    tools.retain(|t| mcp_cfg.is_tool_allowed(&t.name));
 
     // Check if this is a tools/call that needs real execution
     let method = request["method"].as_str().unwrap_or("");
@@ -4877,7 +4892,29 @@ pub async fn mcp_http(
             .cloned()
             .unwrap_or(serde_json::json!({}));
 
-        // Verify the tool exists
+        // SECURITY: second line of defence — even if somehow the tool slipped
+        // into the list, double-check the allowlist before execution. Also
+        // distinguishes "unknown tool" (likely typo) from "tool denied" (auth).
+        if !mcp_cfg.is_tool_allowed(tool_name) {
+            tracing::warn!(
+                tool_name,
+                "MCP tool call denied by allowlist — add to mcp_server.extra_allowed_tools to permit"
+            );
+            return Json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": request.get("id").cloned(),
+                "error": {
+                    "code": -32000,
+                    "message": format!(
+                        "Tool '{tool_name}' not allowed via MCP. Add to [mcp_server] extra_allowed_tools in config.toml to enable."
+                    )
+                }
+            }));
+        }
+
+        // Verify the tool exists (after auth check so we don't leak existence
+        // of privileged tools to unauthorised callers — but in our case the
+        // allowlist covers that).
         if !tools.iter().any(|t| t.name == tool_name) {
             return Json(serde_json::json!({
                 "jsonrpc": "2.0",
