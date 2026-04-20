@@ -147,6 +147,10 @@ document.addEventListener('alpine:init', function() {
     pendingApprovals: 0,
     filterState: 'all',
     agentQuery: '',
+    // Server-side search state (used when local list >= SERVER_SEARCH_THRESHOLD agents)
+    _searchResultsFor: '',   // query string the current results correspond to
+    searchResults: [],       // last response from /api/agents/search
+    _searchTimer: null,      // debounce handle
     templatesExpanded: false,
     agentGroupsCollapsed: (function() {
       try {
@@ -204,6 +208,15 @@ document.addEventListener('alpine:init', function() {
     get filteredAgents() {
       var f = this.filterState;
       var q = (this.agentQuery || '').trim().toLowerCase();
+      // If we have fresh server-side search results for this exact query,
+      // use them (scales past 100+ agents without downloading everything).
+      if (q && this._searchResultsFor === this.agentQuery.trim()) {
+        return this.searchResults.filter(function(a) {
+          if (f !== 'all' && (a.state || '').toLowerCase() !== f) return false;
+          return true;
+        });
+      }
+      // Fallback: local filter (for small installs or until server responds).
       return this.agents.filter(function(a) {
         if (f !== 'all' && a.state.toLowerCase() !== f) return false;
         if (!q) return true;
@@ -285,6 +298,50 @@ document.addEventListener('alpine:init', function() {
     chatWithAgent(agent) {
       this.activeChatAgent = agent;
       this.pendingAgent = agent;
+    },
+
+    // Fire server-side search when the local list is big enough that
+    // filtering all agents in memory is wasteful. Debounced on the caller.
+    async _runServerSearch(query) {
+        var q = (query || '').trim();
+        if (!q) {
+            this.searchResults = [];
+            this._searchResultsFor = '';
+            return;
+        }
+        try {
+            var res = await RustyHandAPI.get(
+                '/api/agents/search?q=' + encodeURIComponent(q) +
+                '&state=' + encodeURIComponent(this.filterState === 'all' ? '' : this.filterState)
+            );
+            // The server returns the same shape as list_agents (agents envelope).
+            var results = Array.isArray(res) ? res :
+                (res && Array.isArray(res.results) ? res.results :
+                (res && Array.isArray(res.agents) ? res.agents : []));
+            this.searchResults = results;
+            this._searchResultsFor = q;
+        } catch (e) {
+            // Network / 404: fall back to local filter silently (keeps UX smooth).
+            console.warn('Agents search failed, using local filter:', e.message);
+            this._searchResultsFor = '';
+        }
+    },
+
+    // Watcher invoked from index_body.html on agentQuery changes.
+    onAgentQueryChange() {
+        var SERVER_SEARCH_THRESHOLD = 50;
+        if (this._searchTimer) clearTimeout(this._searchTimer);
+        // Local filter is instant and sufficient for small installs.
+        if ((this.agents || []).length < SERVER_SEARCH_THRESHOLD) {
+            this._searchResultsFor = '';
+            this.searchResults = [];
+            return;
+        }
+        var self = this;
+        var q = this.agentQuery;
+        this._searchTimer = setTimeout(function() {
+            self._runServerSearch(q);
+        }, 250);
     },
 
     async refreshAgents() {
@@ -504,6 +561,52 @@ function app() {
     sidebarSpawnBuiltin(t) {
       Alpine.store('app').pendingTemplate = t;
       if (this.page !== 'agents') this.navigate('agents');
+    },
+
+    // Export all agents as a downloadable JSON file (server-side endpoint).
+    async exportAgents() {
+      try {
+        var data = await RustyHandAPI.get('/api/agents/export');
+        var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        var ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        a.download = 'rustyhand-agents-' + ts + '.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        RustyHandToast.success('Exported ' + (data.agent_count || 0) + ' agent(s)');
+      } catch (e) {
+        RustyHandToast.error('Export failed: ' + e.message);
+      }
+    },
+
+    // Import agents from a user-selected JSON file. Uses /api/agents/import
+    // which returns {imported, skipped, errors}.
+    async importAgents(file) {
+      if (!file) return;
+      try {
+        var text = await file.text();
+        var body;
+        try { body = JSON.parse(text); }
+        catch (e) { throw new Error('Invalid JSON: ' + e.message); }
+        var res = await RustyHandAPI.post('/api/agents/import', body);
+        var msg = 'Imported ' + (res.imported || 0) + ' / ' +
+                  (res.total_in_file || 0) + ' agent(s)';
+        if (res.skipped) msg += ', skipped ' + res.skipped + ' duplicate(s)';
+        if (res.errors && res.errors.length) {
+          RustyHandToast.warn(msg + ' (' + res.errors.length + ' error' +
+            (res.errors.length === 1 ? '' : 's') + ' — see console)');
+          console.warn('Import errors:', res.errors);
+        } else {
+          RustyHandToast.success(msg);
+        }
+        await this.refreshAgents();
+      } catch (e) {
+        RustyHandToast.error('Import failed: ' + e.message);
+      }
     },
 
     async init() {

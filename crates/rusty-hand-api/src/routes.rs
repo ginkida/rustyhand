@@ -7172,6 +7172,23 @@ pub async fn config_schema() -> impl IntoResponse {
                     "slack": "object",
                     "whatsapp": "object"
                 }
+            },
+            "proxy": {
+                "fields": {
+                    "url": "string",
+                    "username": "string",
+                    "password": "string",
+                    "no_proxy": "array"
+                },
+                "description": "HTTP/HTTPS/SOCKS5 proxy for outbound requests (Bright Data, residential proxies). Password is write-only and never returned in GET /api/config."
+            },
+            "mcp_server": {
+                "fields": {
+                    "enabled": "boolean",
+                    "extra_allowed_tools": "array",
+                    "allow_all_tools": "boolean"
+                },
+                "description": "Controls which builtin tools remote MCP clients can invoke via POST /mcp. Defaults to safe read-only tools. Add privileged tools (shell_exec, skill_install, file_write) to extra_allowed_tools only if needed."
             }
         }
     }))

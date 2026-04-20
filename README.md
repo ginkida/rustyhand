@@ -19,21 +19,21 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT" />
-  <img src="https://img.shields.io/badge/version-0.6.2-green?style=flat-square" alt="v0.6.2" />
+  <img src="https://img.shields.io/badge/version-0.6.3-green?style=flat-square" alt="v0.6.3" />
   <img src="https://img.shields.io/badge/tests-1,775%2B%20passing-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/clippy-0%20warnings-brightgreen?style=flat-square" alt="Clippy" />
 </p>
 
 ---
 
-> **v0.6.2 — Self-Extending Agents + HTTP Proxy (April 2026)**
+> **v0.6.3 — MCP Security + Dashboard UX (April 2026)**
 >
-> Three new bundled meta-agents (coordinator, capability-builder, diagnostic)
-> turn RustyHand into a self-routing assistant. New `skill_install` builtin tool
-> lets capability-builder install Python/JS skills end-to-end, with safe wrapping
-> of user code into the stdin/stdout runtime contract. New HTTP/HTTPS proxy
-> support in web_fetch (Bright Data, residential proxies) — config-driven, with
-> password redaction in Debug, no_proxy bypass list, and SOCKS5 support.
+> SECURITY: MCP server now gates tool access behind an explicit allowlist —
+> previous versions let any authenticated MCP client call shell_exec /
+> skill_install / file_write, turning MCP into an RCE channel. Dashboard
+> now exposes agent export/import buttons, proxy + MCP server config in
+> settings, and auto-scales sidebar search to server-side when agent count
+> exceeds 50.
 > [Report issues here.](https://github.com/ginkida/rustyhand/issues)
 
 ---
