@@ -297,7 +297,15 @@ function agentsPage() {
     },
 
     get templatePicks() {
-      return this.builtinTemplates.slice(0, 6);
+      // Surface meta-agents first, then fill with the most useful generic templates.
+      var all = this.builtinTemplates || [];
+      var meta = all.filter(function(t) { return t.meta; });
+      var rest = all.filter(function(t) { return !t.meta; });
+      return meta.concat(rest).slice(0, 6);
+    },
+
+    get metaTemplates() {
+      return (this.builtinTemplates || []).filter(function(t) { return t.meta; });
     },
 
     agentLastSeen(agent) {
@@ -335,7 +343,10 @@ function agentsPage() {
 
     get filteredCustom() {
       var self = this;
+      var metaSlugs = { 'coordinator': true, 'capability-builder': true, 'diagnostic': true };
       return this.tplTemplates.filter(function(t) {
+        // Meta-agents are surfaced via the frontend builtinTemplates list — skip the on-disk duplicates.
+        if (t && metaSlugs[(t.name || '').toLowerCase()]) return false;
         if (self.searchQuery) {
           var q = self.searchQuery.toLowerCase();
           if ((t.name || '').toLowerCase().indexOf(q) === -1 &&

@@ -15,6 +15,9 @@ function automationPage() {
     agents: [],
     agentsLoadError: '',
 
+    // -- Workflows (for workflow_run action type) --
+    workflows: [],
+
     // -- Event Triggers state --
     triggers: [],
     trigLoading: false,
@@ -37,6 +40,8 @@ function automationPage() {
       action_type: 'agent_turn',
       message: '',
       event_text: '',
+      workflow_id: '',
+      workflow_input: '',
       model_override: '',
       timeout_secs: 300,
       delivery_type: 'none',
@@ -91,11 +96,25 @@ function automationPage() {
         // Jobs can still load with fallback labels even if agent refresh fails.
       }
       try {
+        await this.loadWorkflows();
+      } catch(e) {
+        // Workflow list is optional — jobs that reference workflows will still work.
+      }
+      try {
         await this.loadJobs();
       } catch(e) {
         this.loadError = e.message || 'Could not load automation data.';
       }
       this.loading = false;
+    },
+
+    async loadWorkflows() {
+      try {
+        var data = await RustyHandAPI.get('/api/workflows');
+        this.workflows = Array.isArray(data) ? data : (data.workflows || []);
+      } catch (e) {
+        this.workflows = [];
+      }
     },
 
     async loadAgents() {
@@ -276,6 +295,11 @@ function automationPage() {
       if (act.kind === 'system_event') {
         f.action_type = 'system_event';
         f.event_text = act.text || '';
+      } else if (act.kind === 'workflow_run') {
+        f.action_type = 'workflow_run';
+        f.workflow_id = act.workflow_id || '';
+        f.workflow_input = act.input || '';
+        f.timeout_secs = act.timeout_secs || 300;
       } else {
         f.action_type = 'agent_turn';
         f.message = act.message || '';
@@ -331,6 +355,14 @@ function automationPage() {
       // Action
       if (f.action_type === 'system_event') {
         payload.action = { kind: 'system_event', text: f.event_text.trim() };
+      } else if (f.action_type === 'workflow_run') {
+        var wfAction = {
+          kind: 'workflow_run',
+          workflow_id: f.workflow_id.trim(),
+          input: f.workflow_input
+        };
+        if (f.timeout_secs) wfAction.timeout_secs = parseInt(f.timeout_secs, 10);
+        payload.action = wfAction;
       } else {
         var action = { kind: 'agent_turn', message: f.message.trim() };
         if (f.model_override.trim()) action.model_override = f.model_override.trim();
@@ -384,6 +416,10 @@ function automationPage() {
       }
       if (f.action_type === 'system_event' && !f.event_text.trim()) {
         RustyHandToast.warn('Please enter event text');
+        return;
+      }
+      if (f.action_type === 'workflow_run' && !f.workflow_id.trim()) {
+        RustyHandToast.warn('Please select a workflow to run');
         return;
       }
 
@@ -632,8 +668,28 @@ function automationPage() {
     },
 
     actionTypeName(kind) {
-      var names = { agent_turn: 'Agent Message', system_event: 'System Event' };
+      var names = { agent_turn: 'Agent Message', system_event: 'System Event', workflow_run: 'Workflow' };
       return names[kind] || kind;
+    },
+
+    actionPreviewFull(job) {
+      var a = job && job.action || {};
+      if (a.kind === 'system_event') return a.text || '';
+      if (a.kind === 'workflow_run') {
+        var wfName = '';
+        for (var i = 0; i < this.workflows.length; i++) {
+          if (this.workflows[i].id === a.workflow_id) { wfName = this.workflows[i].name; break; }
+        }
+        var label = wfName ? 'workflow: ' + wfName : 'workflow: ' + (a.workflow_id || '?');
+        return a.input ? label + ' — ' + a.input : label;
+      }
+      return a.message || '';
+    },
+
+    actionPreview(job) {
+      var full = this.actionPreviewFull(job);
+      if (!full) return '';
+      return full.length > 50 ? full.substring(0, 50) + '...' : full;
     },
 
     deliveryTypeName(kind) {

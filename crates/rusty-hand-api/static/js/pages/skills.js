@@ -8,8 +8,67 @@ function skillsPage() {
     loading: true,
     loadError: '',
 
+    // Install form state
+    installOpen: false,
+    installSaving: false,
+    installForm: {
+      name: '',
+      language: 'python',
+      description: '',
+      content: '',
+      overwrite: false,
+    },
+
     mcpServers: { configured: [], connected: [], total_configured: 0, total_connected: 0 },
     mcpLoading: false,
+
+    openInstallForm() {
+      this.installForm = {
+        name: '',
+        language: 'python',
+        description: '',
+        content: 'def run(input):\n    # input is a dict; return any JSON-serialisable value\n    return {"echo": input}\n',
+        overwrite: false,
+      };
+      this.installOpen = true;
+    },
+
+    onLanguageChange() {
+      var f = this.installForm;
+      if (f.language === 'python' && !f.content.includes('def run')) {
+        f.content = 'def run(input):\n    # input is a dict; return any JSON-serialisable value\n    return {"echo": input}\n';
+      } else if (f.language === 'node' && !f.content.includes('function run')) {
+        f.content = 'function run(input) {\n  // input is an object; return any JSON-serialisable value\n  return { echo: input };\n}\n';
+      }
+    },
+
+    async submitInstall() {
+      var f = this.installForm;
+      if (!/^[a-z][a-z0-9_]{0,63}$/.test(f.name)) {
+        RustyHandToast.error('Name must match ^[a-z][a-z0-9_]{0,63}$');
+        return;
+      }
+      if (!f.content.trim()) {
+        RustyHandToast.error('Skill content is required');
+        return;
+      }
+      this.installSaving = true;
+      try {
+        var res = await RustyHandAPI.post('/api/skills/install-custom', {
+          name: f.name,
+          language: f.language,
+          description: f.description,
+          content: f.content,
+          overwrite: f.overwrite,
+        });
+        RustyHandToast.success('Skill installed: ' + (res.message || f.name));
+        this.installOpen = false;
+        await this.loadSkills();
+      } catch (e) {
+        RustyHandToast.error('Install failed: ' + e.message);
+      }
+      this.installSaving = false;
+    },
 
     runtimeBadge: function(rt) {
       var r = (rt || '').toLowerCase();

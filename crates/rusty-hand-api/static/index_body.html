@@ -622,6 +622,15 @@
                     </div>
                   </div>
 
+                  <!-- ── Pagination bar (only when total exceeds page) ── -->
+                  <div class="flex items-center justify-between" style="margin-bottom:16px;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);font-size:12px" x-show="$store.app.agentsIsPaginated()">
+                    <span class="text-dim" x-text="$store.app.agentsPageLabel() + ' agents'"></span>
+                    <div class="flex gap-2">
+                      <button class="btn btn-ghost btn-sm" @click="$store.app.agentsPagePrev()" :disabled="!$store.app.agentsHasPrev()">&laquo; Prev</button>
+                      <button class="btn btn-ghost btn-sm" @click="$store.app.agentsPageNext()" :disabled="!$store.app.agentsHasNext()">Next &raquo;</button>
+                    </div>
+                  </div>
+
                   <!-- ── Agent Directory (grouped) ── -->
                   <div class="agent-directory" x-show="groupedAgents.length">
                     <template x-for="group in groupedAgents" :key="group.key">
@@ -668,11 +677,30 @@
                     <div style="margin-top:20px">
                       <button class="btn btn-primary" @click="openSpawnWizard()">+ New Agent</button>
                     </div>
+                    <!-- Meta-agents: RustyHand-specific self-extending agents -->
+                    <div style="margin-top:28px;width:100%;max-width:640px" x-show="metaTemplates.length">
+                      <div class="flex items-center gap-2" style="margin-bottom:10px">
+                        <span class="text-xs" style="font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent)">Meta Agents</span>
+                        <span class="badge badge-info" style="font-size:10px">self-extending</span>
+                      </div>
+                      <div class="card-grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px">
+                        <template x-for="t in metaTemplates" :key="t.name">
+                          <div class="card" style="cursor:pointer;padding:12px;border-left:3px solid var(--accent)" @click="spawnBuiltin(t)">
+                            <div class="flex items-center gap-2" style="margin-bottom:4px">
+                              <div class="font-bold" style="font-size:12px" x-text="t.name"></div>
+                              <span class="badge badge-info" style="font-size:9px">meta</span>
+                            </div>
+                            <div class="text-xs text-dim" style="line-height:1.4" x-text="t.description"></div>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+
                     <!-- Templates inline for empty state -->
-                    <div style="margin-top:28px;width:100%;max-width:640px">
+                    <div style="margin-top:24px;width:100%;max-width:640px">
                       <div class="text-xs text-dim" style="margin-bottom:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Or launch a template</div>
                       <div class="card-grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px">
-                        <template x-for="t in templatePicks" :key="t.name">
+                        <template x-for="t in templatePicks.filter(function(tt){return !tt.meta})" :key="t.name">
                           <div class="card" style="cursor:pointer;padding:12px" @click="spawnBuiltin(t)">
                             <div class="font-bold" style="font-size:12px" x-text="t.name"></div>
                             <div class="text-xs text-dim" style="margin-top:4px;line-height:1.4" x-text="t.description"></div>
@@ -1642,9 +1670,9 @@
                       <tr>
                         <td>
                           <span class="font-bold" x-text="job.name || '(unnamed)'"></span>
-                          <div class="text-xs text-dim" x-show="job.action && job.action.message"
-                               x-text="((job.action && job.action.message) || '').substring(0, 50) + (((job.action && job.action.message) || '').length > 50 ? '...' : '')"
-                               :title="job.action && job.action.message"></div>
+                          <div class="text-xs text-dim" x-show="actionPreview(job)"
+                               x-text="actionPreview(job)"
+                               :title="actionPreviewFull(job)"></div>
                         </td>
                         <td>
                           <span class="badge badge-dim" style="font-size:10px" x-text="scheduleTypeName(job.schedule && job.schedule.kind)"></span>
@@ -1761,6 +1789,7 @@
                     <div class="flex gap-1" style="margin-bottom:10px">
                       <button class="btn btn-sm" :class="jobForm.action_type === 'agent_turn' ? 'btn-primary' : 'btn-ghost'" @click="jobForm.action_type = 'agent_turn'">Send Message</button>
                       <button class="btn btn-sm" :class="jobForm.action_type === 'system_event' ? 'btn-primary' : 'btn-ghost'" @click="jobForm.action_type = 'system_event'">System Event</button>
+                      <button class="btn btn-sm" :class="jobForm.action_type === 'workflow_run' ? 'btn-primary' : 'btn-ghost'" @click="jobForm.action_type = 'workflow_run'">Run Workflow</button>
                     </div>
 
                     <div x-show="jobForm.action_type === 'agent_turn'">
@@ -1774,6 +1803,23 @@
 
                     <div x-show="jobForm.action_type === 'system_event'">
                       <textarea class="form-textarea" x-model="jobForm.event_text" placeholder="Event payload text..." rows="2"></textarea>
+                    </div>
+
+                    <div x-show="jobForm.action_type === 'workflow_run'">
+                      <select class="form-select" x-model="jobForm.workflow_id" style="margin-bottom:8px">
+                        <option value="">Select a workflow...</option>
+                        <template x-for="wf in workflows" :key="wf.id">
+                          <option :value="wf.id" x-text="wf.name + (wf.description ? ' — ' + wf.description : '')"></option>
+                        </template>
+                      </select>
+                      <textarea class="form-textarea" x-model="jobForm.workflow_input" placeholder="Input passed to the workflow (string)..." rows="3" style="margin-bottom:8px"></textarea>
+                      <div class="flex items-center gap-2">
+                        <input class="form-input" type="number" min="10" max="600" x-model.number="jobForm.timeout_secs" title="Timeout in seconds" style="width:100px;font-size:12px">
+                        <span class="text-xs text-dim">Timeout sec (10-600)</span>
+                      </div>
+                      <div class="text-xs text-dim" style="margin-top:6px" x-show="!workflows.length">
+                        No workflows defined yet — create one on the <a href="#workflows" style="color:var(--accent)">Workflows</a> page first.
+                      </div>
                     </div>
                   </div>
 
@@ -2187,7 +2233,10 @@
             <h2 style="margin:0;font-size:18px">Skills</h2>
             <span class="badge badge-dim" x-show="skills.length" x-text="skills.length + ' installed'"></span>
           </div>
-          <button class="btn btn-ghost btn-sm" @click="loadData()">Refresh</button>
+          <div class="flex gap-2">
+            <button class="btn btn-primary btn-sm" @click="openInstallForm()">+ Install skill</button>
+            <button class="btn btn-ghost btn-sm" @click="loadData()">Refresh</button>
+          </div>
         </div>
         <div class="page-body" x-init="loadSkills()">
           <div x-show="loading" class="skeleton-card-grid"><div class="skeleton-card-item"><div class="skeleton-line-lg"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-badge"></div></div><div class="skeleton-card-item"><div class="skeleton-line-lg"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-badge"></div></div><div class="skeleton-card-item"><div class="skeleton-line-lg"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-badge"></div></div><div class="skeleton-card-item"><div class="skeleton-line-lg"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-badge"></div></div><div class="skeleton-card-item"><div class="skeleton-line-lg"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-badge"></div></div><div class="skeleton-card-item"><div class="skeleton-line-lg"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-badge"></div></div></div>
@@ -2319,6 +2368,60 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
 
           </div>
         </div>
+
+        <!-- Install skill modal -->
+        <template x-if="installOpen">
+          <div class="modal-overlay" @click.self="installOpen = false" @keydown.escape.window="installOpen = false">
+            <div class="modal" style="max-width:640px;max-height:85vh;overflow-y:auto">
+              <div class="modal-header">
+                <h3>Install custom skill</h3>
+                <button class="modal-close" @click="installOpen = false">&times;</button>
+              </div>
+              <p class="text-dim" style="font-size:12px;margin:0 0 12px">
+                Install a new Python or Node skill into <code>~/.rustyhand/skills/</code>. Your code runs as a subprocess; <code>input</code> is the JSON tool arguments and the return value is sent back to the agent.
+              </p>
+              <div style="display:grid;grid-template-columns:1fr 180px;gap:12px">
+                <div class="form-group">
+                  <label>Name</label>
+                  <input class="form-input" type="text" x-model="installForm.name" placeholder="my_custom_skill" maxlength="64">
+                  <div class="text-xs text-dim" style="margin-top:4px">Lowercase, digits, underscore. Must start with a letter.</div>
+                </div>
+                <div class="form-group">
+                  <label>Language</label>
+                  <select class="form-select" x-model="installForm.language" @change="onLanguageChange()">
+                    <option value="python">Python</option>
+                    <option value="node">Node.js</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Description</label>
+                <input class="form-input" type="text" x-model="installForm.description" placeholder="What this skill does">
+              </div>
+              <div class="form-group">
+                <label>Code</label>
+                <textarea class="form-input" x-model="installForm.content" rows="12" style="font-family:monospace;font-size:12px;white-space:pre"></textarea>
+                <div class="text-xs text-dim" style="margin-top:4px" x-show="installForm.language === 'python'">
+                  Define <code>def run(input):</code> &mdash; return any JSON-serialisable value.
+                </div>
+                <div class="text-xs text-dim" style="margin-top:4px" x-show="installForm.language === 'node'">
+                  Define <code>function run(input) { ... }</code> or <code>async function run(input)</code>.
+                </div>
+              </div>
+              <label class="flex items-center gap-2" style="margin:8px 0 16px">
+                <input type="checkbox" x-model="installForm.overwrite">
+                <span class="text-sm">Overwrite if a skill with this name already exists</span>
+              </label>
+              <div class="flex gap-2 justify-end">
+                <button class="btn btn-ghost" @click="installOpen = false" :disabled="installSaving">Cancel</button>
+                <button class="btn btn-primary" @click="submitInstall()" :disabled="installSaving">
+                  <span x-show="!installSaving">Install skill</span>
+                  <span x-show="installSaving">Installing...</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
       </div>
     </template>
 

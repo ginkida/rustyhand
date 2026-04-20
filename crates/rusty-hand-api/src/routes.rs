@@ -3016,6 +3016,81 @@ pub async fn install_skill(
     }
 }
 
+/// POST /api/skills/install-custom — Install a skill from inline code.
+///
+/// Thin wrapper around the `skill_install` builtin tool. Writes the skill to
+/// `~/.rustyhand/skills/<name>/` with proper stdin/stdout boilerplate, then
+/// triggers a hot-reload so it's available immediately.
+///
+/// Body: `{ "name", "language" ("python"|"javascript"), "description", "content", "overwrite"? }`
+///
+/// Auth: same api_key middleware as the rest of /api/*. No separate allowlist
+/// check needed here (unlike the /mcp endpoint) — if you have the api_key you
+/// already have full control of the kernel.
+///
+/// Distinct from `install_skill` which fetches a published skill from the
+/// FangHub marketplace by name.
+pub async fn install_custom_skill(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    // Reuse the tool function directly so behaviour is identical to what
+    // capability-builder produces via MCP: same validation, same wrapper,
+    // same marker file. Single source of truth.
+    let skills_dir = state.kernel.config.home_dir.join("skills");
+    let mut registry = rusty_hand_skills::registry::SkillRegistry::new(skills_dir);
+    // We pass a freshly-loaded registry so skills_dir() and is_frozen() work.
+    if let Err(e) = registry.load_all() {
+        tracing::warn!(error = %e, "Failed to load skills registry for install");
+    }
+
+    // Build a synthetic tool invocation and dispatch through the public
+    // execute_tool entrypoint. allowed_tools=["skill_install"] so the
+    // capability gate is satisfied without granting anything else.
+    let kernel_handle: Arc<dyn rusty_hand_runtime::kernel_handle::KernelHandle> =
+        state.kernel.clone() as Arc<dyn rusty_hand_runtime::kernel_handle::KernelHandle>;
+    let allowed = vec!["skill_install".to_string()];
+    let result = rusty_hand_runtime::tool_runner::execute_tool(
+        "dashboard-install",
+        "skill_install",
+        &req,
+        Some(&kernel_handle),
+        Some(&allowed),
+        None,
+        Some(&registry),
+        Some(&state.kernel.mcp_connections),
+        Some(&state.kernel.web_ctx),
+        Some(&state.kernel.browser_ctx),
+        None,
+        None,
+        Some(&state.kernel.media_engine),
+        None,
+        None,
+        None,
+        Some(&*state.kernel.process_manager),
+    )
+    .await;
+
+    if result.is_error {
+        return safe_error(
+            StatusCode::BAD_REQUEST,
+            "Skill install",
+            &result.content.as_str(),
+        );
+    }
+
+    // Refresh the live skill registry so new skill is immediately callable.
+    state.kernel.reload_skills();
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "installed",
+            "message": result.content,
+        })),
+    )
+}
+
 /// POST /api/skills/uninstall — Uninstall a skill.
 pub async fn uninstall_skill(
     State(state): State<Arc<AppState>>,

@@ -143,6 +143,9 @@ document.addEventListener('alpine:init', function() {
     approvalsRefreshError: '',
     version: '0.1.0',
     agentCount: 0,
+    agentsTotal: 0,
+    agentsOffset: 0,
+    agentsLimit: 100,
     pendingAgent: null,
     pendingApprovals: 0,
     filterState: 'all',
@@ -179,7 +182,10 @@ document.addEventListener('alpine:init', function() {
       { name: 'Intel Collector', description: 'Autonomous intelligence collector — monitors targets with change detection and knowledge graphs.', category: 'Research', profile: 'research', autonomous: true, cronExpr: '0 */4 * * *', cronMessage: 'Run intelligence collection sweep on all monitored targets.', system_prompt: 'You are Intel Collector — an autonomous intelligence collector that monitors any target 24/7, building a living knowledge graph and detecting changes over time.\n\nPhase 0: Platform Detection & State Recovery — detect OS, load previous state.\nPhase 1: Schedule & Target Initialization — create schedule, identify target type, build query set.\nPhase 2: Source Discovery & Query Construction — build targeted searches based on focus area.\nPhase 3: Collection Sweep — web_search, web_fetch, extract entities, evaluate quality.\nPhase 4: Knowledge Graph Construction — add entities and relations for collected data.\nPhase 5: Change Detection & Delta Analysis — compare against previous snapshot, score changes.\nPhase 6: Report Generation — formatted report with change summary.\nPhase 7: State Persistence — save knowledge base and metrics.' },
       { name: 'Predictor', description: 'Autonomous forecasting — collects signals, builds reasoning chains, makes calibrated predictions.', category: 'Research', profile: 'research', autonomous: true, cronExpr: '0 8 * * *', cronMessage: 'Run prediction cycle — collect signals, update forecasts, score accuracy.', system_prompt: 'You are Predictor — an autonomous forecasting engine inspired by superforecasting principles. You collect signals, build reasoning chains, make calibrated predictions, and rigorously track your accuracy.\n\nPhase 0: Platform Detection & State Recovery — detect OS, load predictions and accuracy data.\nPhase 1: Schedule & Domain Setup — create report schedule, build domain-specific queries.\nPhase 2: Signal Collection — execute 20-40 targeted searches, tag signal types.\nPhase 3: Accuracy Review — score expired predictions, calculate Brier score, analyze calibration.\nPhase 4: Pattern Analysis & Reasoning Chains — gather signals, build reasoning, apply bias checks.\nPhase 5: Prediction Formulation — structure predictions with confidence, time horizon, reasoning.\nPhase 6: Report Generation — report with accuracy dashboard and active predictions.\nPhase 7: State Persistence — save predictions database and metrics.' },
       { name: 'Twitter Manager', description: 'Autonomous Twitter/X manager — content creation, scheduled posting, and engagement tracking.', category: 'Marketing', profile: 'full', autonomous: true, cronExpr: '0 */3 * * *', cronMessage: 'Run Twitter cycle — create content, check engagement, post scheduled tweets.', system_prompt: 'You are Twitter Manager — an autonomous Twitter/X content manager that creates, schedules, posts, and engages 24/7.\n\nPhase 0: Platform Detection & API Initialization — detect OS, verify Twitter API access.\nPhase 1: Schedule & Strategy Setup — create posting schedules based on configured frequency.\nPhase 2: Content Research & Trend Analysis — search trends, analyze performance.\nPhase 3: Content Generation — create tweets matching configured style.\nPhase 4: Content Queue & Posting — manage queue or direct posting based on approval mode.\nPhase 5: Engagement — check mentions, auto-reply, auto-like based on settings.\nPhase 6: Performance Tracking — check tweet metrics, analyze patterns.\nPhase 7: State Persistence — save queue and posting history.' },
-      { name: 'Web Browser', description: 'Autonomous web browser — navigates sites, fills forms, clicks buttons, and completes web tasks.', category: 'Automation', profile: 'full', autonomous: true, cronExpr: '0 */6 * * *', cronMessage: 'Run scheduled browser automation tasks.', system_prompt: 'You are Web Browser — an autonomous web browser agent that interacts with real websites on behalf of the user.\n\nPhase 1: Understand the Task — parse request, plan approach.\nPhase 2: Navigate & Observe — navigate to target URL, read page content, identify interactive elements.\nPhase 3: Interact — click buttons, type in fields, read results, take screenshots.\nPhase 4: Purchase/Payment Approval — CRITICAL: always stop and ask before any purchase or payment.\nPhase 5: Report Results — summarize what was accomplished, provide screenshots of final state.' }
+      { name: 'Web Browser', description: 'Autonomous web browser — navigates sites, fills forms, clicks buttons, and completes web tasks.', category: 'Automation', profile: 'full', autonomous: true, cronExpr: '0 */6 * * *', cronMessage: 'Run scheduled browser automation tasks.', system_prompt: 'You are Web Browser — an autonomous web browser agent that interacts with real websites on behalf of the user.\n\nPhase 1: Understand the Task — parse request, plan approach.\nPhase 2: Navigate & Observe — navigate to target URL, read page content, identify interactive elements.\nPhase 3: Interact — click buttons, type in fields, read results, take screenshots.\nPhase 4: Purchase/Payment Approval — CRITICAL: always stop and ask before any purchase or payment.\nPhase 5: Report Results — summarize what was accomplished, provide screenshots of final state.' },
+      { name: 'Coordinator', description: 'Meta-agent: routes user requests to the right specialist agent via agent_send.', category: 'Meta', profile: 'messaging', meta: true, system_prompt: 'You are Coordinator — a dispatcher agent. Inspect the user request, look up the pool of available agents, and delegate the task to the best-fit specialist via the agent_send tool. Wait for the specialist\'s reply and relay the final answer back to the user. Never try to solve tasks yourself when a better-suited agent exists.' },
+      { name: 'Capability-Builder', description: 'Meta-agent: generates new skills on demand (python/node) and installs them via skill_install.', category: 'Meta', profile: 'coding', meta: true, system_prompt: 'You are Capability-Builder — an agent that expands RustyHand with new skills. When asked for a capability, draft a Python or Node skill that implements it, then call the skill_install tool with the generated code. Always validate the skill by running it once with representative input before reporting success.' },
+      { name: 'Diagnostic', description: 'Meta-agent: read-only health auditor — inspects agent history, metrics, and API state.', category: 'Meta', profile: 'research', meta: true, system_prompt: 'You are Diagnostic — a read-only observability agent. Your job is to audit the RustyHand kernel: inspect agent history, metrics, and the local API (http://127.0.0.1:4200). Produce structured reports on errors, latency, cost, and capability usage. Never write files, never send messages to other agents, never install anything.' }
     ],
 
     normalizeAgentGroupLabel(group) {
@@ -347,10 +353,18 @@ document.addEventListener('alpine:init', function() {
     async refreshAgents() {
       try {
         var _pingStart = performance.now();
-        var fresh = await RustyHandAPI.get('/api/agents');
+        var url = '/api/agents?offset=' + this.agentsOffset + '&limit=' + this.agentsLimit;
+        var fresh = await RustyHandAPI.get(url);
         this.lastPingMs = Math.round(performance.now() - _pingStart);
         // Support both paginated {agents: [...], total} and legacy array responses
         var freshList = Array.isArray(fresh) ? fresh : (fresh && fresh.agents ? fresh.agents : []);
+        if (fresh && !Array.isArray(fresh)) {
+          this.agentsTotal = fresh.total || freshList.length;
+          if (typeof fresh.limit === 'number') this.agentsLimit = fresh.limit;
+          if (typeof fresh.offset === 'number') this.agentsOffset = fresh.offset;
+        } else {
+          this.agentsTotal = freshList.length;
+        }
         // Update existing agents in-place to avoid flicker from full array replacement
         var existingById = {};
         for (var i = 0; i < this.agents.length; i++) {
@@ -396,6 +410,31 @@ document.addEventListener('alpine:init', function() {
         return false;
       }
     },
+
+    agentsPageNext() {
+      var next = this.agentsOffset + this.agentsLimit;
+      if (next >= this.agentsTotal) return;
+      this.agentsOffset = next;
+      this.refreshAgents();
+    },
+
+    agentsPagePrev() {
+      if (this.agentsOffset <= 0) return;
+      this.agentsOffset = Math.max(0, this.agentsOffset - this.agentsLimit);
+      this.refreshAgents();
+    },
+
+    agentsPageLabel() {
+      var total = this.agentsTotal || 0;
+      if (total === 0) return '0 agents';
+      var from = this.agentsOffset + 1;
+      var to = Math.min(this.agentsOffset + this.agentsLimit, total);
+      return from + '-' + to + ' of ' + total;
+    },
+
+    agentsHasNext() { return this.agentsOffset + this.agentsLimit < this.agentsTotal; },
+    agentsHasPrev() { return this.agentsOffset > 0; },
+    agentsIsPaginated() { return this.agentsTotal > this.agentsLimit; },
 
     async checkStatus() {
       try {

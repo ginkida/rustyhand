@@ -19,21 +19,23 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT" />
-  <img src="https://img.shields.io/badge/version-0.6.3-green?style=flat-square" alt="v0.6.3" />
+  <img src="https://img.shields.io/badge/version-0.6.4-green?style=flat-square" alt="v0.6.4" />
   <img src="https://img.shields.io/badge/tests-1,775%2B%20passing-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/clippy-0%20warnings-brightgreen?style=flat-square" alt="Clippy" />
 </p>
 
 ---
 
-> **v0.6.3 — MCP Security + Dashboard UX (April 2026)**
+> **v0.6.4 — Self-service skills + workflow cron + meta-agent surfacing (April 2026)**
 >
-> SECURITY: MCP server now gates tool access behind an explicit allowlist —
-> previous versions let any authenticated MCP client call shell_exec /
-> skill_install / file_write, turning MCP into an RCE channel. Dashboard
-> now exposes agent export/import buttons, proxy + MCP server config in
-> settings, and auto-scales sidebar search to server-side when agent count
-> exceeds 50.
+> Dashboard UX closeout: Skills page now has an **Install skill** form that
+> compiles Python/Node code into a loadable manifest via the privileged
+> `skill_install` tool. Automation page supports scheduling **workflow
+> runs** (not just agent turns). Agents list gained prev/next pagination
+> controls for installs with 100+ agents. Three bundled meta-agents —
+> **Coordinator**, **Capability-Builder**, **Diagnostic** — are now
+> highlighted in the empty-state picker so new users can kick-start a
+> self-extending agent loop in one click.
 > [Report issues here.](https://github.com/ginkida/rustyhand/issues)
 
 ---
