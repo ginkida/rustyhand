@@ -6,9 +6,10 @@
 
 use crate::web_cache::WebCache;
 use crate::web_content::{html_to_markdown, wrap_external_content};
-use rusty_hand_types::config::WebFetchConfig;
+use rusty_hand_types::config::{ProxyConfig, WebFetchConfig};
 use std::net::{IpAddr, ToSocketAddrs};
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::debug;
 
 /// Enhanced web fetch engine with SSRF protection and readability extraction.
@@ -16,24 +17,28 @@ pub struct WebFetchEngine {
     config: WebFetchConfig,
     client: reqwest::Client,
     cache: Arc<WebCache>,
+    proxy: ProxyConfig,
 }
 
 impl WebFetchEngine {
     /// Create a new fetch engine from config with a shared cache.
+    /// No proxy is used (direct connection).
     pub fn new(config: WebFetchConfig, cache: Arc<WebCache>) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(config.timeout_secs))
-            .build()
-            .unwrap_or_else(|e| {
-                tracing::warn!(
-                    "Failed to build HTTP client with custom timeout: {e}, using default"
-                );
-                reqwest::Client::new()
-            });
+        Self::with_proxy(config, cache, ProxyConfig::default())
+    }
+
+    /// Create a new fetch engine with an optional proxy configuration.
+    /// When `proxy.is_enabled()` is true, requests route through the proxy
+    /// (with `no_proxy` bypass for matching hosts).
+    pub fn with_proxy(config: WebFetchConfig, cache: Arc<WebCache>, proxy: ProxyConfig) -> Self {
+        let timeout = Duration::from_secs(config.timeout_secs);
+        // Default client (used for hosts that bypass the proxy or when proxy is off).
+        let client = crate::http_client::build_with_proxy(&proxy, timeout, None);
         Self {
             config,
             client,
             cache,
+            proxy,
         }
     }
 
@@ -54,9 +59,25 @@ impl WebFetchEngine {
             return Ok(cached);
         }
 
-        // Step 3: HTTP GET
-        let resp = self
-            .client
+        // Step 3: HTTP GET — use a per-host client so `no_proxy` bypass works
+        // even when the engine was built with a proxy.
+        let host = extract_host(url);
+        let host_only = host.split(':').next().unwrap_or(&host);
+        let client = if self.proxy.is_enabled() && !self.proxy.should_bypass(host_only) {
+            // Use the proxy-configured shared client.
+            self.client.clone()
+        } else if self.proxy.is_enabled() {
+            // Proxy enabled but this host bypasses — build a direct client.
+            crate::http_client::build_with_proxy(
+                &ProxyConfig::default(),
+                Duration::from_secs(self.config.timeout_secs),
+                Some(host_only),
+            )
+        } else {
+            self.client.clone()
+        };
+
+        let resp = client
             .get(url)
             .header("User-Agent", "Mozilla/5.0 (compatible; RustyHandAgent/0.1)")
             .send()

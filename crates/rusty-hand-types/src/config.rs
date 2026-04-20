@@ -269,6 +269,98 @@ impl Default for WebFetchConfig {
     }
 }
 
+/// HTTP/HTTPS proxy configuration for outbound requests.
+///
+/// When `url` is set, all proxy-aware HTTP clients (web_fetch, browser, etc.)
+/// route requests through it. Useful for residential proxy services like
+/// Bright Data, Smartproxy, IPRoyal where the same endpoint handles both
+/// HTTP and HTTPS via CONNECT.
+///
+/// Auth: `username` and `password` are sent as Basic auth on the proxy
+/// connection. For Bright Data the credentials are zone-specific.
+///
+/// Example config:
+/// ```toml
+/// [proxy]
+/// url = "http://brd.superproxy.io:33335"
+/// username = "brd-customer-hl_xxx-zone-residential_proxy1"
+/// password = "secret"
+/// no_proxy = ["localhost", "127.0.0.1", "*.internal"]
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProxyConfig {
+    /// Proxy URL (e.g. `http://brd.superproxy.io:33335`). Empty disables the proxy.
+    /// Schemes: http://, https://, socks5://.
+    pub url: String,
+    /// Optional basic auth username for the proxy.
+    #[serde(default)]
+    pub username: String,
+    /// Optional basic auth password for the proxy.
+    /// SECURITY: skip_serializing prevents accidental exposure in JSON output.
+    #[serde(default, skip_serializing)]
+    pub password: String,
+    /// Hostnames that should bypass the proxy (direct connection).
+    /// Supports exact match and wildcard prefix `*.` (e.g. `*.internal`).
+    /// Localhost and 127.0.0.1 are always bypassed regardless of this list.
+    #[serde(default)]
+    pub no_proxy: Vec<String>,
+}
+
+impl ProxyConfig {
+    /// True if a proxy URL is configured.
+    pub fn is_enabled(&self) -> bool {
+        !self.url.trim().is_empty()
+    }
+
+    /// Validate the proxy configuration.
+    /// Returns a list of human-readable warnings (empty if config is valid).
+    pub fn validate(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+        if self.url.trim().is_empty() {
+            return warnings;
+        }
+        let lower = self.url.to_lowercase();
+        if !lower.starts_with("http://")
+            && !lower.starts_with("https://")
+            && !lower.starts_with("socks5://")
+            && !lower.starts_with("socks5h://")
+        {
+            warnings.push(format!(
+                "proxy.url '{}' must start with http://, https://, socks5:// or socks5h://",
+                self.url
+            ));
+        }
+        if !self.username.is_empty() && self.password.is_empty() {
+            warnings.push("proxy.username is set but proxy.password is empty".to_string());
+        }
+        warnings
+    }
+
+    /// Check whether the proxy should be bypassed for a given host.
+    /// Always bypasses localhost and 127.0.0.1.
+    pub fn should_bypass(&self, host: &str) -> bool {
+        let h = host.to_lowercase();
+        if h == "localhost" || h == "127.0.0.1" || h == "::1" {
+            return true;
+        }
+        for entry in &self.no_proxy {
+            let e = entry.trim().to_lowercase();
+            if e.is_empty() {
+                continue;
+            }
+            if let Some(suffix) = e.strip_prefix("*.") {
+                if h == suffix || h.ends_with(&format!(".{suffix}")) {
+                    return true;
+                }
+            } else if h == e {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 /// Browser automation configuration (uses `agent-browser` CLI).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -1041,6 +1133,10 @@ pub struct KernelConfig {
     /// Global spending budget configuration.
     #[serde(default)]
     pub budget: BudgetConfig,
+    /// HTTP/HTTPS proxy for outbound requests (web_fetch, browser, etc.).
+    /// Disabled by default — when configured, all proxy-aware clients route through it.
+    #[serde(default)]
+    pub proxy: ProxyConfig,
 }
 
 /// Global spending budget configuration.
@@ -1220,6 +1316,7 @@ impl Default for KernelConfig {
             auth_profiles: HashMap::new(),
             thinking: None,
             budget: BudgetConfig::default(),
+            proxy: ProxyConfig::default(),
         }
     }
 }
@@ -1312,6 +1409,23 @@ impl std::fmt::Debug for KernelConfig {
                 &format!("{} provider(s)", self.auth_profiles.len()),
             )
             .field("thinking", &self.thinking.is_some())
+            .field(
+                "proxy",
+                &if self.proxy.is_enabled() {
+                    format!(
+                        "enabled url={} auth={} no_proxy={}",
+                        self.proxy.url,
+                        if self.proxy.password.is_empty() {
+                            "none"
+                        } else {
+                            "<redacted>"
+                        },
+                        self.proxy.no_proxy.len()
+                    )
+                } else {
+                    "disabled".to_string()
+                },
+            )
             .finish()
     }
 }
@@ -3181,6 +3295,104 @@ mod tests {
         let warnings = config.validate();
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("Discord"));
+    }
+
+    #[test]
+    fn proxy_disabled_by_default() {
+        let cfg = KernelConfig::default();
+        assert!(!cfg.proxy.is_enabled());
+        assert!(cfg.proxy.url.is_empty());
+    }
+
+    #[test]
+    fn proxy_is_enabled_when_url_set() {
+        let cfg = ProxyConfig {
+            url: "http://proxy.example.com:8080".to_string(),
+            username: String::new(),
+            password: String::new(),
+            no_proxy: vec![],
+        };
+        assert!(cfg.is_enabled());
+    }
+
+    #[test]
+    fn proxy_validate_rejects_unknown_scheme() {
+        let cfg = ProxyConfig {
+            url: "ftp://proxy.example.com".to_string(),
+            ..Default::default()
+        };
+        let warnings = cfg.validate();
+        assert!(warnings.iter().any(|w| w.contains("must start with")));
+    }
+
+    #[test]
+    fn proxy_validate_warns_on_missing_password() {
+        let cfg = ProxyConfig {
+            url: "http://proxy.example.com:8080".to_string(),
+            username: "user".to_string(),
+            password: String::new(),
+            ..Default::default()
+        };
+        let warnings = cfg.validate();
+        assert!(warnings.iter().any(|w| w.contains("password is empty")));
+    }
+
+    #[test]
+    fn proxy_validate_accepts_valid_brightdata() {
+        let cfg = ProxyConfig {
+            url: "http://brd.superproxy.io:33335".to_string(),
+            username: "brd-customer-hl_xxx-zone-residential".to_string(),
+            password: "secret".to_string(),
+            no_proxy: vec![],
+        };
+        assert!(cfg.validate().is_empty());
+    }
+
+    #[test]
+    fn proxy_should_bypass_localhost_always() {
+        let cfg = ProxyConfig {
+            url: "http://proxy.example.com".to_string(),
+            ..Default::default()
+        };
+        assert!(cfg.should_bypass("localhost"));
+        assert!(cfg.should_bypass("127.0.0.1"));
+        assert!(cfg.should_bypass("::1"));
+    }
+
+    #[test]
+    fn proxy_should_bypass_exact_match() {
+        let cfg = ProxyConfig {
+            url: "http://proxy.example.com".to_string(),
+            no_proxy: vec!["internal.corp".to_string()],
+            ..Default::default()
+        };
+        assert!(cfg.should_bypass("internal.corp"));
+        assert!(cfg.should_bypass("INTERNAL.CORP")); // case-insensitive
+        assert!(!cfg.should_bypass("api.internal.corp"));
+    }
+
+    #[test]
+    fn proxy_should_bypass_wildcard_suffix() {
+        let cfg = ProxyConfig {
+            url: "http://proxy.example.com".to_string(),
+            no_proxy: vec!["*.local".to_string()],
+            ..Default::default()
+        };
+        assert!(cfg.should_bypass("foo.local"));
+        assert!(cfg.should_bypass("a.b.local"));
+        assert!(cfg.should_bypass("local")); // suffix match also matches the bare value
+        assert!(!cfg.should_bypass("local.org"));
+    }
+
+    #[test]
+    fn proxy_does_not_bypass_unrelated_host() {
+        let cfg = ProxyConfig {
+            url: "http://proxy.example.com".to_string(),
+            no_proxy: vec!["internal.corp".to_string(), "*.local".to_string()],
+            ..Default::default()
+        };
+        assert!(!cfg.should_bypass("olx.kz"));
+        assert!(!cfg.should_bypass("api.example.com"));
     }
 
     #[test]

@@ -809,9 +809,10 @@ impl RustyHandKernel {
                 config.web.clone(),
                 web_cache.clone(),
             ),
-            fetch: rusty_hand_runtime::web_fetch::WebFetchEngine::new(
+            fetch: rusty_hand_runtime::web_fetch::WebFetchEngine::with_proxy(
                 config.web.fetch.clone(),
                 web_cache,
+                config.proxy.clone(),
             ),
         };
 
