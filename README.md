@@ -19,19 +19,21 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT" />
-  <img src="https://img.shields.io/badge/version-0.6.1-green?style=flat-square" alt="v0.6.1" />
-  <img src="https://img.shields.io/badge/tests-1,749%2B%20passing-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/version-0.6.2-green?style=flat-square" alt="v0.6.2" />
+  <img src="https://img.shields.io/badge/tests-1,775%2B%20passing-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/clippy-0%20warnings-brightgreen?style=flat-square" alt="Clippy" />
 </p>
 
 ---
 
-> **v0.6.1 — Bug Fix Release (April 2026)**
+> **v0.6.2 — Self-Extending Agents + HTTP Proxy (April 2026)**
 >
-> Fixes 10 bugs found during post-v0.6.0 audit: UTF-8 byte-slicing panics,
-> TOCTOU race in registry rename, stale session previews, cron job panic recovery,
-> workflow UUID validation, import deduplication, saturating token counters.
-> Adds UTF-8-safe truncation helpers + 11 regression tests.
+> Three new bundled meta-agents (coordinator, capability-builder, diagnostic)
+> turn RustyHand into a self-routing assistant. New `skill_install` builtin tool
+> lets capability-builder install Python/JS skills end-to-end, with safe wrapping
+> of user code into the stdin/stdout runtime contract. New HTTP/HTTPS proxy
+> support in web_fetch (Bright Data, residential proxies) — config-driven, with
+> password redaction in Debug, no_proxy bypass list, and SOCKS5 support.
 > [Report issues here.](https://github.com/ginkida/rustyhand/issues)
 
 ---
