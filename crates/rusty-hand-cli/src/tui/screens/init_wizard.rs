@@ -28,20 +28,20 @@ struct ProviderInfo {
 
 const PROVIDERS: &[ProviderInfo] = &[
     ProviderInfo {
-        name: "groq",
-        display: "Groq",
-        env_var: "GROQ_API_KEY",
-        default_model: "llama-3.3-70b-versatile",
+        name: "anthropic",
+        display: "Anthropic",
+        env_var: "ANTHROPIC_API_KEY",
+        default_model: "claude-sonnet-4-20250514",
         needs_key: true,
-        hint: "free tier",
+        hint: "Claude — first-class",
     },
     ProviderInfo {
-        name: "gemini",
-        display: "Gemini",
-        env_var: "GEMINI_API_KEY",
-        default_model: "gemini-2.5-flash",
+        name: "kimi",
+        display: "Kimi",
+        env_var: "KIMI_API_KEY",
+        default_model: "kimi-for-coding",
         needs_key: true,
-        hint: "free tier",
+        hint: "Kimi Code (Anthropic-compat)",
     },
     ProviderInfo {
         name: "deepseek",
@@ -49,23 +49,23 @@ const PROVIDERS: &[ProviderInfo] = &[
         env_var: "DEEPSEEK_API_KEY",
         default_model: "deepseek-chat",
         needs_key: true,
-        hint: "cheap",
+        hint: "cheap reasoning",
     },
     ProviderInfo {
-        name: "anthropic",
-        display: "Anthropic",
-        env_var: "ANTHROPIC_API_KEY",
-        default_model: "claude-sonnet-4-20250514",
+        name: "zhipu",
+        display: "Zhipu GLM",
+        env_var: "ZHIPU_API_KEY",
+        default_model: "glm-4-plus",
         needs_key: true,
         hint: "",
     },
     ProviderInfo {
-        name: "openai",
-        display: "OpenAI",
-        env_var: "OPENAI_API_KEY",
-        default_model: "gpt-4o",
+        name: "minimax",
+        display: "MiniMax",
+        env_var: "MINIMAX_API_KEY",
+        default_model: "MiniMax-M2.7",
         needs_key: true,
-        hint: "",
+        hint: "long context",
     },
     ProviderInfo {
         name: "openrouter",
@@ -73,45 +73,13 @@ const PROVIDERS: &[ProviderInfo] = &[
         env_var: "OPENROUTER_API_KEY",
         default_model: "openrouter/auto",
         needs_key: true,
-        hint: "",
-    },
-    ProviderInfo {
-        name: "together",
-        display: "Together",
-        env_var: "TOGETHER_API_KEY",
-        default_model: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-        needs_key: true,
-        hint: "",
-    },
-    ProviderInfo {
-        name: "mistral",
-        display: "Mistral",
-        env_var: "MISTRAL_API_KEY",
-        default_model: "mistral-large-latest",
-        needs_key: true,
-        hint: "",
-    },
-    ProviderInfo {
-        name: "fireworks",
-        display: "Fireworks",
-        env_var: "FIREWORKS_API_KEY",
-        default_model: "accounts/fireworks/models/llama-v3p3-70b-instruct",
-        needs_key: true,
-        hint: "",
+        hint: "universal gateway",
     },
     ProviderInfo {
         name: "ollama",
         display: "Ollama",
         env_var: "OLLAMA_API_KEY",
         default_model: "llama3.2",
-        needs_key: false,
-        hint: "local",
-    },
-    ProviderInfo {
-        name: "lmstudio",
-        display: "LM Studio",
-        env_var: "LMSTUDIO_API_KEY",
-        default_model: "local-model",
         needs_key: false,
         hint: "local",
     },
@@ -256,18 +224,13 @@ impl State {
 
     fn build_provider_order(&mut self) {
         self.provider_order.clear();
-        let gemini_via_google = std::env::var("GOOGLE_API_KEY").is_ok();
         for (i, p) in PROVIDERS.iter().enumerate() {
-            let detected =
-                std::env::var(p.env_var).is_ok() || (p.name == "gemini" && gemini_via_google);
-            if detected {
+            if std::env::var(p.env_var).is_ok() {
                 self.provider_order.push(i);
             }
         }
         for (i, p) in PROVIDERS.iter().enumerate() {
-            let detected =
-                std::env::var(p.env_var).is_ok() || (p.name == "gemini" && gemini_via_google);
-            if !detected {
+            if std::env::var(p.env_var).is_err() {
                 self.provider_order.push(i);
             }
         }
@@ -291,7 +254,6 @@ impl State {
     fn is_provider_detected(&self, prov_idx: usize) -> bool {
         let p = &PROVIDERS[prov_idx];
         std::env::var(p.env_var).is_ok()
-            || (p.name == "gemini" && std::env::var("GOOGLE_API_KEY").is_ok())
     }
 
     /// Populate model_entries from the catalog for the selected provider.

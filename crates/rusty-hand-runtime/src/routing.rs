@@ -171,7 +171,7 @@ mod tests {
 
     fn default_config() -> ModelRoutingConfig {
         ModelRoutingConfig {
-            simple_model: "llama-3.3-70b-versatile".to_string(),
+            simple_model: "claude-haiku-4-5-20251001".to_string(),
             medium_model: "claude-sonnet-4-20250514".to_string(),
             complex_model: "claude-opus-4-20250514".to_string(),
             simple_threshold: 200,
@@ -204,7 +204,7 @@ mod tests {
         );
         let (complexity, model) = router.select_model(&request);
         assert_eq!(complexity, TaskComplexity::Simple);
-        assert_eq!(model, "llama-3.3-70b-versatile");
+        assert_eq!(model, "claude-haiku-4-5-20251001");
     }
 
     #[test]
@@ -271,7 +271,7 @@ mod tests {
         let router = ModelRouter::new(default_config());
         assert_eq!(
             router.model_for_complexity(TaskComplexity::Simple),
-            "llama-3.3-70b-versatile"
+            "claude-haiku-4-5-20251001"
         );
         assert_eq!(
             router.model_for_complexity(TaskComplexity::Medium),
@@ -294,7 +294,7 @@ mod tests {
     fn test_validate_models_all_found() {
         let catalog = crate::model_catalog::ModelCatalog::new();
         let config = ModelRoutingConfig {
-            simple_model: "llama-3.3-70b-versatile".to_string(),
+            simple_model: "claude-haiku-4-5-20251001".to_string(),
             medium_model: "claude-sonnet-4-20250514".to_string(),
             complex_model: "claude-opus-4-20250514".to_string(),
             simple_threshold: 200,
@@ -325,7 +325,7 @@ mod tests {
     fn test_resolve_aliases() {
         let catalog = crate::model_catalog::ModelCatalog::new();
         let config = ModelRoutingConfig {
-            simple_model: "llama".to_string(),
+            simple_model: "haiku".to_string(),
             medium_model: "sonnet".to_string(),
             complex_model: "opus".to_string(),
             simple_threshold: 200,
@@ -335,7 +335,7 @@ mod tests {
         router.resolve_aliases(&catalog);
         assert_eq!(
             router.model_for_complexity(TaskComplexity::Simple),
-            "llama-3.3-70b-versatile"
+            "claude-haiku-4-5-20251001"
         );
         assert_eq!(
             router.model_for_complexity(TaskComplexity::Medium),

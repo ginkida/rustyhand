@@ -393,7 +393,7 @@ mod tests {
             agent: Some("ops".to_string()),
             deliver: true,
             channel: Some("slack-alerts".to_string()),
-            model: Some("gemini-2.5-flash".to_string()),
+            model: Some("kimi-for-coding".to_string()),
             timeout_secs: 300,
         };
         let json = serde_json::to_string(&orig).unwrap();
@@ -402,7 +402,7 @@ mod tests {
         assert_eq!(back.agent.as_deref(), Some("ops"));
         assert!(back.deliver);
         assert_eq!(back.channel.as_deref(), Some("slack-alerts"));
-        assert_eq!(back.model.as_deref(), Some("gemini-2.5-flash"));
+        assert_eq!(back.model.as_deref(), Some("kimi-for-coding"));
         assert_eq!(back.timeout_secs, 300);
     }
 

@@ -27,18 +27,15 @@ const COMPACT_LOGO: &str = "O P E N F A N G";
 
 // ── Provider detection ───────────────────────────────────────────────────────
 
-/// Known provider env vars, checked in priority order.
+/// Known provider env vars, checked in priority order. LLM providers first,
+/// then search (Brave/Tavily/Perplexity are side-feature upstreams, not LLM).
 const PROVIDER_ENV_VARS: &[(&str, &str)] = &[
     ("ANTHROPIC_API_KEY", "Anthropic"),
-    ("OPENAI_API_KEY", "OpenAI"),
+    ("KIMI_API_KEY", "Kimi"),
     ("DEEPSEEK_API_KEY", "DeepSeek"),
-    ("GEMINI_API_KEY", "Gemini"),
-    ("GOOGLE_API_KEY", "Gemini"),
-    ("GROQ_API_KEY", "Groq"),
+    ("ZHIPU_API_KEY", "Zhipu GLM"),
+    ("MINIMAX_API_KEY", "MiniMax"),
     ("OPENROUTER_API_KEY", "OpenRouter"),
-    ("TOGETHER_API_KEY", "Together"),
-    ("MISTRAL_API_KEY", "Mistral"),
-    ("FIREWORKS_API_KEY", "Fireworks"),
     ("BRAVE_API_KEY", "Brave Search"),
     ("TAVILY_API_KEY", "Tavily"),
     ("PERPLEXITY_API_KEY", "Perplexity"),

@@ -1,13 +1,13 @@
 //! Embedding driver for vector-based semantic memory.
 //!
 //! Provides an `EmbeddingDriver` trait and an OpenAI-compatible implementation
-//! that works with any provider offering a `/v1/embeddings` endpoint (OpenAI,
-//! Groq, Together, Fireworks, Ollama, etc.).
+//! that works with any provider offering a `/v1/embeddings` endpoint. Built-in
+//! targets: Ollama (local), Voyage (specialized), and any OpenAI-compatible
+//! endpoint via an explicit `base_url`.
 
 use async_trait::async_trait;
 use rusty_hand_types::model_catalog::{
-    FIREWORKS_BASE_URL, GROQ_BASE_URL, LMSTUDIO_BASE_URL, MISTRAL_BASE_URL, OLLAMA_BASE_URL,
-    OPENAI_BASE_URL, TOGETHER_BASE_URL, VLLM_BASE_URL, VOYAGE_BASE_URL,
+    OLLAMA_BASE_URL, OPENAI_EMBEDDING_BASE_URL, VOYAGE_BASE_URL,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
@@ -200,15 +200,12 @@ pub fn create_embedding_driver(
     };
 
     let base_url = match provider {
-        "openai" => OPENAI_BASE_URL.to_string(),
-        "groq" => GROQ_BASE_URL.to_string(),
-        "together" => TOGETHER_BASE_URL.to_string(),
-        "fireworks" => FIREWORKS_BASE_URL.to_string(),
-        "mistral" => MISTRAL_BASE_URL.to_string(),
         "ollama" => OLLAMA_BASE_URL.to_string(),
-        "vllm" => VLLM_BASE_URL.to_string(),
-        "lmstudio" => LMSTUDIO_BASE_URL.to_string(),
         "voyage" | "voyageai" => VOYAGE_BASE_URL.to_string(),
+        // OpenAI embeddings (text-embedding-3-*) are kept available even though
+        // OpenAI is not a first-class LLM provider in v0.7.0 — RAG / memory
+        // quality is worth the separate env var.
+        "openai" => OPENAI_EMBEDDING_BASE_URL.to_string(),
         other => {
             warn!("Unknown embedding provider '{other}', using OpenAI-compatible format");
             format!("https://{other}/v1")

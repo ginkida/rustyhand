@@ -117,7 +117,11 @@ struct ApiTool {
 #[derive(Debug, Deserialize)]
 struct ApiResponse {
     content: Vec<ResponseContentBlock>,
-    stop_reason: String,
+    /// Optional because upstream (Kimi Code, and occasionally Anthropic on
+    /// truncated completions) returns `null` when the model was cut off before
+    /// emitting a real stop reason. Parsed via `as_deref().unwrap_or(...)`.
+    #[serde(default)]
+    stop_reason: Option<String>,
     usage: ApiUsage,
 }
 
@@ -701,7 +705,7 @@ fn convert_response(api: ApiResponse) -> CompletionResponse {
         }
     }
 
-    let stop_reason = match api.stop_reason.as_str() {
+    let stop_reason = match api.stop_reason.as_deref().unwrap_or("end_turn") {
         "end_turn" => StopReason::EndTurn,
         "tool_use" => StopReason::ToolUse,
         "max_tokens" => StopReason::MaxTokens,
@@ -744,7 +748,7 @@ mod tests {
                     input: serde_json::json!({"query": "rust lang"}),
                 },
             ],
-            stop_reason: "tool_use".to_string(),
+            stop_reason: Some("tool_use".to_string()),
             usage: ApiUsage {
                 input_tokens: 100,
                 output_tokens: 50,
@@ -756,5 +760,33 @@ mod tests {
         assert_eq!(response.tool_calls.len(), 1);
         assert_eq!(response.tool_calls[0].name, "web_search");
         assert_eq!(response.usage.total(), 150);
+    }
+
+    #[test]
+    fn test_parse_response_with_null_stop_reason() {
+        // Regression guard: Kimi Code returns `stop_reason: null` when the
+        // response was truncated (observed with max_tokens: 1). The driver
+        // must not crash on this — it should fall through to EndTurn.
+        let raw = r#"{
+            "content": [{"type": "text", "text": ""}],
+            "stop_reason": null,
+            "usage": {"input_tokens": 8, "output_tokens": 1}
+        }"#;
+        let parsed: ApiResponse = serde_json::from_str(raw).expect("must parse null stop_reason");
+        let converted = convert_response(parsed);
+        assert_eq!(converted.stop_reason, StopReason::EndTurn);
+    }
+
+    #[test]
+    fn test_parse_response_with_missing_stop_reason() {
+        // Some upstreams omit the field entirely — #[serde(default)] must tolerate this.
+        let raw = r#"{
+            "content": [{"type": "text", "text": "hi"}],
+            "usage": {"input_tokens": 1, "output_tokens": 1}
+        }"#;
+        let parsed: ApiResponse =
+            serde_json::from_str(raw).expect("must parse missing stop_reason");
+        let converted = convert_response(parsed);
+        assert_eq!(converted.stop_reason, StopReason::EndTurn);
     }
 }

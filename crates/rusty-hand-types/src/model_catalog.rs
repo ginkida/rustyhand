@@ -8,40 +8,34 @@ use std::fmt;
 // Referenced by rusty-hand-runtime drivers, model catalog, and embedding modules.
 // ---------------------------------------------------------------------------
 
+// RustyHand ships with seven LLM completion providers. Auxiliary services
+// (OpenAI TTS, DALL-E image gen, Whisper audio transcription, Perplexity web
+// search) talk to their upstreams directly via HTTP and don't need entries
+// here — they read env vars at request time.
+
+// ── Anthropic (native Messages API) ───────────────────────────────
 pub const ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
-pub const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
-pub const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com";
+
+// ── Kimi Code (Moonshot's Anthropic-compatible coding endpoint) ──
+// Uses Anthropic Messages API format. Driven by `AnthropicDriver`, not `OpenAIDriver`.
+pub const KIMI_CODE_BASE_URL: &str = "https://api.kimi.com/coding";
+
+// ── OpenAI-compatible clouds ──────────────────────────────────────
 pub const DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com/v1";
-pub const GROQ_BASE_URL: &str = "https://api.groq.com/openai/v1";
 pub const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
-pub const MISTRAL_BASE_URL: &str = "https://api.mistral.ai/v1";
-pub const TOGETHER_BASE_URL: &str = "https://api.together.xyz/v1";
-pub const FIREWORKS_BASE_URL: &str = "https://api.fireworks.ai/inference/v1";
-pub const OLLAMA_BASE_URL: &str = "http://localhost:11434/v1";
-pub const VLLM_BASE_URL: &str = "http://localhost:8000/v1";
-pub const LMSTUDIO_BASE_URL: &str = "http://localhost:1234/v1";
-pub const PERPLEXITY_BASE_URL: &str = "https://api.perplexity.ai";
-pub const COHERE_BASE_URL: &str = "https://api.cohere.com/v2";
-pub const AI21_BASE_URL: &str = "https://api.ai21.com/studio/v1";
-pub const CEREBRAS_BASE_URL: &str = "https://api.cerebras.ai/v1";
-pub const SAMBANOVA_BASE_URL: &str = "https://api.sambanova.ai/v1";
-pub const HUGGINGFACE_BASE_URL: &str = "https://api-inference.huggingface.co/v1";
-pub const XAI_BASE_URL: &str = "https://api.x.ai/v1";
-pub const REPLICATE_BASE_URL: &str = "https://api.replicate.com/v1";
-
-// ── GitHub Copilot ──────────────────────────────────────────────
-pub const GITHUB_COPILOT_BASE_URL: &str = "https://api.githubcopilot.com";
-
-// ── Chinese providers ─────────────────────────────────────────────
-pub const QWEN_BASE_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 pub const MINIMAX_BASE_URL: &str = "https://api.minimax.io/v1";
-pub const VOYAGE_BASE_URL: &str = "https://api.voyageai.com/v1";
 pub const ZHIPU_BASE_URL: &str = "https://open.bigmodel.cn/api/paas/v4";
-pub const MOONSHOT_BASE_URL: &str = "https://api.moonshot.cn/v1";
-pub const QIANFAN_BASE_URL: &str = "https://qianfan.baidubce.com/v2";
 
-// ── AWS Bedrock ───────────────────────────────────────────────────
-pub const BEDROCK_BASE_URL: &str = "https://bedrock-runtime.us-east-1.amazonaws.com";
+// ── Local ─────────────────────────────────────────────────────────
+pub const OLLAMA_BASE_URL: &str = "http://localhost:11434/v1";
+
+// ── Embedding-only upstreams ──────────────────────────────────────
+// These are NOT completion providers — RustyHand does not offer GPT/OpenAI
+// LLMs as of v0.7.0. They are kept only for `embedding.rs` so users can still
+// use high-quality text embedders for RAG / memory. Set VOYAGE_API_KEY or
+// OPENAI_API_KEY independently of the LLM provider config.
+pub const VOYAGE_BASE_URL: &str = "https://api.voyageai.com/v1";
+pub const OPENAI_EMBEDDING_BASE_URL: &str = "https://api.openai.com/v1";
 
 /// A model's capability tier.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

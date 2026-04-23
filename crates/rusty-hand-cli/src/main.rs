@@ -1455,17 +1455,18 @@ fn detect_best_provider() -> (&'static str, &'static str, &'static str) {
             return (p, env_var, m);
         }
     }
-    // Also check GOOGLE_API_KEY
-    if std::env::var("GOOGLE_API_KEY").is_ok() {
-        ui::success("Detected Gemini (GOOGLE_API_KEY)");
-        return ("gemini", "GOOGLE_API_KEY", "gemini-2.5-flash");
-    }
     ui::hint("No LLM provider API keys found");
-    ui::hint("Groq offers a free tier: https://console.groq.com");
-    ("groq", "GROQ_API_KEY", "llama-3.3-70b-versatile")
+    ui::hint("Get an Anthropic key: https://console.anthropic.com");
+    ui::hint("Or a Kimi Code key: https://platform.moonshot.ai/console/code");
+    ui::hint("Or run Ollama locally: https://ollama.com");
+    // Sensible fallback — Ollama needs no key, so it never errors on missing credentials.
+    ("ollama", "OLLAMA_API_KEY", "llama3.2")
 }
 
 /// Static list of supported providers: (id, env_var, default_model, display_name).
+///
+/// Order matters — this drives auto-detect priority in `detect_provider()`.
+/// v0.7.0 shipped seven providers; see drivers/mod.rs for the canonical list.
 fn provider_list() -> Vec<(&'static str, &'static str, &'static str, &'static str)> {
     vec![
         (
@@ -1474,11 +1475,10 @@ fn provider_list() -> Vec<(&'static str, &'static str, &'static str, &'static st
             "claude-sonnet-4-20250514",
             "Anthropic",
         ),
-        ("groq", "GROQ_API_KEY", "llama-3.3-70b-versatile", "Groq"),
-        ("gemini", "GEMINI_API_KEY", "gemini-2.5-flash", "Gemini"),
+        ("kimi", "KIMI_API_KEY", "kimi-for-coding", "Kimi"),
         ("deepseek", "DEEPSEEK_API_KEY", "deepseek-chat", "DeepSeek"),
+        ("zhipu", "ZHIPU_API_KEY", "glm-4-plus", "Zhipu GLM"),
         ("minimax", "MINIMAX_API_KEY", "MiniMax-M2.7", "MiniMax"),
-        ("openai", "OPENAI_API_KEY", "gpt-4o", "OpenAI"),
         (
             "openrouter",
             "OPENROUTER_API_KEY",
@@ -2342,16 +2342,11 @@ decay_rate = 0.05
     }
     let provider_keys = [
         ("ANTHROPIC_API_KEY", "Anthropic", "anthropic"),
-        ("GROQ_API_KEY", "Groq", "groq"),
-        ("OPENROUTER_API_KEY", "OpenRouter", "openrouter"),
-        ("MINIMAX_API_KEY", "MiniMax", "minimax"),
-        ("OPENAI_API_KEY", "OpenAI", "openai"),
+        ("KIMI_API_KEY", "Kimi", "kimi"),
         ("DEEPSEEK_API_KEY", "DeepSeek", "deepseek"),
-        ("GEMINI_API_KEY", "Gemini", "gemini"),
-        ("GOOGLE_API_KEY", "Google", "google"),
-        ("TOGETHER_API_KEY", "Together", "together"),
-        ("MISTRAL_API_KEY", "Mistral", "mistral"),
-        ("FIREWORKS_API_KEY", "Fireworks", "fireworks"),
+        ("ZHIPU_API_KEY", "Zhipu GLM", "zhipu"),
+        ("MINIMAX_API_KEY", "MiniMax", "minimax"),
+        ("OPENROUTER_API_KEY", "OpenRouter", "openrouter"),
     ];
 
     let mut any_key_set = false;
@@ -2382,12 +2377,16 @@ decay_rate = 0.05
             println!();
             ui::check_fail("No LLM provider API keys found!");
             ui::blank();
-            ui::section("Getting an API key (free tiers)");
-            ui::suggest_cmd("Groq:", "https://console.groq.com       (free, fast)");
-            ui::suggest_cmd("Gemini:", "https://aistudio.google.com    (free tier)");
-            ui::suggest_cmd("DeepSeek:", "https://platform.deepseek.com  (low cost)");
+            ui::section("Getting an API key");
+            ui::suggest_cmd("Anthropic:", "https://console.anthropic.com (premium)");
+            ui::suggest_cmd("Kimi Code:", "https://platform.moonshot.ai/console/code");
+            ui::suggest_cmd(
+                "DeepSeek:",
+                "https://platform.deepseek.com  (cheap reasoning)",
+            );
+            ui::suggest_cmd("Ollama:", "https://ollama.com              (local, free)");
             ui::blank();
-            ui::hint("Or run: rustyhand config set-key groq");
+            ui::hint("Or run: rustyhand init");
         }
         all_ok = false;
     }
@@ -3878,17 +3877,12 @@ fn provider_to_env_var(provider: &str) -> String {
     match provider.to_lowercase().as_str() {
         "groq" => "GROQ_API_KEY".to_string(),
         "anthropic" => "ANTHROPIC_API_KEY".to_string(),
-        "openai" => "OPENAI_API_KEY".to_string(),
-        "gemini" => "GEMINI_API_KEY".to_string(),
-        "google" => "GOOGLE_API_KEY".to_string(),
+        "kimi" => "KIMI_API_KEY".to_string(),
         "deepseek" => "DEEPSEEK_API_KEY".to_string(),
+        "zhipu" | "glm" => "ZHIPU_API_KEY".to_string(),
+        "minimax" => "MINIMAX_API_KEY".to_string(),
         "openrouter" => "OPENROUTER_API_KEY".to_string(),
-        "together" => "TOGETHER_API_KEY".to_string(),
-        "mistral" => "MISTRAL_API_KEY".to_string(),
-        "fireworks" => "FIREWORKS_API_KEY".to_string(),
-        "perplexity" => "PERPLEXITY_API_KEY".to_string(),
-        "cohere" => "COHERE_API_KEY".to_string(),
-        "xai" => "XAI_API_KEY".to_string(),
+        // Auxiliary services (web search, TTS, etc.) — not core LLM providers.
         "brave" => "BRAVE_API_KEY".to_string(),
         "tavily" => "TAVILY_API_KEY".to_string(),
         other => format!("{}_API_KEY", other.to_uppercase()),
@@ -3914,26 +3908,26 @@ pub(crate) fn test_api_key(provider: &str, env_var: &str) -> bool {
     };
 
     let result = match provider.to_lowercase().as_str() {
-        "groq" => client
-            .get("https://api.groq.com/openai/v1/models")
-            .bearer_auth(&key)
-            .send(),
         "anthropic" => client
             .get("https://api.anthropic.com/v1/models")
             .header("x-api-key", &key)
             .header("anthropic-version", "2023-06-01")
             .send(),
-        "openai" => client
-            .get("https://api.openai.com/v1/models")
-            .bearer_auth(&key)
-            .send(),
-        "gemini" | "google" => client
-            .get(format!(
-                "https://generativelanguage.googleapis.com/v1beta/models?key={key}"
-            ))
+        "kimi" => client
+            .get("https://api.kimi.com/coding/v1/models")
+            .header("x-api-key", &key)
+            .header("anthropic-version", "2023-06-01")
             .send(),
         "deepseek" => client
             .get("https://api.deepseek.com/models")
+            .bearer_auth(&key)
+            .send(),
+        "zhipu" | "glm" => client
+            .get("https://open.bigmodel.cn/api/paas/v4/models")
+            .bearer_auth(&key)
+            .send(),
+        "minimax" => client
+            .get("https://api.minimax.io/v1/models")
             .bearer_auth(&key)
             .send(),
         "openrouter" => client

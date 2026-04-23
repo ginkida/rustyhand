@@ -18,15 +18,11 @@ use std::time::Duration;
 
 const PROVIDER_ENV_VARS: &[(&str, &str)] = &[
     ("ANTHROPIC_API_KEY", "Anthropic"),
-    ("OPENAI_API_KEY", "OpenAI"),
+    ("KIMI_API_KEY", "Kimi"),
     ("DEEPSEEK_API_KEY", "DeepSeek"),
-    ("GEMINI_API_KEY", "Gemini"),
-    ("GOOGLE_API_KEY", "Gemini"),
-    ("GROQ_API_KEY", "Groq"),
+    ("ZHIPU_API_KEY", "Zhipu GLM"),
+    ("MINIMAX_API_KEY", "MiniMax"),
     ("OPENROUTER_API_KEY", "OpenRouter"),
-    ("TOGETHER_API_KEY", "Together"),
-    ("MISTRAL_API_KEY", "Mistral"),
-    ("FIREWORKS_API_KEY", "Fireworks"),
 ];
 
 fn detect_provider() -> Option<(&'static str, &'static str)> {

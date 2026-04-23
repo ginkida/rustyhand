@@ -143,29 +143,22 @@ impl MeteringEngine {
 
     /// Estimate the cost of an LLM call based on model and token counts.
     ///
-    /// Pricing table (approximate, per million tokens):
+    /// Pricing table (approximate, per million tokens) for the 7 v0.7.0 providers:
     ///
     /// | Model Family          | Input $/M | Output $/M |
     /// |-----------------------|-----------|------------|
     /// | claude-haiku          |     0.25  |      1.25  |
     /// | claude-sonnet         |     3.00  |     15.00  |
     /// | claude-opus           |    15.00  |     75.00  |
-    /// | gpt-4o                |     2.50  |     10.00  |
-    /// | gpt-4o-mini           |     0.15  |      0.60  |
-    /// | gpt-4.1               |     2.00  |      8.00  |
-    /// | gpt-4.1-mini          |     0.40  |      1.60  |
-    /// | gpt-4.1-nano          |     0.10  |      0.40  |
-    /// | o3-mini               |     1.10  |      4.40  |
-    /// | gemini-2.0-flash      |     0.10  |      0.40  |
-    /// | gemini-2.5-pro        |     1.25  |     10.00  |
-    /// | gemini-2.5-flash      |     0.15  |      0.60  |
-    /// | deepseek-chat/v3      |     0.27  |      1.10  |
+    /// | kimi-* (Kimi Code)    |     0.60  |      2.50  |
+    /// | deepseek-chat         |     0.27  |      1.10  |
     /// | deepseek-reasoner/r1  |     0.55  |      2.19  |
-    /// | llama/mixtral (groq)  |     0.05  |      0.10  |
-    /// | qwen                  |     0.20  |      0.60  |
-    /// | mistral-large         |     2.00  |      6.00  |
-    /// | mistral-small         |     0.10  |      0.30  |
-    /// | command-r-plus        |     2.50  |     10.00  |
+    /// | MiniMax-M2            |     0.50  |      2.00  |
+    /// | MiniMax-M1            |     0.30  |      1.10  |
+    /// | glm-4-flash           |     0.10  |      0.10  |
+    /// | glm-*                 |     1.50  |      5.00  |
+    /// | openrouter passthru   | varies (upstream rate)  |
+    /// | ollama/llama/qwen-*   |     0.00  |      0.00  |
     /// | Default (unknown)     |     1.00  |      3.00  |
     pub fn estimate_cost(model: &str, input_tokens: u64, output_tokens: u64) -> f64 {
         let model_lower = model.to_lowercase();
@@ -215,8 +208,12 @@ pub struct BudgetStatus {
 
 /// Returns (input_per_million, output_per_million) pricing for a model.
 ///
-/// Order matters: more specific patterns must come before generic ones
-/// (e.g. "gpt-4o-mini" before "gpt-4o", "gpt-4.1-mini" before "gpt-4.1").
+/// Covers only the seven v0.7.0 providers (anthropic, kimi, deepseek,
+/// minimax, zhipu/glm, openrouter gateway, ollama). Ollama is local
+/// and free. For an unknown model string we fall back to a conservative
+/// default rather than crash.
+///
+/// Order matters: more specific patterns must come before generic ones.
 fn estimate_cost_rates(model: &str) -> (f64, f64) {
     // ── Anthropic ──────────────────────────────────────────────
     if model.contains("haiku") {
@@ -229,49 +226,15 @@ fn estimate_cost_rates(model: &str) -> (f64, f64) {
         return (3.0, 15.0);
     }
 
-    // ── OpenAI ─────────────────────────────────────────────────
-    if model.contains("gpt-4o-mini") {
-        return (0.15, 0.60);
-    }
-    if model.contains("gpt-4o") {
-        return (2.50, 10.0);
-    }
-    if model.contains("gpt-4.1-nano") {
-        return (0.10, 0.40);
-    }
-    if model.contains("gpt-4.1-mini") {
-        return (0.40, 1.60);
-    }
-    if model.contains("gpt-4.1") {
-        return (2.00, 8.00);
-    }
-    if model.contains("o4-mini") {
-        return (1.10, 4.40);
-    }
-    if model.contains("o3-mini") {
-        return (1.10, 4.40);
-    }
-    if model.contains("o3") {
-        return (2.00, 8.00);
-    }
-    // Generic gpt-4 fallback
-    if model.contains("gpt-4") {
-        return (2.50, 10.0);
-    }
-
-    // ── Google Gemini ──────────────────────────────────────────
-    if model.contains("gemini-2.5-pro") {
-        return (1.25, 10.0);
-    }
-    if model.contains("gemini-2.5-flash") {
-        return (0.15, 0.60);
-    }
-    if model.contains("gemini-2.0-flash") || model.contains("gemini-flash") {
-        return (0.10, 0.40);
-    }
-    // Generic gemini fallback
-    if model.contains("gemini") {
-        return (0.15, 0.60);
+    // ── Kimi Code (Anthropic-compat) — one backend, many aliases ─
+    if model.contains("kimi-for-coding")
+        || model.contains("kimi-k2-thinking")
+        || model.contains("kimi-code")
+        || model.contains("k2-thinking")
+        || model == "kimi"
+        || model == "k2"
+    {
+        return (0.60, 2.50);
     }
 
     // ── DeepSeek ───────────────────────────────────────────────
@@ -282,54 +245,18 @@ fn estimate_cost_rates(model: &str) -> (f64, f64) {
         return (0.27, 1.10);
     }
 
-    // ── Cerebras (ultra-fast, cheap) ── must come before llama ─
-    if model.contains("cerebras") {
-        return (0.06, 0.06);
+    // ── MiniMax ────────────────────────────────────────────────
+    if model.contains("minimax-m2") || model.to_lowercase().contains("minimax-m2") {
+        return (0.50, 2.00);
     }
-
-    // ── SambaNova ── must come before llama ──────────────────────
-    if model.contains("sambanova") {
-        return (0.06, 0.06);
+    if model.contains("minimax-m1") || model.to_lowercase().contains("minimax-m1") {
+        return (0.30, 1.10);
     }
-
-    // ── Replicate ── must come before llama ─────────────────────
-    if model.contains("replicate") {
-        return (0.40, 0.40);
-    }
-
-    // ── Open-source (Groq, Together, etc.) ─────────────────────
-    if model.contains("llama") || model.contains("mixtral") {
-        return (0.05, 0.10);
-    }
-    // ── Qwen (Alibaba) ──────────────────────────────────────────
-    if model.contains("qwen-max") {
-        return (4.00, 12.00);
-    }
-    if model.contains("qwen-vl") {
-        return (1.50, 4.50);
-    }
-    if model.contains("qwen-plus") {
-        return (0.80, 2.00);
-    }
-    if model.contains("qwen-turbo") {
-        return (0.30, 0.60);
-    }
-    if model.contains("qwen") {
-        return (0.20, 0.60);
-    }
-
-    // ── MiniMax ──────────────────────────────────────────────────
-    if model.contains("minimax-m2") {
-        return (0.50, 2.00); // MiniMax-M2.7 pricing
-    }
-    if model.contains("minimax-m1") {
-        return (0.30, 1.10); // MiniMax-M1 pricing
-    }
-    if model.contains("minimax") {
+    if model.to_lowercase().contains("minimax") {
         return (1.00, 3.00);
     }
 
-    // ── Zhipu / GLM ─────────────────────────────────────────────
+    // ── Zhipu / GLM ────────────────────────────────────────────
     if model.contains("glm-4-flash") {
         return (0.10, 0.10);
     }
@@ -337,66 +264,25 @@ fn estimate_cost_rates(model: &str) -> (f64, f64) {
         return (1.50, 5.00);
     }
 
-    // ── Moonshot / Kimi ─────────────────────────────────────────
-    if model.contains("moonshot") || model.contains("kimi") {
-        return (0.80, 0.80);
-    }
-
-    // ── Baidu ERNIE ─────────────────────────────────────────────
-    if model.contains("ernie") {
-        return (2.00, 6.00);
-    }
-
-    // ── AWS Bedrock ─────────────────────────────────────────────
-    if model.contains("nova-pro") {
-        return (0.80, 3.20);
-    }
-    if model.contains("nova-lite") {
-        return (0.06, 0.24);
-    }
-
-    // ── Mistral ────────────────────────────────────────────────
-    if model.contains("mistral-large") {
-        return (2.00, 6.00);
-    }
-    if model.contains("mistral-small") || model.contains("mistral") {
-        return (0.10, 0.30);
-    }
-
-    // ── Cohere ─────────────────────────────────────────────────
-    if model.contains("command-r-plus") {
-        return (2.50, 10.0);
-    }
-    if model.contains("command-r") {
-        return (0.15, 0.60);
-    }
-
-    // ── Perplexity ──────────────────────────────────────────────
-    if model.contains("sonar-pro") {
+    // ── OpenRouter gateway passthroughs (prefix routing) ──────
+    // OpenRouter charges upstream + 5% overhead; we approximate with
+    // upstream's published rates and round up slightly.
+    if model.starts_with("openai/") || model.starts_with("anthropic/") {
         return (3.0, 15.0);
     }
-    if model.contains("sonar") {
-        return (1.0, 5.0);
+    if model.starts_with("google/") {
+        return (1.25, 5.0);
+    }
+    if model == "openrouter/auto" {
+        return (1.0, 3.0);
     }
 
-    // ── xAI / Grok ──────────────────────────────────────────────
-    if model.contains("grok-3-mini") || model.contains("grok-2-mini") || model.contains("grok-mini")
-    {
-        return (0.30, 0.50);
-    }
-    if model.contains("grok-3") {
-        return (3.0, 15.0);
-    }
-    if model.contains("grok") {
-        return (2.0, 10.0);
+    // ── Ollama (local, free) ───────────────────────────────────
+    if model.contains("llama") || model.contains("qwen2.5-coder") {
+        return (0.0, 0.0);
     }
 
-    // ── AI21 / Jamba ────────────────────────────────────────────
-    if model.contains("jamba") {
-        return (2.0, 8.0);
-    }
-
-    // ── Default (conservative) ─────────────────────────────────
+    // ── Default (conservative) for unknown custom OpenAI-compat ─
     (1.0, 3.0)
 }
 
@@ -491,6 +377,33 @@ mod tests {
     }
 
     #[test]
+    fn test_estimate_cost_kimi_unified() {
+        // Kimi Code has one backend model; all aliases must bill identically.
+        let expected = 3.10; // $0.60 + $2.50 per million in + out
+        for model in [
+            "kimi-for-coding",
+            "kimi-k2-thinking",
+            "kimi-code",
+            "k2-thinking",
+            "kimi",
+            "k2",
+        ] {
+            let cost = MeteringEngine::estimate_cost(model, 1_000_000, 1_000_000);
+            assert!(
+                (cost - expected).abs() < 0.01,
+                "model `{model}` expected {expected}, got {cost}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_estimate_cost_kimi_does_not_fall_through_to_legacy() {
+        // Regression guard: the Kimi match arm must precede the Moonshot fallback.
+        let cost = MeteringEngine::estimate_cost("kimi-for-coding", 1_000_000, 1_000_000);
+        assert!(cost > 3.0, "expected Kimi-tier pricing, got {cost}");
+    }
+
+    #[test]
     fn test_estimate_cost_sonnet() {
         let cost = MeteringEngine::estimate_cost("claude-sonnet-4-20250514", 1_000_000, 1_000_000);
         assert!((cost - 18.0).abs() < 0.01); // $3.00 + $15.00
@@ -500,60 +413,6 @@ mod tests {
     fn test_estimate_cost_opus() {
         let cost = MeteringEngine::estimate_cost("claude-opus-4-20250514", 1_000_000, 1_000_000);
         assert!((cost - 90.0).abs() < 0.01); // $15.00 + $75.00
-    }
-
-    #[test]
-    fn test_estimate_cost_gpt4o() {
-        let cost = MeteringEngine::estimate_cost("gpt-4o-2024-11-20", 1_000_000, 1_000_000);
-        assert!((cost - 12.50).abs() < 0.01); // $2.50 + $10.00
-    }
-
-    #[test]
-    fn test_estimate_cost_gpt4o_mini() {
-        let cost = MeteringEngine::estimate_cost("gpt-4o-mini", 1_000_000, 1_000_000);
-        assert!((cost - 0.75).abs() < 0.01); // $0.15 + $0.60
-    }
-
-    #[test]
-    fn test_estimate_cost_gpt41() {
-        let cost = MeteringEngine::estimate_cost("gpt-4.1", 1_000_000, 1_000_000);
-        assert!((cost - 10.0).abs() < 0.01); // $2.00 + $8.00
-    }
-
-    #[test]
-    fn test_estimate_cost_gpt41_mini() {
-        let cost = MeteringEngine::estimate_cost("gpt-4.1-mini", 1_000_000, 1_000_000);
-        assert!((cost - 2.0).abs() < 0.01); // $0.40 + $1.60
-    }
-
-    #[test]
-    fn test_estimate_cost_gpt41_nano() {
-        let cost = MeteringEngine::estimate_cost("gpt-4.1-nano", 1_000_000, 1_000_000);
-        assert!((cost - 0.50).abs() < 0.01); // $0.10 + $0.40
-    }
-
-    #[test]
-    fn test_estimate_cost_o3_mini() {
-        let cost = MeteringEngine::estimate_cost("o3-mini", 1_000_000, 1_000_000);
-        assert!((cost - 5.50).abs() < 0.01); // $1.10 + $4.40
-    }
-
-    #[test]
-    fn test_estimate_cost_gemini_20_flash() {
-        let cost = MeteringEngine::estimate_cost("gemini-2.0-flash", 1_000_000, 1_000_000);
-        assert!((cost - 0.50).abs() < 0.01); // $0.10 + $0.40
-    }
-
-    #[test]
-    fn test_estimate_cost_gemini_25_pro() {
-        let cost = MeteringEngine::estimate_cost("gemini-2.5-pro", 1_000_000, 1_000_000);
-        assert!((cost - 11.25).abs() < 0.01); // $1.25 + $10.00
-    }
-
-    #[test]
-    fn test_estimate_cost_gemini_25_flash() {
-        let cost = MeteringEngine::estimate_cost("gemini-2.5-flash", 1_000_000, 1_000_000);
-        assert!((cost - 0.75).abs() < 0.01); // $0.15 + $0.60
     }
 
     #[test]
@@ -569,75 +428,51 @@ mod tests {
     }
 
     #[test]
-    fn test_estimate_cost_llama() {
-        let cost = MeteringEngine::estimate_cost("llama-3.3-70b-versatile", 1_000_000, 1_000_000);
-        assert!((cost - 0.15).abs() < 0.01); // $0.05 + $0.10
+    fn test_estimate_cost_minimax_m2() {
+        let cost = MeteringEngine::estimate_cost("MiniMax-M2.7", 1_000_000, 1_000_000);
+        assert!((cost - 2.50).abs() < 0.01); // $0.50 + $2.00
     }
 
     #[test]
-    fn test_estimate_cost_mixtral() {
-        let cost = MeteringEngine::estimate_cost("mixtral-8x7b", 1_000_000, 1_000_000);
-        assert!((cost - 0.15).abs() < 0.01); // $0.05 + $0.10
+    fn test_estimate_cost_minimax_m1() {
+        let cost = MeteringEngine::estimate_cost("MiniMax-M1", 1_000_000, 1_000_000);
+        assert!((cost - 1.40).abs() < 0.01); // $0.30 + $1.10
     }
 
     #[test]
-    fn test_estimate_cost_qwen() {
-        let cost = MeteringEngine::estimate_cost("qwen-2.5-72b", 1_000_000, 1_000_000);
-        assert!((cost - 0.80).abs() < 0.01); // $0.20 + $0.60
+    fn test_estimate_cost_glm() {
+        let cost = MeteringEngine::estimate_cost("glm-4-plus", 1_000_000, 1_000_000);
+        assert!((cost - 6.50).abs() < 0.01); // $1.50 + $5.00
     }
 
     #[test]
-    fn test_estimate_cost_mistral_large() {
-        let cost = MeteringEngine::estimate_cost("mistral-large-latest", 1_000_000, 1_000_000);
-        assert!((cost - 8.0).abs() < 0.01); // $2.00 + $6.00
+    fn test_estimate_cost_glm_flash() {
+        let cost = MeteringEngine::estimate_cost("glm-4-flash", 1_000_000, 1_000_000);
+        assert!((cost - 0.20).abs() < 0.01); // $0.10 + $0.10
     }
 
     #[test]
-    fn test_estimate_cost_mistral_small() {
-        let cost = MeteringEngine::estimate_cost("mistral-small-latest", 1_000_000, 1_000_000);
-        assert!((cost - 0.40).abs() < 0.01); // $0.10 + $0.30
+    fn test_estimate_cost_openrouter_anthropic_passthru() {
+        let cost = MeteringEngine::estimate_cost("anthropic/claude-sonnet-4", 1_000_000, 1_000_000);
+        assert!((cost - 18.0).abs() < 0.01); // OpenRouter rounds to upstream sonnet rates
     }
 
     #[test]
-    fn test_estimate_cost_command_r_plus() {
-        let cost = MeteringEngine::estimate_cost("command-r-plus", 1_000_000, 1_000_000);
-        assert!((cost - 12.50).abs() < 0.01); // $2.50 + $10.00
+    fn test_estimate_cost_openrouter_auto() {
+        let cost = MeteringEngine::estimate_cost("openrouter/auto", 1_000_000, 1_000_000);
+        assert!((cost - 4.0).abs() < 0.01); // Conservative passthru estimate
     }
 
     #[test]
-    fn test_estimate_cost_unknown() {
+    fn test_estimate_cost_ollama_is_free() {
+        let cost = MeteringEngine::estimate_cost("llama3.2", 1_000_000, 1_000_000);
+        assert!(cost.abs() < 0.01);
+    }
+
+    #[test]
+    fn test_estimate_cost_unknown_falls_back() {
         let cost = MeteringEngine::estimate_cost("my-custom-model", 1_000_000, 1_000_000);
         assert!((cost - 4.0).abs() < 0.01); // $1.00 + $3.00
-    }
-
-    #[test]
-    fn test_estimate_cost_grok() {
-        let cost = MeteringEngine::estimate_cost("grok-2", 1_000_000, 1_000_000);
-        assert!((cost - 12.0).abs() < 0.01); // $2.00 + $10.00
-    }
-
-    #[test]
-    fn test_estimate_cost_grok_mini() {
-        let cost = MeteringEngine::estimate_cost("grok-2-mini", 1_000_000, 1_000_000);
-        assert!((cost - 0.80).abs() < 0.01); // $0.30 + $0.50
-    }
-
-    #[test]
-    fn test_estimate_cost_sonar_pro() {
-        let cost = MeteringEngine::estimate_cost("sonar-pro", 1_000_000, 1_000_000);
-        assert!((cost - 18.0).abs() < 0.01); // $3.00 + $15.00
-    }
-
-    #[test]
-    fn test_estimate_cost_jamba() {
-        let cost = MeteringEngine::estimate_cost("jamba-1.5-large", 1_000_000, 1_000_000);
-        assert!((cost - 10.0).abs() < 0.01); // $2.00 + $8.00
-    }
-
-    #[test]
-    fn test_estimate_cost_cerebras() {
-        let cost = MeteringEngine::estimate_cost("cerebras/llama3.3-70b", 1_000_000, 1_000_000);
-        assert!((cost - 0.12).abs() < 0.01); // $0.06 + $0.06
     }
 
     #[test]

@@ -20,12 +20,10 @@ pub struct ProbeResult {
 
 /// Check if a provider is a local provider (no key required, localhost URL).
 ///
-/// Returns true for `"ollama"`, `"vllm"`, `"lmstudio"`.
+/// Returns true for `"ollama"`. RustyHand v0.7.0 dropped vLLM and LM Studio as
+/// first-class providers; users can still point `base_url` at them manually.
 pub fn is_local_provider(provider: &str) -> bool {
-    matches!(
-        provider.to_lowercase().as_str(),
-        "ollama" | "vllm" | "lmstudio"
-    )
+    matches!(provider.to_lowercase().as_str(), "ollama")
 }
 
 /// Probe timeout for local provider health checks.
@@ -169,13 +167,12 @@ pub async fn probe_model(
 
     let mut req = client.post(&url).json(&body);
     if let Some(key) = api_key {
-        // Detect provider to set correct auth header
-        let lower = provider.to_lowercase();
-        if lower == "gemini" {
-            req = req.header("x-goog-api-key", key);
-        } else {
-            req = req.header("Authorization", format!("Bearer {key}"));
-        }
+        // All v0.7.0 providers use Authorization: Bearer (OpenAI-compat) or
+        // x-api-key (Anthropic/Kimi). This probe function is only called for
+        // OpenAI-compat providers; Anthropic/Kimi health checks go through the
+        // dedicated driver path in routes.rs.
+        let _ = provider; // Kept in signature for callers that pass it for logging.
+        req = req.header("Authorization", format!("Bearer {key}"));
     }
 
     let resp = req.send().await.map_err(|e| format!("{e}"))?;
@@ -205,16 +202,16 @@ mod tests {
         assert!(is_local_provider("ollama"));
         assert!(is_local_provider("Ollama"));
         assert!(is_local_provider("OLLAMA"));
-        assert!(is_local_provider("vllm"));
-        assert!(is_local_provider("lmstudio"));
     }
 
     #[test]
-    fn test_is_local_provider_false_for_openai() {
-        assert!(!is_local_provider("openai"));
+    fn test_is_local_provider_false_for_clouds() {
         assert!(!is_local_provider("anthropic"));
-        assert!(!is_local_provider("gemini"));
-        assert!(!is_local_provider("groq"));
+        assert!(!is_local_provider("kimi"));
+        assert!(!is_local_provider("deepseek"));
+        assert!(!is_local_provider("openrouter"));
+        assert!(!is_local_provider("minimax"));
+        assert!(!is_local_provider("zhipu"));
     }
 
     #[test]

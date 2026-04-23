@@ -1,22 +1,27 @@
 //! LLM driver implementations.
 //!
-//! Contains drivers for Anthropic Claude, Google Gemini, OpenAI-compatible APIs, and more.
-//! Supports: Anthropic, Gemini, OpenAI, Groq, OpenRouter, DeepSeek, Together,
-//! Mistral, Fireworks, Ollama, vLLM, and any OpenAI-compatible endpoint.
+//! RustyHand ships with a deliberately lean set of seven LLM providers, driven
+//! by two wire protocols:
+//!
+//! * **AnthropicDriver** — speaks the Anthropic Messages API. Used by
+//!   `anthropic` and by `kimi` (Kimi Code, `api.kimi.com/coding`, which is
+//!   Anthropic-compatible).
+//! * **OpenAIDriver** — speaks the OpenAI Chat Completions API. Used by
+//!   `deepseek`, `minimax`, `zhipu` (GLM), `ollama`, and `openrouter`, plus
+//!   any custom OpenAI-compatible endpoint supplied via `base_url`.
+//!
+//! Historically RustyHand supported 27 providers (OpenAI, Gemini, Groq, xAI,
+//! GitHub Copilot, …). They were removed in v0.7.0 to shrink scope: see
+//! `openrouter` for a universal gateway to any model still not covered here.
 
 pub mod anthropic;
-pub mod copilot;
 pub mod fallback;
-pub mod gemini;
 pub mod openai;
 
 use crate::llm_driver::{CompletionRequest, CompletionResponse, DriverConfig, LlmDriver, LlmError};
 use rusty_hand_types::model_catalog::{
-    AI21_BASE_URL, ANTHROPIC_BASE_URL, CEREBRAS_BASE_URL, COHERE_BASE_URL, DEEPSEEK_BASE_URL,
-    FIREWORKS_BASE_URL, GEMINI_BASE_URL, GROQ_BASE_URL, HUGGINGFACE_BASE_URL, LMSTUDIO_BASE_URL,
-    MINIMAX_BASE_URL, MISTRAL_BASE_URL, MOONSHOT_BASE_URL, OLLAMA_BASE_URL, OPENAI_BASE_URL,
-    OPENROUTER_BASE_URL, PERPLEXITY_BASE_URL, QIANFAN_BASE_URL, QWEN_BASE_URL, REPLICATE_BASE_URL,
-    SAMBANOVA_BASE_URL, TOGETHER_BASE_URL, VLLM_BASE_URL, XAI_BASE_URL, ZHIPU_BASE_URL,
+    ANTHROPIC_BASE_URL, DEEPSEEK_BASE_URL, KIMI_CODE_BASE_URL, MINIMAX_BASE_URL, OLLAMA_BASE_URL,
+    OPENROUTER_BASE_URL, ZHIPU_BASE_URL,
 };
 use std::sync::Arc;
 
@@ -31,114 +36,25 @@ struct ProviderDefaults {
 /// Get defaults for known providers.
 fn provider_defaults(provider: &str) -> Option<ProviderDefaults> {
     match provider {
-        "groq" => Some(ProviderDefaults {
-            base_url: GROQ_BASE_URL,
-            api_key_env: "GROQ_API_KEY",
+        // Premium cloud, Anthropic wire protocol.
+        "anthropic" => Some(ProviderDefaults {
+            base_url: ANTHROPIC_BASE_URL,
+            api_key_env: "ANTHROPIC_API_KEY",
             key_required: true,
         }),
-        "openrouter" => Some(ProviderDefaults {
-            base_url: OPENROUTER_BASE_URL,
-            api_key_env: "OPENROUTER_API_KEY",
+        // Kimi Code — Moonshot's Anthropic-compatible coding endpoint.
+        // Routed through `AnthropicDriver` in `create_driver`; surfaced here so
+        // introspection, catalog, and the `/api/providers/{name}/test` route
+        // can resolve the base URL and env var.
+        "kimi" => Some(ProviderDefaults {
+            base_url: KIMI_CODE_BASE_URL,
+            api_key_env: "KIMI_API_KEY",
             key_required: true,
         }),
+        // OpenAI-compatible cloud providers.
         "deepseek" => Some(ProviderDefaults {
             base_url: DEEPSEEK_BASE_URL,
             api_key_env: "DEEPSEEK_API_KEY",
-            key_required: true,
-        }),
-        "together" => Some(ProviderDefaults {
-            base_url: TOGETHER_BASE_URL,
-            api_key_env: "TOGETHER_API_KEY",
-            key_required: true,
-        }),
-        "mistral" => Some(ProviderDefaults {
-            base_url: MISTRAL_BASE_URL,
-            api_key_env: "MISTRAL_API_KEY",
-            key_required: true,
-        }),
-        "fireworks" => Some(ProviderDefaults {
-            base_url: FIREWORKS_BASE_URL,
-            api_key_env: "FIREWORKS_API_KEY",
-            key_required: true,
-        }),
-        "openai" => Some(ProviderDefaults {
-            base_url: OPENAI_BASE_URL,
-            api_key_env: "OPENAI_API_KEY",
-            key_required: true,
-        }),
-        "gemini" | "google" => Some(ProviderDefaults {
-            base_url: GEMINI_BASE_URL,
-            api_key_env: "GEMINI_API_KEY",
-            key_required: true,
-        }),
-        "ollama" => Some(ProviderDefaults {
-            base_url: OLLAMA_BASE_URL,
-            api_key_env: "OLLAMA_API_KEY",
-            key_required: false,
-        }),
-        "vllm" => Some(ProviderDefaults {
-            base_url: VLLM_BASE_URL,
-            api_key_env: "VLLM_API_KEY",
-            key_required: false,
-        }),
-        "lmstudio" => Some(ProviderDefaults {
-            base_url: LMSTUDIO_BASE_URL,
-            api_key_env: "LMSTUDIO_API_KEY",
-            key_required: false,
-        }),
-        "perplexity" => Some(ProviderDefaults {
-            base_url: PERPLEXITY_BASE_URL,
-            api_key_env: "PERPLEXITY_API_KEY",
-            key_required: true,
-        }),
-        "cohere" => Some(ProviderDefaults {
-            base_url: COHERE_BASE_URL,
-            api_key_env: "COHERE_API_KEY",
-            key_required: true,
-        }),
-        "ai21" => Some(ProviderDefaults {
-            base_url: AI21_BASE_URL,
-            api_key_env: "AI21_API_KEY",
-            key_required: true,
-        }),
-        "cerebras" => Some(ProviderDefaults {
-            base_url: CEREBRAS_BASE_URL,
-            api_key_env: "CEREBRAS_API_KEY",
-            key_required: true,
-        }),
-        "sambanova" => Some(ProviderDefaults {
-            base_url: SAMBANOVA_BASE_URL,
-            api_key_env: "SAMBANOVA_API_KEY",
-            key_required: true,
-        }),
-        "huggingface" => Some(ProviderDefaults {
-            base_url: HUGGINGFACE_BASE_URL,
-            api_key_env: "HF_API_KEY",
-            key_required: true,
-        }),
-        "xai" => Some(ProviderDefaults {
-            base_url: XAI_BASE_URL,
-            api_key_env: "XAI_API_KEY",
-            key_required: true,
-        }),
-        "replicate" => Some(ProviderDefaults {
-            base_url: REPLICATE_BASE_URL,
-            api_key_env: "REPLICATE_API_TOKEN",
-            key_required: true,
-        }),
-        "github-copilot" | "copilot" => Some(ProviderDefaults {
-            base_url: copilot::GITHUB_COPILOT_BASE_URL,
-            api_key_env: "GITHUB_TOKEN",
-            key_required: true,
-        }),
-        "moonshot" | "kimi" => Some(ProviderDefaults {
-            base_url: MOONSHOT_BASE_URL,
-            api_key_env: "MOONSHOT_API_KEY",
-            key_required: true,
-        }),
-        "qwen" | "dashscope" => Some(ProviderDefaults {
-            base_url: QWEN_BASE_URL,
-            api_key_env: "DASHSCOPE_API_KEY",
             key_required: true,
         }),
         "minimax" => Some(ProviderDefaults {
@@ -151,10 +67,16 @@ fn provider_defaults(provider: &str) -> Option<ProviderDefaults> {
             api_key_env: "ZHIPU_API_KEY",
             key_required: true,
         }),
-        "qianfan" | "baidu" => Some(ProviderDefaults {
-            base_url: QIANFAN_BASE_URL,
-            api_key_env: "QIANFAN_API_KEY",
+        "openrouter" => Some(ProviderDefaults {
+            base_url: OPENROUTER_BASE_URL,
+            api_key_env: "OPENROUTER_API_KEY",
             key_required: true,
+        }),
+        // Local.
+        "ollama" => Some(ProviderDefaults {
+            base_url: OLLAMA_BASE_URL,
+            api_key_env: "OLLAMA_API_KEY",
+            key_required: false,
         }),
         _ => None,
     }
@@ -164,29 +86,17 @@ fn provider_defaults(provider: &str) -> Option<ProviderDefaults> {
 ///
 /// Supported providers:
 /// - `anthropic` — Anthropic Claude (Messages API)
-/// - `openai` — OpenAI GPT models
-/// - `groq` — Groq (ultra-fast inference)
-/// - `openrouter` — OpenRouter (multi-model gateway)
-/// - `deepseek` — DeepSeek
-/// - `together` — Together AI
-/// - `mistral` — Mistral AI
-/// - `fireworks` — Fireworks AI
+/// - `kimi` — Moonshot Kimi Code (Anthropic-compatible endpoint)
+/// - `deepseek` — DeepSeek V3 / R1 reasoning
+/// - `minimax` — MiniMax M1 / M2 long-context
+/// - `zhipu` (alias `glm`) — Zhipu AI GLM-4.6
+/// - `openrouter` — OpenRouter (universal gateway)
 /// - `ollama` — Ollama (local)
-/// - `vllm` — vLLM (local)
-/// - `lmstudio` — LM Studio (local)
-/// - `perplexity` — Perplexity AI (search-augmented)
-/// - `cohere` — Cohere (Command R)
-/// - `ai21` — AI21 Labs (Jamba)
-/// - `cerebras` — Cerebras (ultra-fast inference)
-/// - `sambanova` — SambaNova
-/// - `huggingface` — Hugging Face Inference API
-/// - `xai` — xAI (Grok)
-/// - `replicate` — Replicate
 /// - Any custom provider with `base_url` set uses OpenAI-compatible format
 pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmError> {
     let provider = config.provider.as_str();
 
-    // Anthropic uses a different API format — special case
+    // Anthropic uses its own API format — special case.
     if provider == "anthropic" {
         let api_key = config
             .api_key
@@ -202,49 +112,28 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
         return Ok(Arc::new(anthropic::AnthropicDriver::new(api_key, base_url)));
     }
 
-    // Gemini uses a different API format — special case
-    if provider == "gemini" || provider == "google" {
+    // Kimi Code — Moonshot's Anthropic-compatible endpoint.
+    // Same wire protocol as Anthropic (Messages API, x-api-key, anthropic-version),
+    // so we reuse AnthropicDriver with a different base URL. Env var is KIMI_API_KEY
+    // (distinct from ANTHROPIC_API_KEY).
+    if provider == "kimi" {
         let api_key = config
             .api_key
             .clone()
-            .or_else(|| std::env::var("GEMINI_API_KEY").ok())
-            .or_else(|| std::env::var("GOOGLE_API_KEY").ok())
+            .or_else(|| std::env::var("KIMI_API_KEY").ok())
             .ok_or_else(|| {
                 LlmError::MissingApiKey(
-                    "Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable".to_string(),
+                    "Set KIMI_API_KEY environment variable (get one at https://platform.moonshot.ai/console/code)".to_string(),
                 )
             })?;
         let base_url = config
             .base_url
             .clone()
-            .unwrap_or_else(|| GEMINI_BASE_URL.to_string());
-        return Ok(Arc::new(gemini::GeminiDriver::new(api_key, base_url)));
+            .unwrap_or_else(|| KIMI_CODE_BASE_URL.to_string());
+        return Ok(Arc::new(anthropic::AnthropicDriver::new(api_key, base_url)));
     }
 
-    // GitHub Copilot — wraps OpenAI-compatible driver with automatic token exchange.
-    // The CopilotDriver exchanges the GitHub PAT for a Copilot API token on demand,
-    // caches it, and refreshes when expired.
-    if provider == "github-copilot" || provider == "copilot" {
-        let github_token = config
-            .api_key
-            .clone()
-            .or_else(|| std::env::var("GITHUB_TOKEN").ok())
-            .ok_or_else(|| {
-                LlmError::MissingApiKey(
-                    "Set GITHUB_TOKEN environment variable for GitHub Copilot".to_string(),
-                )
-            })?;
-        let base_url = config
-            .base_url
-            .clone()
-            .unwrap_or_else(|| copilot::GITHUB_COPILOT_BASE_URL.to_string());
-        return Ok(Arc::new(copilot::CopilotDriver::new(
-            github_token,
-            base_url,
-        )));
-    }
-
-    // All other providers use OpenAI-compatible format
+    // All other providers use OpenAI-compatible format.
     if let Some(defaults) = provider_defaults(provider) {
         let api_key = config
             .api_key
@@ -267,7 +156,7 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
         return Ok(Arc::new(openai::OpenAIDriver::new(api_key, base_url)));
     }
 
-    // Unknown provider — if base_url is set, treat as custom OpenAI-compatible
+    // Unknown provider — if base_url is set, treat as custom OpenAI-compatible.
     if let Some(ref base_url) = config.base_url {
         let api_key = config.api_key.clone().unwrap_or_default();
         return Ok(Arc::new(openai::OpenAIDriver::new(
@@ -279,10 +168,9 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
     Err(LlmError::Api {
         status: 0,
         message: format!(
-            "Unknown provider '{}'. Supported: anthropic, gemini, openai, groq, openrouter, \
-             deepseek, together, mistral, fireworks, ollama, vllm, lmstudio, perplexity, \
-             cohere, ai21, cerebras, sambanova, huggingface, xai, replicate, github-copilot. \
-             Or set base_url for a custom OpenAI-compatible endpoint.",
+            "Unknown provider '{}'. Supported: anthropic, kimi, deepseek, minimax, zhipu \
+             (alias glm), openrouter, ollama. Or set base_url for a custom OpenAI-compatible \
+             endpoint.",
             provider
         ),
     })
@@ -300,9 +188,9 @@ impl LlmDriver for NullDriver {
     async fn complete(&self, _request: CompletionRequest) -> Result<CompletionResponse, LlmError> {
         Err(LlmError::Api {
             status: 0,
-            message: "No LLM provider configured. Set an API key environment variable \
-                      (e.g. ANTHROPIC_API_KEY, OPENAI_API_KEY, MINIMAX_API_KEY) or run \
-                      `rustyhand init` to choose a provider."
+            message: "No LLM provider configured. Set ANTHROPIC_API_KEY, KIMI_API_KEY, \
+                      DEEPSEEK_API_KEY, MINIMAX_API_KEY, ZHIPU_API_KEY, or OPENROUTER_API_KEY, \
+                      or run `rustyhand init` to choose a provider."
                 .to_string(),
         })
     }
@@ -312,58 +200,21 @@ impl LlmDriver for NullDriver {
 ///
 /// Returns `(provider, api_key_env, recommended_model)` for the first provider
 /// whose API key is found in the environment. Providers are checked in priority
-/// order (most popular first). Returns `None` if no keys are found.
+/// order (Anthropic + Kimi are the two first-class coding providers, then the
+/// rest). Returns `None` if no keys are found.
 pub fn detect_available_provider() -> Option<(&'static str, &'static str, &'static str)> {
-    // Priority order: premium cloud → popular alternatives → Chinese providers → local
     const PROBE_ORDER: &[(&str, &str, &str)] = &[
         ("anthropic", "ANTHROPIC_API_KEY", "claude-sonnet-4-20250514"),
-        ("openai", "OPENAI_API_KEY", "gpt-4o"),
-        ("gemini", "GEMINI_API_KEY", "gemini-2.5-flash"),
-        ("minimax", "MINIMAX_API_KEY", "MiniMax-M1"),
+        ("kimi", "KIMI_API_KEY", "kimi-for-coding"),
         ("deepseek", "DEEPSEEK_API_KEY", "deepseek-chat"),
-        ("groq", "GROQ_API_KEY", "llama-3.3-70b-versatile"),
-        ("mistral", "MISTRAL_API_KEY", "mistral-large-latest"),
-        (
-            "together",
-            "TOGETHER_API_KEY",
-            "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-        ),
-        ("xai", "XAI_API_KEY", "grok-3-mini"),
+        ("zhipu", "ZHIPU_API_KEY", "glm-4-plus"),
+        ("minimax", "MINIMAX_API_KEY", "MiniMax-M2.7"),
         (
             "openrouter",
             "OPENROUTER_API_KEY",
             "anthropic/claude-sonnet-4",
         ),
-        (
-            "fireworks",
-            "FIREWORKS_API_KEY",
-            "accounts/fireworks/models/llama-v3p3-70b-instruct",
-        ),
-        ("perplexity", "PERPLEXITY_API_KEY", "sonar-pro"),
-        ("cohere", "COHERE_API_KEY", "command-r-plus"),
-        ("cerebras", "CEREBRAS_API_KEY", "llama-3.3-70b"),
-        (
-            "sambanova",
-            "SAMBANOVA_API_KEY",
-            "Meta-Llama-3.3-70B-Instruct",
-        ),
-        ("moonshot", "MOONSHOT_API_KEY", "moonshot-v1-auto"),
-        ("qwen", "DASHSCOPE_API_KEY", "qwen-plus"),
-        ("zhipu", "ZHIPU_API_KEY", "glm-4-plus"),
-        ("qianfan", "QIANFAN_API_KEY", "ernie-4.0-turbo-8k"),
-        (
-            "huggingface",
-            "HF_API_KEY",
-            "meta-llama/Llama-3.3-70B-Instruct",
-        ),
-        (
-            "replicate",
-            "REPLICATE_API_TOKEN",
-            "meta/meta-llama-3-70b-instruct",
-        ),
-        ("github-copilot", "GITHUB_TOKEN", "gpt-4o"),
     ];
-    // Also check GOOGLE_API_KEY as an alias for Gemini
     for &(provider, env_var, model) in PROBE_ORDER {
         if std::env::var(env_var)
             .ok()
@@ -371,14 +222,6 @@ pub fn detect_available_provider() -> Option<(&'static str, &'static str, &'stat
             .is_some()
         {
             return Some((provider, env_var, model));
-        }
-        if provider == "gemini"
-            && std::env::var("GOOGLE_API_KEY")
-                .ok()
-                .filter(|v| !v.is_empty())
-                .is_some()
-        {
-            return Some(("gemini", "GOOGLE_API_KEY", model));
         }
     }
     None
@@ -388,31 +231,12 @@ pub fn detect_available_provider() -> Option<(&'static str, &'static str, &'stat
 pub fn known_providers() -> &'static [&'static str] {
     &[
         "anthropic",
-        "gemini",
-        "openai",
-        "groq",
-        "openrouter",
+        "kimi",
         "deepseek",
-        "together",
-        "mistral",
-        "fireworks",
-        "ollama",
-        "vllm",
-        "lmstudio",
-        "perplexity",
-        "cohere",
-        "ai21",
-        "cerebras",
-        "sambanova",
-        "huggingface",
-        "xai",
-        "replicate",
-        "github-copilot",
-        "moonshot",
-        "qwen",
         "minimax",
         "zhipu",
-        "qianfan",
+        "openrouter",
+        "ollama",
     ]
 }
 
@@ -421,17 +245,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_provider_defaults_groq() {
-        let d = provider_defaults("groq").unwrap();
-        assert_eq!(d.base_url, "https://api.groq.com/openai/v1");
-        assert_eq!(d.api_key_env, "GROQ_API_KEY");
-        assert!(d.key_required);
-    }
-
-    #[test]
     fn test_provider_defaults_openrouter() {
         let d = provider_defaults("openrouter").unwrap();
         assert_eq!(d.base_url, "https://openrouter.ai/api/v1");
+        assert_eq!(d.api_key_env, "OPENROUTER_API_KEY");
         assert!(d.key_required);
     }
 
@@ -442,7 +259,44 @@ mod tests {
     }
 
     #[test]
+    fn test_provider_defaults_deepseek() {
+        let d = provider_defaults("deepseek").unwrap();
+        assert_eq!(d.base_url, "https://api.deepseek.com/v1");
+        assert_eq!(d.api_key_env, "DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_provider_defaults_minimax() {
+        let d = provider_defaults("minimax").unwrap();
+        assert_eq!(d.base_url, "https://api.minimax.io/v1");
+    }
+
+    #[test]
+    fn test_provider_defaults_zhipu_and_glm_alias() {
+        let zhipu = provider_defaults("zhipu").unwrap();
+        let glm = provider_defaults("glm").unwrap();
+        assert_eq!(zhipu.base_url, glm.base_url);
+        assert_eq!(zhipu.api_key_env, "ZHIPU_API_KEY");
+    }
+
+    #[test]
+    fn test_provider_defaults_kimi() {
+        let d = provider_defaults("kimi").unwrap();
+        assert_eq!(d.base_url, "https://api.kimi.com/coding");
+        assert_eq!(d.api_key_env, "KIMI_API_KEY");
+        assert!(d.key_required);
+    }
+
+    #[test]
     fn test_unknown_provider_returns_none() {
+        // Deleted providers must no longer resolve.
+        assert!(provider_defaults("openai").is_none());
+        assert!(provider_defaults("gemini").is_none());
+        assert!(provider_defaults("groq").is_none());
+        assert!(provider_defaults("xai").is_none());
+        assert!(provider_defaults("moonshot").is_none());
+        assert!(provider_defaults("qwen").is_none());
+        assert!(provider_defaults("github-copilot").is_none());
         assert!(provider_defaults("nonexistent").is_none());
     }
 
@@ -469,80 +323,74 @@ mod tests {
     }
 
     #[test]
-    fn test_provider_defaults_gemini() {
-        let d = provider_defaults("gemini").unwrap();
-        assert_eq!(d.base_url, "https://generativelanguage.googleapis.com");
-        assert_eq!(d.api_key_env, "GEMINI_API_KEY");
-        assert!(d.key_required);
-    }
-
-    #[test]
-    fn test_provider_defaults_google_alias() {
-        let d = provider_defaults("google").unwrap();
-        assert_eq!(d.base_url, "https://generativelanguage.googleapis.com");
-        assert!(d.key_required);
-    }
-
-    #[test]
     fn test_known_providers_list() {
         let providers = known_providers();
-        assert!(providers.contains(&"groq"));
-        assert!(providers.contains(&"openrouter"));
-        assert!(providers.contains(&"anthropic"));
-        assert!(providers.contains(&"gemini"));
-        // New providers
-        assert!(providers.contains(&"perplexity"));
-        assert!(providers.contains(&"cohere"));
-        assert!(providers.contains(&"ai21"));
-        assert!(providers.contains(&"cerebras"));
-        assert!(providers.contains(&"sambanova"));
-        assert!(providers.contains(&"huggingface"));
-        assert!(providers.contains(&"xai"));
-        assert!(providers.contains(&"replicate"));
-        assert!(providers.contains(&"github-copilot"));
-        assert!(providers.contains(&"moonshot"));
-        assert!(providers.contains(&"qwen"));
-        assert!(providers.contains(&"minimax"));
-        assert!(providers.contains(&"zhipu"));
-        assert!(providers.contains(&"qianfan"));
-        assert_eq!(providers.len(), 26);
+        assert_eq!(providers.len(), 7);
+        for expected in [
+            "anthropic",
+            "kimi",
+            "deepseek",
+            "minimax",
+            "zhipu",
+            "openrouter",
+            "ollama",
+        ] {
+            assert!(
+                providers.contains(&expected),
+                "missing provider: {expected}"
+            );
+        }
+        // Deleted providers must not be present.
+        for removed in [
+            "openai",
+            "gemini",
+            "groq",
+            "xai",
+            "mistral",
+            "together",
+            "fireworks",
+            "perplexity",
+            "cohere",
+            "ai21",
+            "cerebras",
+            "sambanova",
+            "huggingface",
+            "replicate",
+            "github-copilot",
+            "moonshot",
+            "qwen",
+            "qianfan",
+            "vllm",
+            "lmstudio",
+        ] {
+            assert!(
+                !providers.contains(&removed),
+                "deleted provider still present: {removed}"
+            );
+        }
     }
 
     #[test]
-    fn test_provider_defaults_perplexity() {
-        let d = provider_defaults("perplexity").unwrap();
-        assert_eq!(d.base_url, "https://api.perplexity.ai");
-        assert_eq!(d.api_key_env, "PERPLEXITY_API_KEY");
-        assert!(d.key_required);
+    fn test_create_kimi_driver_uses_anthropic_format() {
+        // The kimi provider must route through AnthropicDriver (Messages API),
+        // NOT the OpenAI-compat driver, since api.kimi.com/coding speaks Anthropic's wire format.
+        let config = DriverConfig {
+            provider: "kimi".to_string(),
+            api_key: Some("test-key".to_string()),
+            base_url: None,
+        };
+        let driver = create_driver(&config);
+        assert!(driver.is_ok(), "kimi provider should create a driver");
     }
 
     #[test]
-    fn test_provider_defaults_xai() {
-        let d = provider_defaults("xai").unwrap();
-        assert_eq!(d.base_url, "https://api.x.ai/v1");
-        assert_eq!(d.api_key_env, "XAI_API_KEY");
-        assert!(d.key_required);
-    }
-
-    #[test]
-    fn test_provider_defaults_cohere() {
-        let d = provider_defaults("cohere").unwrap();
-        assert_eq!(d.base_url, "https://api.cohere.com/v2");
-        assert!(d.key_required);
-    }
-
-    #[test]
-    fn test_provider_defaults_cerebras() {
-        let d = provider_defaults("cerebras").unwrap();
-        assert_eq!(d.base_url, "https://api.cerebras.ai/v1");
-        assert!(d.key_required);
-    }
-
-    #[test]
-    fn test_provider_defaults_huggingface() {
-        let d = provider_defaults("huggingface").unwrap();
-        assert_eq!(d.base_url, "https://api-inference.huggingface.co/v1");
-        assert_eq!(d.api_key_env, "HF_API_KEY");
-        assert!(d.key_required);
+    fn test_create_kimi_driver_respects_custom_base_url() {
+        let config = DriverConfig {
+            provider: "kimi".to_string(),
+            api_key: Some("test-key".to_string()),
+            base_url: Some("https://my-proxy.example.com/kimi".to_string()),
+        };
+        let driver = create_driver(&config);
+        assert!(driver.is_ok());
     }
 }

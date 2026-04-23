@@ -3900,14 +3900,14 @@ mod tests {
             model = "llama3.2:latest"
 
             [[fallback_providers]]
-            provider = "groq"
-            model = "llama-3.3-70b-versatile"
-            api_key_env = "GROQ_API_KEY"
+            provider = "deepseek"
+            model = "deepseek-chat"
+            api_key_env = "DEEPSEEK_API_KEY"
         "#;
         let config: KernelConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.fallback_providers.len(), 2);
         assert_eq!(config.fallback_providers[0].provider, "ollama");
-        assert_eq!(config.fallback_providers[1].provider, "groq");
+        assert_eq!(config.fallback_providers[1].provider, "deepseek");
     }
 
     #[test]

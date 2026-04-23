@@ -37,7 +37,9 @@ pub struct ToolResult {
 
 /// Normalize a JSON Schema for cross-provider compatibility.
 ///
-/// Some providers (Gemini, Groq) reject `anyOf` in tool schemas.
+/// Many OpenAI-compatible providers reject `anyOf` in tool schemas.
+/// Anthropic accepts it natively; everything else (DeepSeek, Zhipu, MiniMax,
+/// OpenRouter, Ollama, custom) runs through the flattening pass.
 /// This function:
 /// - Converts `anyOf` arrays of simple types to flat `enum` arrays
 /// - Strips `$schema` keys (not accepted by most providers)
@@ -183,7 +185,7 @@ mod tests {
                 "name": { "type": "string" }
             }
         });
-        let result = normalize_schema_for_provider(&schema, "gemini");
+        let result = normalize_schema_for_provider(&schema, "deepseek");
         assert!(result.get("$schema").is_none());
         assert_eq!(result["type"], "object");
     }
@@ -201,7 +203,7 @@ mod tests {
                 }
             }
         });
-        let result = normalize_schema_for_provider(&schema, "gemini");
+        let result = normalize_schema_for_provider(&schema, "deepseek");
         let value_prop = &result["properties"]["value"];
         assert_eq!(value_prop["type"], "string");
         assert_eq!(value_prop["nullable"], true);
@@ -221,7 +223,7 @@ mod tests {
                 }
             }
         });
-        let result = normalize_schema_for_provider(&schema, "groq");
+        let result = normalize_schema_for_provider(&schema, "openrouter");
         let value_prop = &result["properties"]["value"];
         assert!(value_prop["type"].is_array());
     }
@@ -253,7 +255,7 @@ mod tests {
                 }
             }
         });
-        let result = normalize_schema_for_provider(&schema, "gemini");
+        let result = normalize_schema_for_provider(&schema, "deepseek");
         assert!(result["properties"]["outer"]["properties"]["inner"]
             .get("$schema")
             .is_none());

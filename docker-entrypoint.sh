@@ -145,9 +145,8 @@ fi
 
 # ── 3. Check that at least one LLM API key is set ──────────────────
 HAS_KEY=0
-for VAR in MINIMAX_API_KEY GROQ_API_KEY ANTHROPIC_API_KEY OPENAI_API_KEY \
-           GEMINI_API_KEY DEEPSEEK_API_KEY OPENROUTER_API_KEY TOGETHER_API_KEY \
-           MISTRAL_API_KEY FIREWORKS_API_KEY; do
+for VAR in ANTHROPIC_API_KEY KIMI_API_KEY DEEPSEEK_API_KEY ZHIPU_API_KEY \
+           MINIMAX_API_KEY OPENROUTER_API_KEY; do
     eval "val=\$$VAR"
     if [ -n "$val" ]; then
         HAS_KEY=1
@@ -157,9 +156,9 @@ done
 
 if [ "$HAS_KEY" = "0" ]; then
     echo "WARNING: No LLM API key found. Set at least one of:"
-    echo "  MINIMAX_API_KEY, GROQ_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY,"
-    echo "  GEMINI_API_KEY, DEEPSEEK_API_KEY, OPENROUTER_API_KEY"
-    echo "  (agents will fail to respond without a configured provider)"
+    echo "  ANTHROPIC_API_KEY, KIMI_API_KEY, DEEPSEEK_API_KEY, ZHIPU_API_KEY,"
+    echo "  MINIMAX_API_KEY, OPENROUTER_API_KEY"
+    echo "  (Ollama needs no key — just run it locally on localhost:11434)"
 fi
 
 # ── 4. Exec into rustyhand ──────────────────────────────────────────

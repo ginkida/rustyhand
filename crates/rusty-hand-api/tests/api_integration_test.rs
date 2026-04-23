@@ -3,7 +3,7 @@
 //! These tests boot a real kernel, start a real axum HTTP server on a random
 //! port, and hit actual endpoints with reqwest.  No mocking.
 //!
-//! Tests that require an LLM API call are gated behind GROQ_API_KEY.
+//! Tests that require an LLM API call are gated behind KIMI_API_KEY.
 //!
 //! Run: cargo test -p rusty-hand-api --test api_integration_test -- --nocapture
 
@@ -47,9 +47,9 @@ async fn start_test_server() -> Option<TestServer> {
     start_test_server_with_provider("ollama", "test-model", "OLLAMA_API_KEY").await
 }
 
-/// Start a test server with Groq as the LLM provider (requires GROQ_API_KEY).
+/// Start a test server with Kimi as the LLM provider (requires KIMI_API_KEY).
 async fn start_test_server_with_llm() -> Option<TestServer> {
-    start_test_server_with_provider("groq", "llama-3.3-70b-versatile", "GROQ_API_KEY").await
+    start_test_server_with_provider("kimi", "kimi-for-coding", "KIMI_API_KEY").await
 }
 
 async fn start_test_server_with_provider(
@@ -210,8 +210,8 @@ author = "test"
 module = "builtin:chat"
 
 [model]
-provider = "groq"
-model = "llama-3.3-70b-versatile"
+provider = "kimi"
+model = "kimi-for-coding"
 system_prompt = "You are a test agent. Reply concisely."
 
 [capabilities]
@@ -544,8 +544,8 @@ async fn test_cron_job_manual_run_system_event() {
 
 #[tokio::test]
 async fn test_send_message_with_llm() {
-    if std::env::var("GROQ_API_KEY").is_err() {
-        eprintln!("GROQ_API_KEY not set, skipping LLM integration test");
+    if std::env::var("KIMI_API_KEY").is_err() {
+        eprintln!("KIMI_API_KEY not set, skipping LLM integration test");
         return;
     }
 

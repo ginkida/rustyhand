@@ -505,15 +505,15 @@ mod tests {
     #[test]
     fn test_new_provider_allows() {
         let cb = ProviderCooldown::new(fast_config());
-        assert_eq!(cb.check("openai"), CooldownVerdict::Allow);
-        assert_eq!(cb.get_state("openai"), CircuitState::Closed);
+        assert_eq!(cb.check("deepseek"), CooldownVerdict::Allow);
+        assert_eq!(cb.get_state("deepseek"), CircuitState::Closed);
     }
 
     #[test]
     fn test_single_failure_opens_circuit() {
         let cb = ProviderCooldown::new(fast_config());
-        cb.record_failure("openai", false);
-        assert_eq!(cb.get_state("openai"), CircuitState::Open);
+        cb.record_failure("deepseek", false);
+        assert_eq!(cb.get_state("deepseek"), CircuitState::Open);
     }
 
     #[test]
@@ -560,12 +560,12 @@ mod tests {
     #[test]
     fn test_success_resets_circuit() {
         let cb = ProviderCooldown::new(fast_config());
-        cb.record_failure("openai", false);
-        assert_eq!(cb.get_state("openai"), CircuitState::Open);
+        cb.record_failure("deepseek", false);
+        assert_eq!(cb.get_state("deepseek"), CircuitState::Open);
 
-        cb.record_success("openai");
-        assert_eq!(cb.get_state("openai"), CircuitState::Closed);
-        assert_eq!(cb.check("openai"), CooldownVerdict::Allow);
+        cb.record_success("deepseek");
+        assert_eq!(cb.get_state("deepseek"), CircuitState::Closed);
+        assert_eq!(cb.check("deepseek"), CooldownVerdict::Allow);
     }
 
     #[test]
@@ -574,13 +574,13 @@ mod tests {
         config.base_cooldown_secs = 0; // instant cooldown for testing
         let cb = ProviderCooldown::new(config);
 
-        cb.record_failure("openai", false);
+        cb.record_failure("deepseek", false);
         // Cooldown is 0s, so it should be HalfOpen immediately.
         std::thread::sleep(Duration::from_millis(5));
 
-        let verdict = cb.check("openai");
+        let verdict = cb.check("deepseek");
         assert_eq!(verdict, CooldownVerdict::AllowProbe);
-        assert_eq!(cb.get_state("openai"), CircuitState::HalfOpen);
+        assert_eq!(cb.get_state("deepseek"), CircuitState::HalfOpen);
     }
 
     #[test]
@@ -590,17 +590,17 @@ mod tests {
         config.probe_enabled = true;
         let cb = ProviderCooldown::new(config);
 
-        cb.record_failure("openai", false);
+        cb.record_failure("deepseek", false);
 
         // First check: should allow probe (no last_probe yet).
-        let v1 = cb.check("openai");
+        let v1 = cb.check("deepseek");
         assert_eq!(v1, CooldownVerdict::AllowProbe);
 
         // Record a failed probe to set last_probe.
-        cb.record_probe_result("openai", false);
+        cb.record_probe_result("deepseek", false);
 
         // Second check: probe interval hasn't elapsed, should reject.
-        let v2 = cb.check("openai");
+        let v2 = cb.check("deepseek");
         match v2 {
             CooldownVerdict::Reject { .. } => {} // expected
             other => panic!("expected Reject after probe throttle, got {other:?}"),
@@ -610,28 +610,28 @@ mod tests {
     #[test]
     fn test_probe_success_closes_circuit() {
         let cb = ProviderCooldown::new(fast_config());
-        cb.record_failure("openai", false);
-        assert_eq!(cb.get_state("openai"), CircuitState::Open);
+        cb.record_failure("deepseek", false);
+        assert_eq!(cb.get_state("deepseek"), CircuitState::Open);
 
-        cb.record_probe_result("openai", true);
-        assert_eq!(cb.get_state("openai"), CircuitState::Closed);
+        cb.record_probe_result("deepseek", true);
+        assert_eq!(cb.get_state("deepseek"), CircuitState::Closed);
     }
 
     #[test]
     fn test_probe_failure_extends_cooldown() {
         let cb = ProviderCooldown::new(fast_config());
-        cb.record_failure("openai", false);
+        cb.record_failure("deepseek", false);
 
-        let state_before = cb.states.get("openai").unwrap().error_count;
-        cb.record_probe_result("openai", false);
-        let state_after = cb.states.get("openai").unwrap().error_count;
+        let state_before = cb.states.get("deepseek").unwrap().error_count;
+        cb.record_probe_result("deepseek", false);
+        let state_after = cb.states.get("deepseek").unwrap().error_count;
 
         assert_eq!(
             state_after,
             state_before + 1,
             "error count should increase on probe failure"
         );
-        assert_eq!(cb.get_state("openai"), CircuitState::Open);
+        assert_eq!(cb.get_state("deepseek"), CircuitState::Open);
     }
 
     #[test]
@@ -640,41 +640,41 @@ mod tests {
         config.base_cooldown_secs = 0;
         let cb = ProviderCooldown::new(config);
 
-        cb.record_failure("openai", false);
+        cb.record_failure("deepseek", false);
         // Immediately record success so error_count = 0 with an expired cooldown.
-        cb.record_success("openai");
+        cb.record_success("deepseek");
 
         // The entry still exists in the map.
-        assert!(cb.states.contains_key("openai"));
+        assert!(cb.states.contains_key("deepseek"));
 
         // After success the cooldown_start is None, so clear_expired won't match.
         // Instead, let's test with a scenario where cooldown expired naturally:
-        cb.force_reset("openai");
-        assert!(!cb.states.contains_key("openai"));
+        cb.force_reset("deepseek");
+        assert!(!cb.states.contains_key("deepseek"));
     }
 
     #[test]
     fn test_force_reset() {
         let cb = ProviderCooldown::new(fast_config());
-        cb.record_failure("openai", false);
-        cb.record_failure("openai", false);
-        assert_eq!(cb.get_state("openai"), CircuitState::Open);
+        cb.record_failure("deepseek", false);
+        cb.record_failure("deepseek", false);
+        assert_eq!(cb.get_state("deepseek"), CircuitState::Open);
 
-        cb.force_reset("openai");
-        assert_eq!(cb.get_state("openai"), CircuitState::Closed);
-        assert_eq!(cb.check("openai"), CooldownVerdict::Allow);
+        cb.force_reset("deepseek");
+        assert_eq!(cb.get_state("deepseek"), CircuitState::Closed);
+        assert_eq!(cb.check("deepseek"), CooldownVerdict::Allow);
     }
 
     #[test]
     fn test_snapshot() {
         let cb = ProviderCooldown::new(fast_config());
-        cb.record_failure("openai", false);
+        cb.record_failure("deepseek", false);
         cb.record_failure("anthropic", true);
 
         let snap = cb.snapshot();
         assert_eq!(snap.len(), 2);
 
-        let openai_snap = snap.iter().find(|s| s.provider == "openai").unwrap();
+        let openai_snap = snap.iter().find(|s| s.provider == "deepseek").unwrap();
         assert_eq!(openai_snap.state, CircuitState::Open);
         assert_eq!(openai_snap.error_count, 1);
         assert!(!openai_snap.is_billing);
@@ -691,12 +691,12 @@ mod tests {
         config.failure_window_secs = 0; // instant window expiry
         let cb = ProviderCooldown::new(config);
 
-        cb.record_failure("openai", false);
+        cb.record_failure("deepseek", false);
         std::thread::sleep(Duration::from_millis(5));
 
         // Second failure after window expired should reset window counter.
-        cb.record_failure("openai", false);
-        let state = cb.states.get("openai").unwrap();
+        cb.record_failure("deepseek", false);
+        let state = cb.states.get("deepseek").unwrap();
         // The total_errors_in_window should be 1 (reset then +1), not 2.
         assert_eq!(state.total_errors_in_window, 1);
     }
@@ -705,17 +705,17 @@ mod tests {
     fn test_multiple_providers_independent() {
         let cb = ProviderCooldown::new(fast_config());
 
-        cb.record_failure("openai", false);
-        cb.record_failure("openai", false);
+        cb.record_failure("deepseek", false);
+        cb.record_failure("deepseek", false);
         cb.record_failure("anthropic", true);
 
-        assert_eq!(cb.get_state("openai"), CircuitState::Open);
+        assert_eq!(cb.get_state("deepseek"), CircuitState::Open);
         assert_eq!(cb.get_state("anthropic"), CircuitState::Open);
-        assert_eq!(cb.get_state("gemini"), CircuitState::Closed);
+        assert_eq!(cb.get_state("kimi"), CircuitState::Closed);
 
-        // Reset openai, anthropic should be unaffected.
-        cb.record_success("openai");
-        assert_eq!(cb.get_state("openai"), CircuitState::Closed);
+        // Reset deepseek, anthropic should be unaffected.
+        cb.record_success("deepseek");
+        assert_eq!(cb.get_state("deepseek"), CircuitState::Closed);
         assert_eq!(cb.get_state("anthropic"), CircuitState::Open);
     }
 }

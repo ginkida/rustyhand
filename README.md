@@ -6,7 +6,7 @@
 <h3 align="center">The Agent Operating System</h3>
 
 <p align="center">
-  Open-source Agent OS built in Rust. 135K LOC. 10 crates. 1,700+ tests. Zero clippy warnings.<br/>
+  Open-source Agent OS built in Rust. 137K LOC. 10 crates. 1,700+ tests. Zero clippy warnings.<br/>
   <strong>One binary. Autonomous Telegram agent. Agents that actually work for you.</strong>
 </p>
 
@@ -19,22 +19,35 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT" />
-  <img src="https://img.shields.io/badge/version-0.6.5-green?style=flat-square" alt="v0.6.5" />
-  <img src="https://img.shields.io/badge/tests-1,775%2B%20passing-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/version-0.7.0-green?style=flat-square" alt="v0.7.0" />
+  <img src="https://img.shields.io/badge/tests-1,733%20passing-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/clippy-0%20warnings-brightgreen?style=flat-square" alt="Clippy" />
 </p>
 
 ---
 
-> **v0.6.5 — Bug audit + Agent Activity tab (April 2026)**
+> **v0.7.0 — Lean provider catalog + first-class Kimi Code (April 2026)**
 >
-> Post-release audit of v0.6.4 surfaces. **Pagination race** fixed
-> (rapid Next clicks no longer bounce the page back). **`workflow_input`
-> now trimmed** before submission. **Install-custom skill endpoint**
-> gains a dedicated 512 KB body limit (down from the global 4 MB).
-> New **Activity tab** in the agent detail modal: timeline of recent
-> audit events, session updates, and cron runs, plus per-agent 1h/24h/30d
-> spend from the existing budget endpoints — zero schema changes.
+> **Provider catalog shrunk from 27 → 7.** RustyHand now ships with Anthropic,
+> **Kimi (Moonshot)**, DeepSeek, Zhipu GLM, MiniMax, OpenRouter, and Ollama —
+> driven by 2 wire protocols (Anthropic Messages API + OpenAI-compatible Chat
+> Completions). **Kimi Code** (`api.kimi.com/coding`) is a first-class coding
+> provider alongside Anthropic, wired through `AnthropicDriver` because Kimi
+> speaks Anthropic's wire format natively — same `x-api-key` + `anthropic-version`
+> headers, same tool/thinking/streaming support.
+>
+> Removed providers (OpenAI, Gemini, Groq, xAI, Copilot, Mistral, Together,
+> Fireworks, Perplexity, Cohere, AI21, Cerebras, SambaNova, HuggingFace,
+> Replicate, vLLM, LM Studio, Moonshot legacy, Qwen, Qianfan, Bedrock) are
+> reachable via **OpenRouter** with one key.
+>
+> Also fixed: Anthropic driver now tolerates `stop_reason: null` (Kimi
+> returns this on truncated responses). OpenAI embeddings remain available
+> as an embedding-only upstream even though OpenAI LLM is gone.
+>
+> **Breaking**: configs with `provider = "openai" | "gemini" | "groq" | ...`
+> will error on boot with `Unknown provider`. Migrate to `openrouter` + a
+> passthrough model id (e.g. `openai/gpt-4o`) or pick a kept provider.
 > [Report issues here.](https://github.com/ginkida/rustyhand/issues)
 
 ---
@@ -52,9 +65,9 @@ This project is based on [OpenFang](https://github.com/RightNow-AI/openfang) by 
 - [Configuration](#configuration)
 - [CLI Reference](#cli-reference)
 - [Autonomous Templates](#autonomous-templates)
-- [37 Pre-built Agent Templates](#37-pre-built-agent-templates)
+- [40 Pre-built Agent Templates](#40-pre-built-agent-templates)
 - [37 Channel Adapters](#37-channel-adapters)
-- [26 LLM Providers — 130+ Models](#26-llm-providers--130-models)
+- [7 LLM Providers](#7-llm-providers)
 - [Architecture](#architecture)
 - [API Endpoints](#api-endpoints)
 - [Dashboard](#dashboard)
@@ -304,7 +317,7 @@ api_key = "your-bearer-token"          # Recommended for non-localhost access
 api_listen = "127.0.0.1:4200"          # HTTP bind address
 
 [default_model]
-provider = "anthropic"                 # anthropic, openai, gemini, groq, ollama, minimax, etc.
+provider = "anthropic"                 # anthropic, kimi, deepseek, zhipu, minimax, openrouter, ollama
 model = "claude-sonnet-4-20250514"     # Model identifier
 api_key_env = "ANTHROPIC_API_KEY"      # Env var holding the API key
 # base_url = "https://api.anthropic.com"  # Optional: override endpoint
@@ -351,17 +364,21 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
 Copy `.env.example` to `~/.rustyhand/.env` and fill in the keys you need:
 
 ```bash
-# LLM providers — set ANY key and RustyHand auto-detects the provider
-ANTHROPIC_API_KEY=sk-ant-...       # Default: Claude Sonnet 4 (recommended)
-OPENAI_API_KEY=sk-...              # GPT-4o
-MINIMAX_API_KEY=eyJ...             # MiniMax M1
-GROQ_API_KEY=gsk_...               # Llama 3.3 70B (ultra-fast)
-DEEPSEEK_API_KEY=sk-...            # DeepSeek Chat
+# LLM providers — set ANY key and RustyHand auto-detects the provider.
+# Priority order: Anthropic → Kimi → DeepSeek → Zhipu → MiniMax → OpenRouter.
+ANTHROPIC_API_KEY=sk-ant-...       # Claude Opus / Sonnet / Haiku (default)
+KIMI_API_KEY=sk-kimi-...            # Kimi Code — Anthropic-compat, 256K ctx
+DEEPSEEK_API_KEY=sk-...             # DeepSeek V3 / R1 (cheap reasoning)
+ZHIPU_API_KEY=...                   # Zhipu GLM-4.6
+MINIMAX_API_KEY=eyJ...              # MiniMax M1 / M2.7 (1M context)
+OPENROUTER_API_KEY=sk-or-...        # Universal gateway (GPT/Gemini/Grok/etc.)
 
-# Local LLM providers (no key needed)
-OLLAMA_BASE_URL=http://localhost:11434
-VLLM_BASE_URL=http://localhost:8000
-LMSTUDIO_BASE_URL=http://localhost:1234
+# Local LLM — no key needed, just run `ollama serve`
+# (Base URL defaults to http://localhost:11434/v1 — override only if needed)
+
+# Embedding-only upstreams (independent of LLM provider)
+VOYAGE_API_KEY=pa-...                # Voyage AI (voyage-3-lite, code, legal, ...)
+# OPENAI_API_KEY can also be used for text-embedding-3-* — not for LLM completion.
 
 # Channel tokens
 TELEGRAM_BOT_TOKEN=123456:ABC-...
@@ -380,9 +397,9 @@ RUST_LOG=info
 rustyhand config show                              # Print current config
 rustyhand config edit                              # Open in $EDITOR
 rustyhand config get default_model.provider        # Read a key
-rustyhand config set default_model.provider groq   # Write a key
-rustyhand config set-key groq                      # Interactively save API key
-rustyhand config test-key groq                     # Verify connectivity
+rustyhand config set default_model.provider kimi   # Switch provider
+rustyhand config set-key kimi                      # Interactively save API key
+rustyhand config test-key kimi                     # Verify connectivity
 ```
 
 ---
@@ -518,7 +535,7 @@ Use the dashboard to launch one: **Agents → Templates** or **Create Agent → 
 
 ---
 
-## 37 Pre-built Agent Templates
+## 40 Pre-built Agent Templates
 
 Spawn any template with `rustyhand agent new <name>`:
 
@@ -528,15 +545,18 @@ Spawn any template with `rustyhand agent new <name>`:
 | `api-monitor` | API endpoint monitoring |
 | `architect` | System design and architecture |
 | `assistant` | General-purpose assistant |
+| `capability-builder` | **Meta-agent** — writes new skills at runtime via privileged `skill_install` tool |
 | `ci-monitor` | CI/CD pipeline monitoring |
 | `code-reviewer` | Code review and feedback |
 | `coder` | Software development |
+| `coordinator` | **Meta-agent** — delegates work across other agents via `agent_send` |
 | `customer-support` | Customer support |
 | `dag-monitor` | DAG/workflow monitoring |
 | `data-scientist` | Data science and ML |
 | `db-reporter` | Database reporting |
 | `debugger` | Bug investigation |
 | `devops-lead` | DevOps and infrastructure |
+| `diagnostic` | **Meta-agent** — read-only observability (self-history, metrics, audit log) |
 | `doc-writer` | Documentation |
 | `email-assistant` | Email drafting and management |
 | `health-tracker` | Health and fitness tracking |
@@ -617,14 +637,25 @@ output_format = "TelegramHtml"         # Markdown | TelegramHtml | SlackMrkdwn |
 
 ---
 
-## 26 LLM Providers — 130+ Models
+## 7 LLM Providers
 
-3 native drivers (Anthropic, Gemini, OpenAI-compatible) route to 26 providers:
+RustyHand v0.7.0 ships with a deliberately lean set of 7 providers, driven by 2 wire protocols (Anthropic Messages API + OpenAI-compatible Chat Completions). Anthropic and **Kimi Code** are the two first-class coding providers:
 
-**Cloud:** **Anthropic (default)**, OpenAI, Gemini, Groq, DeepSeek, OpenRouter, Together, Mistral, Fireworks, Cohere, Perplexity, xAI, AI21, Cerebras, SambaNova, HuggingFace, Replicate, Qwen, MiniMax, Zhipu, Moonshot, Qianfan, Copilot
-**Local:** Ollama, vLLM, LM Studio
+| Provider | Env var | Role |
+|---|---|---|
+| **Anthropic** (default) | `ANTHROPIC_API_KEY` | Claude Opus/Sonnet/Haiku — best-in-class tool use + extended thinking |
+| **Kimi (Moonshot)** | `KIMI_API_KEY` | Kimi Code — Anthropic-compatible, 256K ctx, vision, reasoning |
+| **DeepSeek** | `DEEPSEEK_API_KEY` | V3 + R1 — cheap reasoning |
+| **Zhipu GLM** | `ZHIPU_API_KEY` | GLM-4.6 — Chinese frontier |
+| **MiniMax** | `MINIMAX_API_KEY` | M1/M2 — 1M context |
+| **OpenRouter** | `OPENROUTER_API_KEY` | Universal gateway — any model via one key |
+| **Ollama** | (no key) | Local on `localhost:11434` |
 
-Default provider is **Anthropic Claude Sonnet 4** — best-in-class tool use, extended thinking, and data security (API data is never used for training). Works out of the box with `ANTHROPIC_API_KEY`. Change anytime via `rustyhand config set default_model.provider <name>`.
+Default auto-detect order: Anthropic → Kimi → DeepSeek → Zhipu → MiniMax → OpenRouter. Set whichever key you have; RustyHand picks the first one found.
+
+Prefer Kimi? Set `KIMI_API_KEY` and auto-detect will route to `kimi-for-coding` on the Kimi Code endpoint (`api.kimi.com/coding`). Change anytime via `rustyhand config set default_model.provider <name>`.
+
+> v0.6.x shipped 27 providers (OpenAI, Gemini, Groq, xAI, Copilot, Mistral, Together, Fireworks, Perplexity, Cohere, AI21, Cerebras, SambaNova, HuggingFace, Replicate, vLLM, LM Studio, Moonshot, Qwen, Qianfan, Bedrock). They were removed in v0.7.0 — use `openrouter` to reach any of those models through one gateway.
 
 Features:
 - Intelligent routing with task complexity scoring
@@ -634,23 +665,24 @@ Features:
 
 ### Embedding providers
 
-Vector embeddings power semantic memory recall. Auto-detected at boot (first available wins):
+Vector embeddings power semantic memory recall. The catalog is independent of
+the LLM provider list — `OPENAI_API_KEY` is still usable for text-embedding-3-*
+even though OpenAI is not a first-class LLM provider in v0.7.0.
+
+Auto-detected at boot (first available wins):
 
 | Provider | Models | Key required |
 |----------|--------|-------------|
 | **Voyage AI** | voyage-3, voyage-3-lite, voyage-code-3, voyage-finance-2, voyage-law-2, voyage-multilingual-2 | `VOYAGE_API_KEY` |
-| **OpenAI** | text-embedding-3-small, text-embedding-3-large, text-embedding-ada-002 | `OPENAI_API_KEY` |
+| **OpenAI** (embedding-only) | text-embedding-3-small, text-embedding-3-large, text-embedding-ada-002 | `OPENAI_API_KEY` |
 | **Ollama** | nomic-embed-text, all-MiniLM-L6-v2, mxbai-embed-large | No |
-| **Together** | any embedding model | `TOGETHER_API_KEY` |
-| **Fireworks** | any embedding model | `FIREWORKS_API_KEY` |
-| **Mistral** | any embedding model | `MISTRAL_API_KEY` |
-| **vLLM / LM Studio** | any local model | No |
+| **Any OpenAI-compat endpoint** | whatever the server exposes | provider-specific |
 
 Configure explicitly in `config.toml`:
 
 ```toml
 [memory]
-embedding_provider = "voyage"              # or "openai", "ollama", etc.
+embedding_provider = "voyage"              # or "openai", "ollama", "<custom>"
 embedding_api_key_env = "VOYAGE_API_KEY"
 ```
 
@@ -658,7 +690,7 @@ Or let RustyHand auto-detect: it probes Voyage → OpenAI → Ollama at boot and
 
 ```bash
 rustyhand models list                 # Browse all models
-rustyhand models list --provider groq # Filter by provider
+rustyhand models list --provider kimi # Filter by provider
 rustyhand models set claude-sonnet    # Set default model
 ```
 
@@ -677,7 +709,7 @@ rusty-hand-types       Core types, traits, config, taint tracking, Ed25519 manif
     +-- rusty-hand-skills      Skill system + ClawHub marketplace
     +-- rusty-hand-extensions  25 MCP integrations, AES-256-GCM credential vault, OAuth2
     |
-    +-- rusty-hand-runtime     Agent loop, 3 LLM drivers, 53+ tools, WASM sandbox, MCP, A2A
+    +-- rusty-hand-runtime     Agent loop, 2 LLM drivers (Anthropic + OpenAI-compat), 53+ tools, WASM sandbox, MCP, A2A
     |
     +-- rusty-hand-kernel      Orchestration: lifecycle, scheduling, metering, RBAC, workflows
     |
@@ -845,9 +877,9 @@ Set `RUSTYHAND_FORCE_ENV_CONFIG=1` to always regenerate config from env vars (ov
 
 | Env var | Default | Description |
 |---------|---------|-------------|
-| `RUSTYHAND_PROVIDER` | `minimax` | LLM provider: `minimax`, `anthropic`, `openai`, `gemini`, `groq`, `ollama`, etc. |
-| `RUSTYHAND_MODEL` | `MiniMax-M2.7` | Model identifier |
-| `RUSTYHAND_MODEL_KEY_ENV` | `MINIMAX_API_KEY` | Which env var holds the LLM API key |
+| `RUSTYHAND_PROVIDER` | `anthropic` | LLM provider: `anthropic`, `kimi`, `deepseek`, `zhipu`, `minimax`, `openrouter`, `ollama` |
+| `RUSTYHAND_MODEL` | `claude-sonnet-4-20250514` | Model identifier |
+| `RUSTYHAND_MODEL_KEY_ENV` | `ANTHROPIC_API_KEY` | Which env var holds the LLM API key |
 | `RUSTYHAND_MODEL_BASE_URL` | *(auto)* | Override provider API endpoint |
 | `RUSTYHAND_FALLBACK_PROVIDER` | *(none)* | Fallback provider if primary fails |
 | `RUSTYHAND_FALLBACK_MODEL` | *(none)* | Fallback model |
@@ -858,15 +890,11 @@ Set `RUSTYHAND_FORCE_ENV_CONFIG=1` to always regenerate config from env vars (ov
 | Env var | Provider |
 |---------|----------|
 | `ANTHROPIC_API_KEY` | Anthropic Claude (default) |
-| `MINIMAX_API_KEY` | MiniMax |
-| `OPENAI_API_KEY` | OpenAI |
-| `GROQ_API_KEY` | Groq |
-| `GEMINI_API_KEY` | Google Gemini |
-| `DEEPSEEK_API_KEY` | DeepSeek |
-| `OPENROUTER_API_KEY` | OpenRouter |
-| `TOGETHER_API_KEY` | Together AI |
-| `MISTRAL_API_KEY` | Mistral |
-| `FIREWORKS_API_KEY` | Fireworks |
+| `KIMI_API_KEY` | Kimi Code (Moonshot) |
+| `DEEPSEEK_API_KEY` | DeepSeek V3 / R1 |
+| `ZHIPU_API_KEY` | Zhipu GLM-4.6 |
+| `MINIMAX_API_KEY` | MiniMax M1 / M2 |
+| `OPENROUTER_API_KEY` | OpenRouter gateway (any upstream model) |
 
 #### Budget
 
@@ -943,7 +971,7 @@ cross build --release --target aarch64-unknown-linux-gnu -p rusty-hand-cli
 # Compile all crates (use --lib if the daemon binary is locked)
 cargo build --workspace --lib
 
-# Run all tests (3,000+)
+# Run all tests (1,733 as of v0.7.0)
 cargo test --workspace
 
 # Lint — must be 0 warnings
@@ -1004,7 +1032,7 @@ rustyhand/
 | `crates/rusty-hand-types/src/config.rs` | Master config struct (`KernelConfig`) |
 | `crates/rusty-hand-api/static/index_body.html` | Dashboard SPA |
 | `crates/rusty-hand-api/src/channel_bridge.rs` | Channel adapter wiring |
-| `crates/rusty-hand-runtime/src/drivers/` | LLM drivers (anthropic.rs, gemini.rs, openai.rs) |
+| `crates/rusty-hand-runtime/src/drivers/` | LLM drivers (anthropic.rs for Anthropic + Kimi; openai.rs for DeepSeek/Zhipu/MiniMax/OpenRouter/Ollama) |
 
 ### Common gotchas
 
@@ -1028,7 +1056,7 @@ All data from official documentation and public repositories — April 2026.
 | **Install size** | 32 MB | 8.8 MB | 150 MB | 100 MB | 200 MB | 500 MB |
 | **Security layers** | 16 | 6 | 2 | 1 | 2 | 3 |
 | **Channel adapters** | 37 | 15 | 0 | 0 | 0 | 13 |
-| **LLM providers** | 26 | 28 | 15 | 10 | 8 | 10 |
+| **LLM providers** | 7 (+ OpenRouter gateway) | 28 | 15 | 10 | 8 | 10 |
 | **Language** | Rust | Rust | Python | Python | Python | TypeScript |
 
 ---
@@ -1074,7 +1102,7 @@ That's it. The AI agent now has 30+ tools to manage the entire system.
 | `rustyhand_agent_set_model` | Change agent's LLM model at runtime |
 | `rustyhand_agent_session_reset` | Clear conversation history |
 | **Models & Providers** | |
-| `rustyhand_provider_list` | All 26 providers with auth status |
+| `rustyhand_provider_list` | All 7 providers with auth status |
 | `rustyhand_model_list` | Available models (tier, context window, cost) |
 | **Budget** | |
 | `rustyhand_budget_status` | Global spend vs limits (hourly/daily/monthly) |
@@ -1115,7 +1143,7 @@ An AI agent (Claude, GPT, etc.) can autonomously:
 - **Persistent memory** — agents remember context across sessions (vector search + knowledge graph)
 - **37 channels** — reach users on Telegram, Discord, Slack, etc. without building integrations
 - **Budget control** — set spending limits so agents can't run up costs
-- **26 LLM providers** — use the best model for each task with automatic fallback
+- **7 LLM providers** — Anthropic, Kimi, DeepSeek, Zhipu, MiniMax, OpenRouter, Ollama — plus OpenRouter gateway to any other model
 - **Autonomous scheduling** — cron jobs run agents on schedule, no human needed
 - **60 bundled skills** — instant expertise in Kubernetes, AWS, PostgreSQL, Git, Python, etc.
 - **Approval gates** — dangerous actions require human approval before executing
@@ -1135,7 +1163,7 @@ curl http://localhost:4200/api/agents
 # Spawn an agent
 curl -X POST http://localhost:4200/api/agents \
   -H "Content-Type: application/json" \
-  -d '{"manifest_toml": "name = \"my-agent\"\nmodule = \"builtin:chat\"\n[model]\nprovider = \"groq\"\nmodel = \"llama-3.3-70b-versatile\"\napi_key_env = \"GROQ_API_KEY\"\nsystem_prompt = \"You are a helpful assistant.\""}'
+  -d '{"manifest_toml": "name = \"my-agent\"\nmodule = \"builtin:chat\"\n[model]\nprovider = \"kimi\"\nmodel = \"kimi-for-coding\"\napi_key_env = \"KIMI_API_KEY\"\nsystem_prompt = \"You are a helpful assistant.\""}'
 
 # Send a message (triggers LLM call, returns full response)
 curl -X POST http://localhost:4200/api/agents/{id}/message \
@@ -1188,7 +1216,7 @@ User message (CLI / API / Telegram / Discord / ...)
     |
     +-- 1. Recall memories (vector similarity via Voyage/OpenAI/Ollama, or text LIKE)
     +-- 2. Build system prompt (SOUL.md + USER.md + TOOLS.md + MEMORY.md + recalled context)
-    +-- 3. Call LLM (driver: Anthropic / Gemini / OpenAI-compat)
+    +-- 3. Call LLM (driver: Anthropic or OpenAI-compat)
     |       |-- retry on rate limit (3x, exponential backoff)
     |       |-- fallback to next provider on failure
     |       |-- model routing by complexity (simple/medium/complex)

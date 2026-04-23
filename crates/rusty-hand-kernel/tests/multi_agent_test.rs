@@ -1,6 +1,6 @@
 //! Multi-agent integration test: spawn 6 agents, send messages, verify all respond.
 //!
-//! Run with: GROQ_API_KEY=gsk_... cargo test -p rusty-hand-kernel --test multi_agent_test -- --nocapture
+//! Run with: KIMI_API_KEY=sk-kimi-... cargo test -p rusty-hand-kernel --test multi_agent_test -- --nocapture
 
 use rusty_hand_kernel::RustyHandKernel;
 use rusty_hand_types::agent::AgentManifest;
@@ -15,9 +15,9 @@ fn test_config() -> KernelConfig {
         home_dir: tmp.clone(),
         data_dir: tmp.join("data"),
         default_model: DefaultModelConfig {
-            provider: "groq".to_string(),
-            model: "llama-3.3-70b-versatile".to_string(),
-            api_key_env: "GROQ_API_KEY".to_string(),
+            provider: "kimi".to_string(),
+            model: "kimi-for-coding".to_string(),
+            api_key_env: "KIMI_API_KEY".to_string(),
             base_url: None,
         },
         ..KernelConfig::default()
@@ -30,8 +30,8 @@ fn load_manifest(toml_str: &str) -> AgentManifest {
 
 #[tokio::test]
 async fn test_six_agent_fleet() {
-    if std::env::var("GROQ_API_KEY").is_err() {
-        eprintln!("GROQ_API_KEY not set, skipping multi-agent test");
+    if std::env::var("KIMI_API_KEY").is_err() {
+        eprintln!("KIMI_API_KEY not set, skipping multi-agent test");
         return;
     }
 
@@ -45,8 +45,8 @@ async fn test_six_agent_fleet() {
 name = "coder"
 module = "builtin:chat"
 [model]
-provider = "groq"
-model = "llama-3.3-70b-versatile"
+provider = "kimi"
+model = "kimi-for-coding"
 system_prompt = "You are Coder. Reply with 'CODER:' prefix. Be concise."
 [capabilities]
 tools = ["file_read", "file_write"]
@@ -61,8 +61,8 @@ memory_write = ["self.*"]
 name = "researcher"
 module = "builtin:chat"
 [model]
-provider = "groq"
-model = "llama-3.3-70b-versatile"
+provider = "kimi"
+model = "kimi-for-coding"
 system_prompt = "You are Researcher. Reply with 'RESEARCHER:' prefix. Be concise."
 [capabilities]
 tools = ["web_fetch"]
@@ -77,8 +77,8 @@ memory_write = ["self.*"]
 name = "writer"
 module = "builtin:chat"
 [model]
-provider = "groq"
-model = "llama-3.3-70b-versatile"
+provider = "kimi"
+model = "kimi-for-coding"
 system_prompt = "You are Writer. Reply with 'WRITER:' prefix. Be concise."
 [capabilities]
 tools = ["file_read", "file_write"]
@@ -93,8 +93,8 @@ memory_write = ["self.*"]
 name = "ops"
 module = "builtin:chat"
 [model]
-provider = "groq"
-model = "llama-3.1-8b-instant"
+provider = "kimi"
+model = "kimi-for-coding"
 system_prompt = "You are Ops. Reply with 'OPS:' prefix. Be concise."
 [capabilities]
 tools = ["shell_exec"]
@@ -109,8 +109,8 @@ memory_write = ["self.*"]
 name = "analyst"
 module = "builtin:chat"
 [model]
-provider = "groq"
-model = "llama-3.3-70b-versatile"
+provider = "kimi"
+model = "kimi-for-coding"
 system_prompt = "You are Analyst. Reply with 'ANALYST:' prefix. Be concise."
 [capabilities]
 tools = ["file_read"]
@@ -125,8 +125,8 @@ memory_write = ["self.*"]
 name = "hello-world"
 module = "builtin:chat"
 [model]
-provider = "groq"
-model = "llama-3.1-8b-instant"
+provider = "kimi"
+model = "kimi-for-coding"
 system_prompt = "You are a friendly greeter. Reply with 'HELLO:' prefix. Be concise."
 [capabilities]
 memory_read = ["*"]

@@ -20,27 +20,15 @@ struct ProviderInfo {
 
 const PROVIDERS: &[ProviderInfo] = &[
     ProviderInfo {
-        name: "groq",
-        env_var: "GROQ_API_KEY",
-        default_model: "llama-3.3-70b-versatile",
-        needs_key: true,
-    },
-    ProviderInfo {
         name: "anthropic",
         env_var: "ANTHROPIC_API_KEY",
         default_model: "claude-sonnet-4-20250514",
         needs_key: true,
     },
     ProviderInfo {
-        name: "openai",
-        env_var: "OPENAI_API_KEY",
-        default_model: "gpt-4o",
-        needs_key: true,
-    },
-    ProviderInfo {
-        name: "openrouter",
-        env_var: "OPENROUTER_API_KEY",
-        default_model: "anthropic/claude-sonnet-4-20250514",
+        name: "kimi",
+        env_var: "KIMI_API_KEY",
+        default_model: "kimi-for-coding",
         needs_key: true,
     },
     ProviderInfo {
@@ -50,39 +38,27 @@ const PROVIDERS: &[ProviderInfo] = &[
         needs_key: true,
     },
     ProviderInfo {
-        name: "together",
-        env_var: "TOGETHER_API_KEY",
-        default_model: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        name: "zhipu",
+        env_var: "ZHIPU_API_KEY",
+        default_model: "glm-4-plus",
         needs_key: true,
     },
     ProviderInfo {
-        name: "mistral",
-        env_var: "MISTRAL_API_KEY",
-        default_model: "mistral-large-latest",
+        name: "minimax",
+        env_var: "MINIMAX_API_KEY",
+        default_model: "MiniMax-M2.7",
         needs_key: true,
     },
     ProviderInfo {
-        name: "fireworks",
-        env_var: "FIREWORKS_API_KEY",
-        default_model: "accounts/fireworks/models/llama-v3p3-70b-instruct",
+        name: "openrouter",
+        env_var: "OPENROUTER_API_KEY",
+        default_model: "openrouter/auto",
         needs_key: true,
     },
     ProviderInfo {
         name: "ollama",
         env_var: "OLLAMA_API_KEY",
         default_model: "llama3.2",
-        needs_key: false,
-    },
-    ProviderInfo {
-        name: "vllm",
-        env_var: "VLLM_API_KEY",
-        default_model: "local-model",
-        needs_key: false,
-    },
-    ProviderInfo {
-        name: "lmstudio",
-        env_var: "LMSTUDIO_API_KEY",
-        default_model: "local-model",
         needs_key: false,
     },
 ];

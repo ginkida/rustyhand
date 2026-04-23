@@ -1014,16 +1014,16 @@ mod tests {
     #[test]
     fn test_fallback_model_serde() {
         let fb = FallbackModel {
-            provider: "groq".to_string(),
-            model: "llama-3.3-70b".to_string(),
-            api_key_env: Some("GROQ_API_KEY".to_string()),
+            provider: "deepseek".to_string(),
+            model: "deepseek-chat".to_string(),
+            api_key_env: Some("DEEPSEEK_API_KEY".to_string()),
             base_url: None,
         };
         let json = serde_json::to_string(&fb).unwrap();
         let back: FallbackModel = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.provider, "groq");
-        assert_eq!(back.model, "llama-3.3-70b");
-        assert_eq!(back.api_key_env, Some("GROQ_API_KEY".to_string()));
+        assert_eq!(back.provider, "deepseek");
+        assert_eq!(back.model, "deepseek-chat");
+        assert_eq!(back.api_key_env, Some("DEEPSEEK_API_KEY".to_string()));
     }
 
     #[test]
@@ -1031,8 +1031,8 @@ mod tests {
         let manifest = AgentManifest {
             profile: Some(ToolProfile::Coding),
             fallback_models: vec![FallbackModel {
-                provider: "groq".to_string(),
-                model: "llama-3.3-70b".to_string(),
+                provider: "deepseek".to_string(),
+                model: "deepseek-chat".to_string(),
                 api_key_env: None,
                 base_url: None,
             }],

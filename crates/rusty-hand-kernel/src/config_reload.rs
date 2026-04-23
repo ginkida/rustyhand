@@ -403,7 +403,7 @@ mod tests {
     fn test_default_model_requires_restart() {
         let a = default_cfg();
         let mut b = default_cfg();
-        b.default_model.model = "gpt-4".to_string();
+        b.default_model.model = "kimi-for-coding".to_string();
         let plan = build_reload_plan(&a, &b);
         assert!(plan.restart_required);
         assert!(plan

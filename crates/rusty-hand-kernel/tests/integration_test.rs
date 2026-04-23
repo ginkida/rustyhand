@@ -1,6 +1,9 @@
-//! Integration test: boot kernel -> spawn agent -> send message via Groq API.
+//! Integration test: boot kernel -> spawn agent -> send message via Kimi Code API.
 //!
-//! Run with: GROQ_API_KEY=gsk_... cargo test -p rusty-hand-kernel --test integration_test -- --nocapture
+//! Run with: KIMI_API_KEY=sk-kimi-... cargo test -p rusty-hand-kernel --test integration_test -- --nocapture
+//!
+//! Kimi was chosen as the default for this test because it's one of the two
+//! first-class coding providers in v0.7.0 and has a generous free tier in dev mode.
 
 use rusty_hand_kernel::RustyHandKernel;
 use rusty_hand_types::agent::AgentManifest;
@@ -15,9 +18,9 @@ fn test_config() -> KernelConfig {
         home_dir: tmp.clone(),
         data_dir: tmp.join("data"),
         default_model: DefaultModelConfig {
-            provider: "groq".to_string(),
-            model: "llama-3.3-70b-versatile".to_string(),
-            api_key_env: "GROQ_API_KEY".to_string(),
+            provider: "kimi".to_string(),
+            model: "kimi-for-coding".to_string(),
+            api_key_env: "KIMI_API_KEY".to_string(),
             base_url: None,
         },
         ..KernelConfig::default()
@@ -25,9 +28,9 @@ fn test_config() -> KernelConfig {
 }
 
 #[tokio::test]
-async fn test_full_pipeline_with_groq() {
-    if std::env::var("GROQ_API_KEY").is_err() {
-        eprintln!("GROQ_API_KEY not set, skipping integration test");
+async fn test_full_pipeline_with_kimi() {
+    if std::env::var("KIMI_API_KEY").is_err() {
+        eprintln!("KIMI_API_KEY not set, skipping integration test");
         return;
     }
 
@@ -45,8 +48,8 @@ author = "test"
 module = "builtin:chat"
 
 [model]
-provider = "groq"
-model = "llama-3.3-70b-versatile"
+provider = "kimi"
+model = "kimi-for-coding"
 system_prompt = "You are a test agent. Reply concisely in one sentence."
 
 [capabilities]
@@ -85,26 +88,26 @@ memory_write = ["self.*"]
 
 #[tokio::test]
 async fn test_multiple_agents_different_models() {
-    if std::env::var("GROQ_API_KEY").is_err() {
-        eprintln!("GROQ_API_KEY not set, skipping integration test");
+    if std::env::var("KIMI_API_KEY").is_err() {
+        eprintln!("KIMI_API_KEY not set, skipping integration test");
         return;
     }
 
     let config = test_config();
     let kernel = RustyHandKernel::boot_with_config(config).expect("Kernel should boot");
 
-    // Spawn agent 1: llama 70b
+    // Spawn agent 1: Kimi Code (frontier-tier coding model)
     let manifest1: AgentManifest = toml::from_str(
         r#"
-name = "agent-llama70b"
+name = "agent-kimi"
 version = "0.1.0"
-description = "Llama 70B agent"
+description = "Kimi agent"
 author = "test"
 module = "builtin:chat"
 
 [model]
-provider = "groq"
-model = "llama-3.3-70b-versatile"
+provider = "kimi"
+model = "kimi-for-coding"
 system_prompt = "You are Agent A. Always start your reply with 'A:'."
 
 [capabilities]
@@ -114,18 +117,19 @@ memory_write = ["self.*"]
     )
     .unwrap();
 
-    // Spawn agent 2: llama 8b (faster, smaller)
+    // Spawn agent 2: Kimi via the k2-thinking alias (server-side alias, same
+    // backend). Exercises catalog alias resolution end-to-end.
     let manifest2: AgentManifest = toml::from_str(
         r#"
-name = "agent-llama8b"
+name = "agent-k2"
 version = "0.1.0"
-description = "Llama 8B agent"
+description = "Kimi via alias"
 author = "test"
 module = "builtin:chat"
 
 [model]
-provider = "groq"
-model = "llama-3.1-8b-instant"
+provider = "kimi"
+model = "kimi-k2-thinking"
 system_prompt = "You are Agent B. Always start your reply with 'B:'."
 
 [capabilities]
@@ -138,26 +142,22 @@ memory_write = ["self.*"]
     let id1 = kernel.spawn_agent(manifest1).expect("Agent 1 should spawn");
     let id2 = kernel.spawn_agent(manifest2).expect("Agent 2 should spawn");
 
-    // Send messages to both
     let r1 = kernel
-        .send_message(id1, "What model are you?")
+        .send_message(id1, "Say hello briefly.")
         .await
-        .expect("Agent 1 response");
+        .expect("A should reply");
     let r2 = kernel
-        .send_message(id2, "What model are you?")
+        .send_message(id2, "Say hello briefly.")
         .await
-        .expect("Agent 2 response");
+        .expect("B should reply");
 
-    println!("\n=== AGENT 1 (llama-70b) ===");
-    println!("{}", r1.response);
-    println!("\n=== AGENT 2 (llama-8b) ===");
-    println!("{}", r2.response);
+    println!("Agent A said: {}", r1.response);
+    println!("Agent B said: {}", r2.response);
 
     assert!(!r1.response.is_empty());
     assert!(!r2.response.is_empty());
 
-    // Cleanup
-    kernel.kill_agent(id1).unwrap();
-    kernel.kill_agent(id2).unwrap();
+    kernel.kill_agent(id1).expect("Agent 1 should be killed");
+    kernel.kill_agent(id2).expect("Agent 2 should be killed");
     kernel.shutdown();
 }
