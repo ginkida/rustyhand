@@ -92,8 +92,48 @@ TOML
 [telegram]
 bot_token_env = "TELEGRAM_BOT_TOKEN"
 TOML
+        # RUSTYHAND_TELEGRAM_USERS is a comma-separated list of Telegram
+        # user IDs (i64, may be negative for channels). We accept the
+        # raw value with or without TOML array brackets, quotes, or
+        # whitespace around tokens, and validate each token. Unparseable
+        # tokens are dropped with a warning so a typo in .env cannot
+        # crash the daemon at boot with a TOML parse error.
         if [ -n "$RUSTYHAND_TELEGRAM_USERS" ]; then
-            echo "allowed_users = [$RUSTYHAND_TELEGRAM_USERS]" >> "$CONFIG"
+            # Strip whitespace, outer brackets, and quotes — we'll rebuild
+            # a clean TOML array ourselves.
+            _tg_raw=$(printf '%s' "$RUSTYHAND_TELEGRAM_USERS" | tr -d '[:space:]"[]')
+            _tg_valid=""
+            _tg_invalid=""
+            _tg_old_ifs=$IFS
+            IFS=','
+            for _tg_tok in $_tg_raw; do
+                [ -z "$_tg_tok" ] && continue
+                # Allow a single optional leading minus sign; the rest must
+                # be digits. Telegram assigns negative IDs to channels.
+                _tg_check="${_tg_tok#-}"
+                case "$_tg_check" in
+                    '' | *[!0-9]*)
+                        _tg_invalid="$_tg_invalid $_tg_tok"
+                        ;;
+                    *)
+                        if [ -z "$_tg_valid" ]; then
+                            _tg_valid="$_tg_tok"
+                        else
+                            _tg_valid="$_tg_valid, $_tg_tok"
+                        fi
+                        ;;
+                esac
+            done
+            IFS=$_tg_old_ifs
+            if [ -n "$_tg_invalid" ]; then
+                echo "WARNING: RUSTYHAND_TELEGRAM_USERS contains non-integer token(s), ignored:$_tg_invalid" >&2
+            fi
+            if [ -n "$_tg_valid" ]; then
+                echo "allowed_users = [$_tg_valid]" >> "$CONFIG"
+            else
+                echo "WARNING: RUSTYHAND_TELEGRAM_USERS set but no valid user IDs parsed — the bot will allow ANY user (open to the world)" >&2
+            fi
+            unset _tg_raw _tg_valid _tg_invalid _tg_old_ifs _tg_tok _tg_check
         fi
     fi
 

@@ -921,7 +921,7 @@ Set `RUSTYHAND_FORCE_ENV_CONFIG=1` to always regenerate config from env vars (ov
 | `DISCORD_BOT_TOKEN` | Discord bot — auto-enables `[discord]` section |
 | `SLACK_BOT_TOKEN` | Slack bot — auto-enables `[slack]` section |
 | `SLACK_APP_TOKEN` | Slack app-level token (for Socket Mode) |
-| `RUSTYHAND_TELEGRAM_USERS` | Comma-separated Telegram user IDs to allow |
+| `RUSTYHAND_TELEGRAM_USERS` | Comma-separated Telegram user IDs to allow (e.g. `123456789,987654321`). Brackets and quotes tolerated. Negative IDs (channels) supported. Unset = open to ANY Telegram user — **strongly recommended to set**. |
 
 #### Other
 
