@@ -7,7 +7,7 @@ tags = ["security", "audit", "vulnerability"]
 
 [model]
 provider = "deepseek"
-model = "deepseek-chat"
+model = "deepseek-v4-pro"
 api_key_env = "DEEPSEEK_API_KEY"
 max_tokens = 4096
 temperature = 0.2

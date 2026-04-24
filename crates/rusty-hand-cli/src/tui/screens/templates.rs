@@ -61,7 +61,7 @@ const BUILTIN_TEMPLATES: &[(&str, &str, &str, &str, &str)] = &[
         "Data analysis, visualization, and SQL queries",
         "Development",
         "deepseek",
-        "deepseek-chat",
+        "deepseek-v4-pro",
     ),
     (
         "DevOps Engineer",
@@ -82,7 +82,7 @@ const BUILTIN_TEMPLATES: &[(&str, &str, &str, &str, &str)] = &[
         "Patient educational assistant for learning any subject",
         "General",
         "deepseek",
-        "deepseek-chat",
+        "deepseek-v4-flash",
     ),
     (
         "API Designer",

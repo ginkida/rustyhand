@@ -85,9 +85,17 @@ fn provider_defaults(provider: &str) -> Option<ProviderDefaults> {
 /// Create an LLM driver based on provider name and configuration.
 ///
 /// Supported providers:
-/// - `anthropic` — Anthropic Claude (Messages API)
+/// - `anthropic` — Anthropic Claude (Messages API). Also the route for
+///   DeepSeek's Anthropic-compatible endpoint — set
+///   `base_url = "https://api.deepseek.com/anthropic"` +
+///   `api_key_env = "DEEPSEEK_API_KEY"` to drive DeepSeek V4 models over the
+///   Messages API wire format. Works for single-turn and multi-turn text.
+///   For reasoning + multi-turn tool-use prefer `provider = "deepseek"`
+///   (OpenAI wire) — the Anthropic `thinking` block round-trip is not
+///   exercised in RustyHand tests and may require a signature field we
+///   do not yet persist.
 /// - `kimi` — Moonshot Kimi Code (Anthropic-compatible endpoint)
-/// - `deepseek` — DeepSeek V3 / R1 reasoning
+/// - `deepseek` — DeepSeek V4 Flash / V4 Pro (V3/R1 legacy, deprecated 2026-07-24)
 /// - `minimax` — MiniMax M1 / M2 long-context
 /// - `zhipu` (alias `glm`) — Zhipu AI GLM-4.6
 /// - `openrouter` — OpenRouter (universal gateway)
@@ -206,7 +214,7 @@ pub fn detect_available_provider() -> Option<(&'static str, &'static str, &'stat
     const PROBE_ORDER: &[(&str, &str, &str)] = &[
         ("anthropic", "ANTHROPIC_API_KEY", "claude-sonnet-4-20250514"),
         ("kimi", "KIMI_API_KEY", "kimi-for-coding"),
-        ("deepseek", "DEEPSEEK_API_KEY", "deepseek-chat"),
+        ("deepseek", "DEEPSEEK_API_KEY", "deepseek-v4-flash"),
         ("zhipu", "ZHIPU_API_KEY", "glm-4-plus"),
         ("minimax", "MINIMAX_API_KEY", "MiniMax-M2.7"),
         (
@@ -263,6 +271,24 @@ mod tests {
         let d = provider_defaults("deepseek").unwrap();
         assert_eq!(d.base_url, "https://api.deepseek.com/v1");
         assert_eq!(d.api_key_env, "DEEPSEEK_API_KEY");
+    }
+
+    #[test]
+    fn test_deepseek_via_anthropic_endpoint() {
+        // DeepSeek's Anthropic-compatible endpoint rides on the `anthropic`
+        // provider with a custom base_url. Driver should be constructed
+        // successfully when DEEPSEEK_API_KEY is supplied.
+        use rusty_hand_types::model_catalog::DEEPSEEK_ANTHROPIC_BASE_URL;
+        let config = DriverConfig {
+            provider: "anthropic".to_string(),
+            api_key: Some("sk-deepseek-test".to_string()),
+            base_url: Some(DEEPSEEK_ANTHROPIC_BASE_URL.to_string()),
+        };
+        let driver = create_driver(&config);
+        assert!(
+            driver.is_ok(),
+            "DeepSeek-via-Anthropic endpoint must build a driver"
+        );
     }
 
     #[test]
@@ -368,6 +394,119 @@ mod tests {
                 "deleted provider still present: {removed}"
             );
         }
+    }
+
+    // ─── Live integration tests (DeepSeek) ────────────────────────────
+    // These tests hit the real DeepSeek API and are `#[ignore]`'d by
+    // default. Run manually with:
+    //   DEEPSEEK_API_KEY=sk-... cargo test -p rusty-hand-runtime \
+    //     --lib drivers::tests::live_deepseek -- --ignored --nocapture
+    //
+    // Purpose: prove that `deepseek-v4-flash` / `deepseek-v4-pro` round-trip
+    // through our actual driver code, over both wire protocols. V4 models are
+    // reasoning models — response must contain a Thinking block plus text.
+
+    #[tokio::test]
+    #[ignore = "requires DEEPSEEK_API_KEY"]
+    async fn live_deepseek_v4_flash_openai_wire() {
+        let key = std::env::var("DEEPSEEK_API_KEY").expect("DEEPSEEK_API_KEY must be set");
+        let driver = create_driver(&DriverConfig {
+            provider: "deepseek".to_string(),
+            api_key: Some(key),
+            base_url: None,
+        })
+        .expect("driver should build");
+        let response = driver
+            .complete(CompletionRequest {
+                model: "deepseek-v4-flash".to_string(),
+                messages: vec![rusty_hand_types::message::Message::user(
+                    "Reply with just the single word: pong",
+                )],
+                tools: vec![],
+                max_tokens: 512,
+                temperature: 0.0,
+                system: None,
+                thinking: None,
+                response_format: Default::default(),
+            })
+            .await
+            .expect("live completion should succeed");
+        let text = response.text().to_lowercase();
+        assert!(
+            text.contains("pong"),
+            "expected 'pong' in response text, got: {text:?}"
+        );
+        let has_thinking = response
+            .content
+            .iter()
+            .any(|b| matches!(b, rusty_hand_types::message::ContentBlock::Thinking { .. }));
+        assert!(
+            has_thinking,
+            "V4 Flash is a reasoning model — expected a Thinking block"
+        );
+        assert!(response.usage.input_tokens > 0);
+        assert!(response.usage.output_tokens > 0);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DEEPSEEK_API_KEY"]
+    async fn live_deepseek_v4_pro_openai_wire() {
+        let key = std::env::var("DEEPSEEK_API_KEY").expect("DEEPSEEK_API_KEY must be set");
+        let driver = create_driver(&DriverConfig {
+            provider: "deepseek".to_string(),
+            api_key: Some(key),
+            base_url: None,
+        })
+        .unwrap();
+        let response = driver
+            .complete(CompletionRequest {
+                model: "deepseek-v4-pro".to_string(),
+                messages: vec![rusty_hand_types::message::Message::user(
+                    "Reply with just the single word: pong",
+                )],
+                tools: vec![],
+                max_tokens: 512,
+                temperature: 0.0,
+                system: None,
+                thinking: None,
+                response_format: Default::default(),
+            })
+            .await
+            .expect("live completion should succeed");
+        assert!(response.text().to_lowercase().contains("pong"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DEEPSEEK_API_KEY"]
+    async fn live_deepseek_v4_flash_anthropic_wire() {
+        use rusty_hand_types::model_catalog::DEEPSEEK_ANTHROPIC_BASE_URL;
+        let key = std::env::var("DEEPSEEK_API_KEY").expect("DEEPSEEK_API_KEY must be set");
+        let driver = create_driver(&DriverConfig {
+            provider: "anthropic".to_string(),
+            api_key: Some(key),
+            base_url: Some(DEEPSEEK_ANTHROPIC_BASE_URL.to_string()),
+        })
+        .expect("driver should build for DeepSeek-via-Anthropic");
+        let response = driver
+            .complete(CompletionRequest {
+                model: "deepseek-v4-flash".to_string(),
+                messages: vec![rusty_hand_types::message::Message::user(
+                    "Reply with just the single word: pong",
+                )],
+                tools: vec![],
+                max_tokens: 512,
+                temperature: 0.0,
+                system: None,
+                thinking: None,
+                response_format: Default::default(),
+            })
+            .await
+            .expect("live completion on Anthropic endpoint should succeed");
+        let text = response.text().to_lowercase();
+        assert!(
+            text.contains("pong"),
+            "expected 'pong' via Anthropic wire, got: {text:?}"
+        );
     }
 
     #[test]

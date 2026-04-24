@@ -3042,4 +3042,329 @@ mod tests {
         }
         assert!(!events.is_empty(), "Should have received stream events");
     }
+
+    // ─── Live end-to-end tests (DeepSeek V4) ─────────────────────────────
+    // Exercise the FULL agent loop against real DeepSeek V4 models to
+    // confirm: (1) default-config agents work out of the box, (2) reasoning
+    // content is handled without blowing up the loop, (3) tool use round-trips
+    // correctly through execute_tool and the continuation turn.
+    //
+    // These tests hit real API and cost real tokens — `#[ignore]`'d by default.
+    // Run with:
+    //   DEEPSEEK_API_KEY=sk-... cargo test -p rusty-hand-runtime --lib \
+    //     agent_loop::tests::live_deepseek_e2e -- --ignored --nocapture
+
+    fn deepseek_manifest(model_id: &str) -> AgentManifest {
+        AgentManifest {
+            name: format!("deepseek-e2e-{model_id}"),
+            model: rusty_hand_types::agent::ModelConfig {
+                provider: "deepseek".to_string(),
+                model: model_id.to_string(),
+                max_tokens: 2048,
+                temperature: 0.0,
+                system_prompt: "You are a terse assistant. Reply with the minimum words needed."
+                    .to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DEEPSEEK_API_KEY"]
+    async fn live_deepseek_e2e_v4_flash_text_only() {
+        let key = std::env::var("DEEPSEEK_API_KEY").expect("DEEPSEEK_API_KEY must be set");
+        let memory = MemorySubstrate::open_in_memory(0.01).unwrap();
+        let agent_id = rusty_hand_types::agent::AgentId::new();
+        let mut session = rusty_hand_memory::session::Session {
+            id: rusty_hand_types::agent::SessionId::new(),
+            agent_id,
+            messages: Vec::new(),
+            context_window_tokens: 0,
+            label: None,
+        };
+        let manifest = deepseek_manifest("deepseek-v4-flash");
+        let driver = crate::drivers::create_driver(&crate::llm_driver::DriverConfig {
+            provider: "deepseek".to_string(),
+            api_key: Some(key),
+            base_url: None,
+        })
+        .expect("driver should build");
+
+        let result = run_agent_loop(
+            &manifest,
+            "Reply with exactly the word: pong",
+            &mut session,
+            &memory,
+            driver,
+            &[],  // no tools
+            None, // kernel
+            None, // skills
+            None, // mcp
+            None, // web_ctx
+            None, // browser
+            None, // embedding
+            None, // workspace
+            None, // on_phase
+            None, // media
+            None, // tts
+            None, // docker
+            None, // hooks
+            None, // context_window_tokens
+            None, // process_manager
+            None, // global_exec_policy
+        )
+        .await
+        .expect("agent loop should complete");
+
+        assert!(
+            !result.response.trim().is_empty(),
+            "response must be non-empty"
+        );
+        assert!(
+            result.response.to_lowercase().contains("pong"),
+            "expected 'pong' in response, got: {:?}",
+            result.response
+        );
+        // Reasoning model uses input + output tokens on every call.
+        assert!(result.total_usage.input_tokens > 0);
+        assert!(result.total_usage.output_tokens > 0);
+        // One LLM round-trip for a text-only reply.
+        assert_eq!(result.iterations, 1, "expected 1 iteration for text-only");
+        assert!(!result.silent);
+        // Session history must have [user, assistant] after the loop.
+        assert_eq!(session.messages.len(), 2);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DEEPSEEK_API_KEY"]
+    async fn live_deepseek_e2e_v4_pro_text_only() {
+        let key = std::env::var("DEEPSEEK_API_KEY").expect("DEEPSEEK_API_KEY must be set");
+        let memory = MemorySubstrate::open_in_memory(0.01).unwrap();
+        let agent_id = rusty_hand_types::agent::AgentId::new();
+        let mut session = rusty_hand_memory::session::Session {
+            id: rusty_hand_types::agent::SessionId::new(),
+            agent_id,
+            messages: Vec::new(),
+            context_window_tokens: 0,
+            label: None,
+        };
+        let manifest = deepseek_manifest("deepseek-v4-pro");
+        let driver = crate::drivers::create_driver(&crate::llm_driver::DriverConfig {
+            provider: "deepseek".to_string(),
+            api_key: Some(key),
+            base_url: None,
+        })
+        .unwrap();
+
+        let result = run_agent_loop(
+            &manifest,
+            "Answer in one word: is water wet?",
+            &mut session,
+            &memory,
+            driver,
+            &[],
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("agent loop should complete");
+
+        assert!(!result.response.trim().is_empty());
+        assert!(result.iterations >= 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DEEPSEEK_API_KEY"]
+    async fn live_deepseek_e2e_v4_flash_tool_use_full_cycle() {
+        // Full tool-use cycle: agent picks a tool, we execute it, agent sees
+        // the result, produces a final answer. Uses `file_list` against the
+        // cargo workspace root so the tool actually returns data.
+        let key = std::env::var("DEEPSEEK_API_KEY").expect("DEEPSEEK_API_KEY must be set");
+        let memory = MemorySubstrate::open_in_memory(0.01).unwrap();
+        let agent_id = rusty_hand_types::agent::AgentId::new();
+        let mut session = rusty_hand_memory::session::Session {
+            id: rusty_hand_types::agent::SessionId::new(),
+            agent_id,
+            messages: Vec::new(),
+            context_window_tokens: 0,
+            label: None,
+        };
+        let mut manifest = deepseek_manifest("deepseek-v4-flash");
+        manifest.model.system_prompt =
+            "You have access to a file_list tool. When the user asks about directory contents, \
+             call file_list with path=\".\" and then summarize in one sentence."
+                .to_string();
+        manifest.model.max_tokens = 4096;
+
+        // Capability allow-list must include the tool we expose
+        manifest.capabilities.tools = vec!["file_list".to_string()];
+
+        let driver = crate::drivers::create_driver(&crate::llm_driver::DriverConfig {
+            provider: "deepseek".to_string(),
+            api_key: Some(key),
+            base_url: None,
+        })
+        .unwrap();
+
+        let tools = crate::tool_runner::builtin_tool_definitions();
+        let file_list_only: Vec<ToolDefinition> = tools
+            .into_iter()
+            .filter(|t| t.name == "file_list")
+            .collect();
+        assert_eq!(file_list_only.len(), 1, "file_list must be a builtin");
+
+        // Temp workspace with a known file
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        std::fs::write(workspace.path().join("MARKER.txt"), "hello").unwrap();
+
+        let result = run_agent_loop(
+            &manifest,
+            "What files are in the current directory? Call file_list with path=\".\".",
+            &mut session,
+            &memory,
+            driver,
+            &file_list_only,
+            None, // kernel
+            None, // skills
+            None, // mcp
+            None, // web_ctx
+            None, // browser
+            None, // embedding
+            Some(workspace.path()),
+            None, // on_phase
+            None, // media
+            None, // tts
+            None, // docker
+            None, // hooks
+            None, // context_window_tokens
+            None, // process_manager
+            None, // global_exec_policy
+        )
+        .await
+        .expect("agent loop should complete");
+
+        assert!(
+            !result.response.trim().is_empty(),
+            "final answer must be non-empty, got: {:?}",
+            result.response
+        );
+        assert!(
+            result.iterations >= 2,
+            "tool use requires at least 2 iterations (tool call + final answer), got {}",
+            result.iterations
+        );
+        // Session history should contain: user, assistant(tool_use), user(tool_result), assistant(final)
+        assert!(
+            session.messages.len() >= 4,
+            "expected ≥4 messages after tool cycle, got {}",
+            session.messages.len()
+        );
+        // Assistant's second message must mention the MARKER file (proof tool
+        // result actually informed the final answer).
+        let response_lower = result.response.to_lowercase();
+        assert!(
+            response_lower.contains("marker"),
+            "final answer should reference the MARKER file from tool output, got: {:?}",
+            result.response
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DEEPSEEK_API_KEY"]
+    async fn live_deepseek_e2e_v4_flash_multi_turn() {
+        // Multi-turn conversation: agent must carry context across turns.
+        let key = std::env::var("DEEPSEEK_API_KEY").expect("DEEPSEEK_API_KEY must be set");
+        let memory = MemorySubstrate::open_in_memory(0.01).unwrap();
+        let agent_id = rusty_hand_types::agent::AgentId::new();
+        let mut session = rusty_hand_memory::session::Session {
+            id: rusty_hand_types::agent::SessionId::new(),
+            agent_id,
+            messages: Vec::new(),
+            context_window_tokens: 0,
+            label: None,
+        };
+        let manifest = deepseek_manifest("deepseek-v4-flash");
+        let driver = crate::drivers::create_driver(&crate::llm_driver::DriverConfig {
+            provider: "deepseek".to_string(),
+            api_key: Some(key),
+            base_url: None,
+        })
+        .unwrap();
+
+        // Turn 1 — establish a fact
+        let turn1 = run_agent_loop(
+            &manifest,
+            "Remember this number: 42. Reply 'ok'.",
+            &mut session,
+            &memory,
+            driver.clone(),
+            &[],
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("turn 1 should complete");
+        assert!(!turn1.response.trim().is_empty());
+
+        // Turn 2 — model must recall across turns
+        let turn2 = run_agent_loop(
+            &manifest,
+            "What number did I ask you to remember?",
+            &mut session,
+            &memory,
+            driver,
+            &[],
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("turn 2 should complete");
+        assert!(
+            turn2.response.contains("42"),
+            "model should recall '42' from turn 1, got: {:?}",
+            turn2.response
+        );
+        // Full 4-turn history: [user1, asst1, user2, asst2]
+        assert_eq!(session.messages.len(), 4);
+    }
 }

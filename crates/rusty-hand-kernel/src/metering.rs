@@ -151,8 +151,10 @@ impl MeteringEngine {
     /// | claude-sonnet         |     3.00  |     15.00  |
     /// | claude-opus           |    15.00  |     75.00  |
     /// | kimi-* (Kimi Code)    |     0.60  |      2.50  |
-    /// | deepseek-chat         |     0.27  |      1.10  |
-    /// | deepseek-reasoner/r1  |     0.55  |      2.19  |
+    /// | deepseek-v4-flash     |     0.27  |      1.10  |
+    /// | deepseek-v4-pro       |     0.55  |      2.19  |
+    /// | deepseek-chat (v3)    |     0.27  |      1.10  |  (deprecated 2026-07-24)
+    /// | deepseek-reasoner/r1  |     0.55  |      2.19  |  (deprecated 2026-07-24)
     /// | MiniMax-M2            |     0.50  |      2.00  |
     /// | MiniMax-M1            |     0.30  |      1.10  |
     /// | glm-4-flash           |     0.10  |      0.10  |
@@ -238,6 +240,15 @@ fn estimate_cost_rates(model: &str) -> (f64, f64) {
     }
 
     // ── DeepSeek ───────────────────────────────────────────────
+    // V4 lineup first (deepseek-chat/reasoner deprecated 2026-07-24).
+    // Specific patterns before generic; `deepseek-v4-pro` must precede
+    // the generic `deepseek` fallback or it would mis-price at flash rates.
+    if model.contains("deepseek-v4-pro") {
+        return (0.55, 2.19);
+    }
+    if model.contains("deepseek-v4-flash") {
+        return (0.27, 1.10);
+    }
     if model.contains("deepseek-reasoner") || model.contains("deepseek-r1") {
         return (0.55, 2.19);
     }
@@ -425,6 +436,30 @@ mod tests {
     fn test_estimate_cost_deepseek_reasoner() {
         let cost = MeteringEngine::estimate_cost("deepseek-reasoner", 1_000_000, 1_000_000);
         assert!((cost - 2.74).abs() < 0.01); // $0.55 + $2.19
+    }
+
+    #[test]
+    fn test_estimate_cost_deepseek_v4_flash() {
+        let cost = MeteringEngine::estimate_cost("deepseek-v4-flash", 1_000_000, 1_000_000);
+        assert!((cost - 1.37).abs() < 0.01); // $0.27 + $1.10
+    }
+
+    #[test]
+    fn test_estimate_cost_deepseek_v4_pro() {
+        let cost = MeteringEngine::estimate_cost("deepseek-v4-pro", 1_000_000, 1_000_000);
+        assert!((cost - 2.74).abs() < 0.01); // $0.55 + $2.19
+    }
+
+    #[test]
+    fn test_deepseek_v4_pro_does_not_fall_through_to_flash() {
+        // Regression guard: the v4-pro match arm must precede the generic
+        // `deepseek` fallback, or pro would mis-price at flash rates.
+        let flash = MeteringEngine::estimate_cost("deepseek-v4-flash", 1_000_000, 1_000_000);
+        let pro = MeteringEngine::estimate_cost("deepseek-v4-pro", 1_000_000, 1_000_000);
+        assert!(
+            pro > flash,
+            "expected v4-pro > v4-flash, got pro={pro} flash={flash}"
+        );
     }
 
     #[test]

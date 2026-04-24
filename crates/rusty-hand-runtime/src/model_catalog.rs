@@ -270,8 +270,13 @@ fn builtin_aliases() -> HashMap<String, String> {
         ("k2-thinking", "kimi-for-coding"),
         ("kimi-k2-thinking", "kimi-for-coding"),
         ("kimi-code", "kimi-for-coding"),
-        // DeepSeek
-        ("deepseek", "deepseek-chat"),
+        // DeepSeek — `deepseek` alias resolves to the current default
+        // (V4 Flash). V3/R1 stay reachable via explicit v3/r1 aliases until
+        // their 2026-07-24 deprecation.
+        ("deepseek", "deepseek-v4-flash"),
+        ("deepseek-v4", "deepseek-v4-flash"),
+        ("deepseek-flash", "deepseek-v4-flash"),
+        ("deepseek-pro", "deepseek-v4-pro"),
         ("deepseek-v3", "deepseek-chat"),
         ("deepseek-r1", "deepseek-reasoner"),
         // Zhipu / GLM
@@ -358,11 +363,48 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
             ],
         },
         // ══════════════════════════════════════════════════════════════
-        // DeepSeek (2)
+        // DeepSeek (4) — V4 lineup leads; V3/R1 kept until 2026-07-24 deprecation.
+        // Also reachable via Anthropic wire at DEEPSEEK_ANTHROPIC_BASE_URL.
         // ══════════════════════════════════════════════════════════════
+        // V4 Flash and V4 Pro are BOTH reasoning models — response contains
+        // a reasoning_content block (OpenAI wire) or a {type:"thinking"} block
+        // (Anthropic wire) before the final answer. Budget max_output_tokens
+        // generously (32K) so reasoning + answer fits.
+        ModelCatalogEntry {
+            id: "deepseek-v4-flash".into(),
+            display_name: "DeepSeek V4 Flash (reasoning)".into(),
+            provider: "deepseek".into(),
+            tier: ModelTier::Smart,
+            context_window: 128_000,
+            max_output_tokens: 32_768,
+            input_cost_per_m: 0.27,
+            output_cost_per_m: 1.10,
+            supports_tools: true,
+            supports_vision: false,
+            supports_streaming: true,
+            aliases: vec![
+                "deepseek".into(),
+                "deepseek-v4".into(),
+                "deepseek-flash".into(),
+            ],
+        },
+        ModelCatalogEntry {
+            id: "deepseek-v4-pro".into(),
+            display_name: "DeepSeek V4 Pro (reasoning)".into(),
+            provider: "deepseek".into(),
+            tier: ModelTier::Frontier,
+            context_window: 128_000,
+            max_output_tokens: 32_768,
+            input_cost_per_m: 0.55,
+            output_cost_per_m: 2.19,
+            supports_tools: true,
+            supports_vision: false,
+            supports_streaming: true,
+            aliases: vec!["deepseek-pro".into()],
+        },
         ModelCatalogEntry {
             id: "deepseek-chat".into(),
-            display_name: "DeepSeek V3".into(),
+            display_name: "DeepSeek V3 (deprecated 2026-07-24)".into(),
             provider: "deepseek".into(),
             tier: ModelTier::Smart,
             context_window: 64_000,
@@ -372,11 +414,11 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
             supports_tools: true,
             supports_vision: false,
             supports_streaming: true,
-            aliases: vec!["deepseek".into(), "deepseek-v3".into()],
+            aliases: vec!["deepseek-v3".into()],
         },
         ModelCatalogEntry {
             id: "deepseek-reasoner".into(),
-            display_name: "DeepSeek R1".into(),
+            display_name: "DeepSeek R1 (deprecated 2026-07-24)".into(),
             provider: "deepseek".into(),
             tier: ModelTier::Frontier,
             context_window: 64_000,
@@ -650,11 +692,68 @@ mod tests {
     #[test]
     fn test_deepseek_aliases() {
         let catalog = ModelCatalog::new();
-        assert_eq!(catalog.find_model("deepseek").unwrap().id, "deepseek-chat");
+        // `deepseek` points to the current default (V4 Flash) post-v0.7.1.
+        assert_eq!(
+            catalog.find_model("deepseek").unwrap().id,
+            "deepseek-v4-flash"
+        );
+        assert_eq!(
+            catalog.find_model("deepseek-v4").unwrap().id,
+            "deepseek-v4-flash"
+        );
+        assert_eq!(
+            catalog.find_model("deepseek-flash").unwrap().id,
+            "deepseek-v4-flash"
+        );
+        assert_eq!(
+            catalog.find_model("deepseek-pro").unwrap().id,
+            "deepseek-v4-pro"
+        );
+        // Legacy V3/R1 still reachable until 2026-07-24 deprecation.
+        assert_eq!(
+            catalog.find_model("deepseek-v3").unwrap().id,
+            "deepseek-chat"
+        );
         assert_eq!(
             catalog.find_model("deepseek-r1").unwrap().id,
             "deepseek-reasoner"
         );
+    }
+
+    #[test]
+    fn test_deepseek_v4_models_in_catalog() {
+        let catalog = ModelCatalog::new();
+        let models = catalog.models_by_provider("deepseek");
+        assert_eq!(
+            models.len(),
+            4,
+            "expected 4 DeepSeek entries (V4 Flash, V4 Pro, V3, R1)"
+        );
+        assert!(models.iter().any(|m| m.id == "deepseek-v4-flash"));
+        assert!(models.iter().any(|m| m.id == "deepseek-v4-pro"));
+        assert!(models.iter().any(|m| m.id == "deepseek-chat"));
+        assert!(models.iter().any(|m| m.id == "deepseek-reasoner"));
+    }
+
+    #[test]
+    fn test_deepseek_v4_tiers_and_pricing() {
+        let catalog = ModelCatalog::new();
+        let flash = catalog.find_model("deepseek-v4-flash").unwrap();
+        // V4 Flash is a reasoning model (not a Fast-tier simple responder),
+        // so it sits in the Smart tier despite the "Flash" name.
+        assert_eq!(flash.tier, ModelTier::Smart);
+        assert!((flash.input_cost_per_m - 0.27).abs() < 0.01);
+        assert!((flash.output_cost_per_m - 1.10).abs() < 0.01);
+        assert_eq!(flash.context_window, 128_000);
+        // 32K output — reasoning + answer need room; 8K truncates.
+        assert_eq!(flash.max_output_tokens, 32_768);
+
+        let pro = catalog.find_model("deepseek-v4-pro").unwrap();
+        assert_eq!(pro.tier, ModelTier::Frontier);
+        assert!((pro.input_cost_per_m - 0.55).abs() < 0.01);
+        assert!((pro.output_cost_per_m - 2.19).abs() < 0.01);
+        assert_eq!(pro.context_window, 128_000);
+        assert_eq!(pro.max_output_tokens, 32_768);
     }
 
     #[test]

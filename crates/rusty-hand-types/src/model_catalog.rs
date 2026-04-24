@@ -22,6 +22,12 @@ pub const KIMI_CODE_BASE_URL: &str = "https://api.kimi.com/coding";
 
 // ── OpenAI-compatible clouds ──────────────────────────────────────
 pub const DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com/v1";
+// DeepSeek also exposes an Anthropic-compatible endpoint at the same hostname
+// (same DEEPSEEK_API_KEY, Messages API wire format). Useful for clients that
+// only speak Anthropic's wire, e.g. Claude Code pointed at DeepSeek backends.
+// Drive through `AnthropicDriver` by setting `provider = "anthropic"` +
+// `base_url = DEEPSEEK_ANTHROPIC_BASE_URL` + `api_key_env = "DEEPSEEK_API_KEY"`.
+pub const DEEPSEEK_ANTHROPIC_BASE_URL: &str = "https://api.deepseek.com/anthropic";
 pub const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
 pub const MINIMAX_BASE_URL: &str = "https://api.minimax.io/v1";
 pub const ZHIPU_BASE_URL: &str = "https://open.bigmodel.cn/api/paas/v4";

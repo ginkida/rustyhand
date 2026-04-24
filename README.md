@@ -19,8 +19,8 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT" />
-  <img src="https://img.shields.io/badge/version-0.7.0-green?style=flat-square" alt="v0.7.0" />
-  <img src="https://img.shields.io/badge/tests-1,733%20passing-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/version-0.7.1-green?style=flat-square" alt="v0.7.1" />
+  <img src="https://img.shields.io/badge/tests-1,741%20passing-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/clippy-0%20warnings-brightgreen?style=flat-square" alt="Clippy" />
 </p>
 
@@ -368,7 +368,7 @@ Copy `.env.example` to `~/.rustyhand/.env` and fill in the keys you need:
 # Priority order: Anthropic → Kimi → DeepSeek → Zhipu → MiniMax → OpenRouter.
 ANTHROPIC_API_KEY=sk-ant-...       # Claude Opus / Sonnet / Haiku (default)
 KIMI_API_KEY=sk-kimi-...            # Kimi Code — Anthropic-compat, 256K ctx
-DEEPSEEK_API_KEY=sk-...             # DeepSeek V3 / R1 (cheap reasoning)
+DEEPSEEK_API_KEY=sk-...             # DeepSeek V4 Flash / V4 Pro (V3/R1 legacy, deprecated 2026-07-24)
 ZHIPU_API_KEY=...                   # Zhipu GLM-4.6
 MINIMAX_API_KEY=eyJ...              # MiniMax M1 / M2.7 (1M context)
 OPENROUTER_API_KEY=sk-or-...        # Universal gateway (GPT/Gemini/Grok/etc.)
@@ -645,7 +645,7 @@ RustyHand v0.7.0 ships with a deliberately lean set of 7 providers, driven by 2 
 |---|---|---|
 | **Anthropic** (default) | `ANTHROPIC_API_KEY` | Claude Opus/Sonnet/Haiku — best-in-class tool use + extended thinking |
 | **Kimi (Moonshot)** | `KIMI_API_KEY` | Kimi Code — Anthropic-compatible, 256K ctx, vision, reasoning |
-| **DeepSeek** | `DEEPSEEK_API_KEY` | V3 + R1 — cheap reasoning |
+| **DeepSeek** | `DEEPSEEK_API_KEY` | V4 Flash + V4 Pro — fast & reasoning (V3/R1 deprecated 2026-07-24). Also exposes an Anthropic-compatible endpoint at `/anthropic` |
 | **Zhipu GLM** | `ZHIPU_API_KEY` | GLM-4.6 — Chinese frontier |
 | **MiniMax** | `MINIMAX_API_KEY` | M1/M2 — 1M context |
 | **OpenRouter** | `OPENROUTER_API_KEY` | Universal gateway — any model via one key |
@@ -891,7 +891,7 @@ Set `RUSTYHAND_FORCE_ENV_CONFIG=1` to always regenerate config from env vars (ov
 |---------|----------|
 | `ANTHROPIC_API_KEY` | Anthropic Claude (default) |
 | `KIMI_API_KEY` | Kimi Code (Moonshot) |
-| `DEEPSEEK_API_KEY` | DeepSeek V3 / R1 |
+| `DEEPSEEK_API_KEY` | DeepSeek V4 Flash / V4 Pro (V3/R1 legacy, deprecated 2026-07-24) |
 | `ZHIPU_API_KEY` | Zhipu GLM-4.6 |
 | `MINIMAX_API_KEY` | MiniMax M1 / M2 |
 | `OPENROUTER_API_KEY` | OpenRouter gateway (any upstream model) |

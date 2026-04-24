@@ -6,7 +6,7 @@ module = "builtin:chat"
 
 [model]
 provider = "deepseek"
-model = "deepseek-chat"
+model = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
 max_tokens = 8192
 temperature = 0.3

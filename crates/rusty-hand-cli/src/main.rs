@@ -1476,7 +1476,12 @@ fn provider_list() -> Vec<(&'static str, &'static str, &'static str, &'static st
             "Anthropic",
         ),
         ("kimi", "KIMI_API_KEY", "kimi-for-coding", "Kimi"),
-        ("deepseek", "DEEPSEEK_API_KEY", "deepseek-chat", "DeepSeek"),
+        (
+            "deepseek",
+            "DEEPSEEK_API_KEY",
+            "deepseek-v4-flash",
+            "DeepSeek",
+        ),
         ("zhipu", "ZHIPU_API_KEY", "glm-4-plus", "Zhipu GLM"),
         ("minimax", "MINIMAX_API_KEY", "MiniMax-M2.7", "MiniMax"),
         (
@@ -2382,7 +2387,7 @@ decay_rate = 0.05
             ui::suggest_cmd("Kimi Code:", "https://platform.moonshot.ai/console/code");
             ui::suggest_cmd(
                 "DeepSeek:",
-                "https://platform.deepseek.com  (cheap reasoning)",
+                "https://platform.deepseek.com  (V4 Flash + V4 Pro — fast & reasoning)",
             );
             ui::suggest_cmd("Ollama:", "https://ollama.com              (local, free)");
             ui::blank();

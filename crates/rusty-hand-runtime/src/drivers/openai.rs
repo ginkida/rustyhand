@@ -55,6 +55,14 @@ struct OaiMessage {
     tool_calls: Option<Vec<OaiToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_call_id: Option<String>,
+    /// Reasoning content echoed back to the provider. DeepSeek V4 reasoning
+    /// models reject multi-turn requests when the previous assistant turn had
+    /// a reasoning trace and we omit this field ("The `reasoning_content` in
+    /// the thinking mode must be passed back to the API."). Other OpenAI-
+    /// compat providers ignore unknown fields, so keeping this on all
+    /// outbound assistant messages is safe.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_content: Option<String>,
 }
 
 /// Content can be a plain string or an array of content parts (for images).
@@ -146,6 +154,7 @@ impl LlmDriver for OpenAIDriver {
                 content: Some(OaiMessageContent::Text(system.clone())),
                 tool_calls: None,
                 tool_call_id: None,
+                reasoning_content: None,
             });
         }
 
@@ -158,6 +167,7 @@ impl LlmDriver for OpenAIDriver {
                         content: Some(OaiMessageContent::Text(text.clone())),
                         tool_calls: None,
                         tool_call_id: None,
+                        reasoning_content: None,
                     });
                 }
                 (Role::User, MessageContent::Text(text)) => {
@@ -166,6 +176,7 @@ impl LlmDriver for OpenAIDriver {
                         content: Some(OaiMessageContent::Text(text.clone())),
                         tool_calls: None,
                         tool_call_id: None,
+                        reasoning_content: None,
                     });
                 }
                 (Role::Assistant, MessageContent::Text(text)) => {
@@ -174,6 +185,7 @@ impl LlmDriver for OpenAIDriver {
                         content: Some(OaiMessageContent::Text(text.clone())),
                         tool_calls: None,
                         tool_call_id: None,
+                        reasoning_content: None,
                     });
                 }
                 (Role::User, MessageContent::Blocks(blocks)) => {
@@ -193,6 +205,7 @@ impl LlmDriver for OpenAIDriver {
                                     content: Some(OaiMessageContent::Text(content.clone())),
                                     tool_calls: None,
                                     tool_call_id: Some(tool_use_id.clone()),
+                                    reasoning_content: None,
                                 });
                             }
                             ContentBlock::Text { text } => {
@@ -215,12 +228,14 @@ impl LlmDriver for OpenAIDriver {
                             content: Some(OaiMessageContent::Parts(parts)),
                             tool_calls: None,
                             tool_call_id: None,
+                            reasoning_content: None,
                         });
                     }
                 }
                 (Role::Assistant, MessageContent::Blocks(blocks)) => {
                     let mut text_parts = Vec::new();
                     let mut tool_calls = Vec::new();
+                    let mut thinking_parts = Vec::new();
                     for block in blocks {
                         match block {
                             ContentBlock::Text { text } => text_parts.push(text.clone()),
@@ -234,7 +249,9 @@ impl LlmDriver for OpenAIDriver {
                                     },
                                 });
                             }
-                            ContentBlock::Thinking { .. } => {}
+                            ContentBlock::Thinking { thinking } => {
+                                thinking_parts.push(thinking.clone());
+                            }
                             _ => {}
                         }
                     }
@@ -251,6 +268,11 @@ impl LlmDriver for OpenAIDriver {
                             Some(tool_calls)
                         },
                         tool_call_id: None,
+                        reasoning_content: if thinking_parts.is_empty() {
+                            None
+                        } else {
+                            Some(thinking_parts.join("\n"))
+                        },
                     });
                 }
                 _ => {}
@@ -471,6 +493,7 @@ impl LlmDriver for OpenAIDriver {
                 content: Some(OaiMessageContent::Text(system.clone())),
                 tool_calls: None,
                 tool_call_id: None,
+                reasoning_content: None,
             });
         }
 
@@ -482,6 +505,7 @@ impl LlmDriver for OpenAIDriver {
                         content: Some(OaiMessageContent::Text(text.clone())),
                         tool_calls: None,
                         tool_call_id: None,
+                        reasoning_content: None,
                     });
                 }
                 (Role::User, MessageContent::Text(text)) => {
@@ -490,6 +514,7 @@ impl LlmDriver for OpenAIDriver {
                         content: Some(OaiMessageContent::Text(text.clone())),
                         tool_calls: None,
                         tool_call_id: None,
+                        reasoning_content: None,
                     });
                 }
                 (Role::Assistant, MessageContent::Text(text)) => {
@@ -498,6 +523,7 @@ impl LlmDriver for OpenAIDriver {
                         content: Some(OaiMessageContent::Text(text.clone())),
                         tool_calls: None,
                         tool_call_id: None,
+                        reasoning_content: None,
                     });
                 }
                 (Role::User, MessageContent::Blocks(blocks)) => {
@@ -513,6 +539,7 @@ impl LlmDriver for OpenAIDriver {
                                 content: Some(OaiMessageContent::Text(content.clone())),
                                 tool_calls: None,
                                 tool_call_id: Some(tool_use_id.clone()),
+                                reasoning_content: None,
                             });
                         }
                     }
@@ -520,6 +547,7 @@ impl LlmDriver for OpenAIDriver {
                 (Role::Assistant, MessageContent::Blocks(blocks)) => {
                     let mut text_parts = Vec::new();
                     let mut tool_calls_out = Vec::new();
+                    let mut thinking_parts = Vec::new();
                     for block in blocks {
                         match block {
                             ContentBlock::Text { text } => text_parts.push(text.clone()),
@@ -533,7 +561,9 @@ impl LlmDriver for OpenAIDriver {
                                     },
                                 });
                             }
-                            ContentBlock::Thinking { .. } => {}
+                            ContentBlock::Thinking { thinking } => {
+                                thinking_parts.push(thinking.clone());
+                            }
                             _ => {}
                         }
                     }
@@ -550,6 +580,11 @@ impl LlmDriver for OpenAIDriver {
                             Some(tool_calls_out)
                         },
                         tool_call_id: None,
+                        reasoning_content: if thinking_parts.is_empty() {
+                            None
+                        } else {
+                            Some(thinking_parts.join("\n"))
+                        },
                     });
                 }
                 _ => {}
@@ -1049,6 +1084,55 @@ mod tests {
     fn test_openai_driver_creation() {
         let driver = OpenAIDriver::new("test-key".to_string(), "http://localhost".to_string());
         assert_eq!(driver.api_key.as_str(), "test-key");
+    }
+
+    #[test]
+    fn test_oai_message_serializes_reasoning_content() {
+        // Regression: DeepSeek V4 reasoning models require that assistant
+        // messages with tool_calls include the original `reasoning_content`
+        // when echoed back. Prior to this fix, we dropped Thinking blocks on
+        // the floor and DeepSeek returned HTTP 400
+        // "The `reasoning_content` in the thinking mode must be passed back
+        // to the API." on the second turn of a tool-use cycle.
+        let msg = OaiMessage {
+            role: "assistant".to_string(),
+            content: None,
+            tool_calls: Some(vec![OaiToolCall {
+                id: "call_1".to_string(),
+                call_type: "function".to_string(),
+                function: OaiFunction {
+                    name: "get_weather".to_string(),
+                    arguments: "{\"city\":\"Paris\"}".to_string(),
+                },
+            }]),
+            tool_call_id: None,
+            reasoning_content: Some("Thinking about weather for Paris".to_string()),
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(
+            json["reasoning_content"],
+            serde_json::json!("Thinking about weather for Paris")
+        );
+        assert_eq!(json["role"], "assistant");
+        assert_eq!(json["tool_calls"][0]["function"]["name"], "get_weather");
+    }
+
+    #[test]
+    fn test_oai_message_omits_reasoning_content_when_none() {
+        // Non-reasoning providers should not see a stray `reasoning_content`
+        // field. `skip_serializing_if = Option::is_none` guards this.
+        let msg = OaiMessage {
+            role: "user".to_string(),
+            content: Some(OaiMessageContent::Text("hello".to_string())),
+            tool_calls: None,
+            tool_call_id: None,
+            reasoning_content: None,
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert!(
+            json.get("reasoning_content").is_none(),
+            "reasoning_content must be omitted when None, got: {json}"
+        );
     }
 
     #[test]

@@ -47,9 +47,9 @@ const PROVIDERS: &[ProviderInfo] = &[
         name: "deepseek",
         display: "DeepSeek",
         env_var: "DEEPSEEK_API_KEY",
-        default_model: "deepseek-chat",
+        default_model: "deepseek-v4-flash",
         needs_key: true,
-        hint: "cheap reasoning",
+        hint: "V4 Flash + V4 Pro",
     },
     ProviderInfo {
         name: "zhipu",
