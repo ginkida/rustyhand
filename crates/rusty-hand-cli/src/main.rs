@@ -3483,7 +3483,6 @@ fn cmd_channel_list() {
     println!("{}", "-".repeat(50));
 
     let channels: Vec<(&str, &str)> = vec![
-        ("webchat", ""),
         ("telegram", "TELEGRAM_BOT_TOKEN"),
         ("discord", "DISCORD_BOT_TOKEN"),
         ("slack", "SLACK_BOT_TOKEN"),
@@ -3491,11 +3490,7 @@ fn cmd_channel_list() {
 
     for (name, env_var) in channels {
         let configured = config_str.contains(&format!("[channels.{name}]"));
-        let env_set = if env_var.is_empty() {
-            true
-        } else {
-            std::env::var(env_var).is_ok()
-        };
+        let env_set = std::env::var(env_var).is_ok();
 
         let status = match (configured, env_set) {
             (true, true) => "Ready",
@@ -3503,12 +3498,7 @@ fn cmd_channel_list() {
             (false, _) => "Not configured",
         };
 
-        println!(
-            "{:<12} {:<10} {}",
-            name,
-            if env_var.is_empty() { "—" } else { env_var },
-            status,
-        );
+        println!("{:<12} {:<10} {}", name, env_var, status);
     }
 
     println!("\nUse `rustyhand channel setup <channel>` to configure a channel.");
