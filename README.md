@@ -6,7 +6,7 @@
 <h3 align="center">The Agent Operating System</h3>
 
 <p align="center">
-  Open-source Agent OS built in Rust. 137K LOC. 10 crates. 1,700+ tests. Zero clippy warnings.<br/>
+  Open-source Agent OS built in Rust. 117K LOC. 10 crates. 1,400+ tests. Zero clippy warnings.<br/>
   <strong>One binary. Autonomous Telegram agent. Agents that actually work for you.</strong>
 </p>
 
@@ -19,8 +19,8 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT" />
-  <img src="https://img.shields.io/badge/version-0.7.3-green?style=flat-square" alt="v0.7.3" />
-  <img src="https://img.shields.io/badge/tests-1,746%20passing-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/version-0.7.5-green?style=flat-square" alt="v0.7.5" />
+  <img src="https://img.shields.io/badge/tests-1,475%20passing-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/clippy-0%20warnings-brightgreen?style=flat-square" alt="Clippy" />
 </p>
 
@@ -66,7 +66,7 @@ This project is based on [OpenFang](https://github.com/RightNow-AI/openfang) by 
 - [CLI Reference](#cli-reference)
 - [Autonomous Templates](#autonomous-templates)
 - [40 Pre-built Agent Templates](#40-pre-built-agent-templates)
-- [37 Channel Adapters](#37-channel-adapters)
+- [Channel Adapters](#channel-adapters)
 - [7 LLM Providers](#7-llm-providers)
 - [Architecture](#architecture)
 - [API Endpoints](#api-endpoints)
@@ -611,25 +611,35 @@ agent_spawn = false
 
 ---
 
-## 37 Channel Adapters
+## Channel Adapters
 
-Connect agents to every platform your users are on. Each adapter supports per-channel model overrides, DM/group policies, rate limiting, and output formatting.
+RustyHand ships three messaging adapters — the ones whose APIs work without
+a public webhook URL, which is what most users actually run:
 
-**Core:** Telegram, Discord, Slack, WhatsApp, Signal, Matrix
-**Enterprise:** Microsoft Teams, Mattermost, Google Chat, Webex, Feishu/Lark, Zulip
-**Social:** LINE, Viber, Facebook Messenger, Mastodon, Bluesky, Reddit, LinkedIn, Twitch
-**Community:** IRC, Guilded, Revolt, Keybase, Discourse, Gitter, Rocket.Chat
-**Privacy:** Threema, Mumble, Nextcloud Talk, Ntfy, Gotify
-**Workplace:** Pumble, Flock, Twist, DingTalk, Webhooks
+- **Telegram** — long-polling Bot API (`@BotFather` token).
+- **Discord** — Gateway WebSocket (Developer Portal bot token).
+- **Slack** — Socket Mode (`xapp-` app token + `xoxb-` bot token).
+
+Each adapter supports per-channel model overrides, DM/group policies, rate
+limiting, and output formatting.
+
+> v0.7.4 and earlier shipped 38 adapters (Matrix, WhatsApp, Signal, Teams,
+> IRC, ...). They were dropped in v0.7.5 — most were webhook-only and broken
+> in typical localhost / home-Docker setups, and many were sprint fillers
+> without real usage. Pin to v0.7.4 if you need them, or open an issue and
+> we'll discuss a route.
 
 ### Channel policies
 
-Each channel supports fine-grained control in `config.toml`:
+Configure each channel under the `[channels.*]` table in `config.toml`:
 
 ```toml
-[telegram]
+[channels.telegram]
 bot_token_env = "TELEGRAM_BOT_TOKEN"
 allowed_users = [123456789]            # Restrict to specific users
+default_agent = "assistant"            # Route inbound messages here
+
+[channels.telegram.overrides]
 dm_policy = "Respond"                  # Respond | AllowedOnly | Ignore
 group_policy = "MentionOnly"           # All | MentionOnly | CommandsOnly | Ignore
 output_format = "TelegramHtml"         # Markdown | TelegramHtml | SlackMrkdwn | PlainText
@@ -705,7 +715,7 @@ rusty-hand-types       Core types, traits, config, taint tracking, Ed25519 manif
     |
     +-- rusty-hand-memory      SQLite persistence, vector embeddings (Voyage/OpenAI/Ollama), session compaction
     +-- rusty-hand-wire        RHP P2P protocol (JSON-RPC over TCP, HMAC-SHA256 auth)
-    +-- rusty-hand-channels    37 messaging adapters with rate limiting
+    +-- rusty-hand-channels    Telegram + Discord + Slack adapters with rate limiting
     +-- rusty-hand-skills      Skill system + ClawHub marketplace
     +-- rusty-hand-extensions  25 MCP integrations, AES-256-GCM credential vault, OAuth2
     |
@@ -1017,7 +1027,7 @@ rustyhand/
         index_head.html     # CSS + fonts
     rusty-hand-kernel/      # Central kernel (~5300 LOC, 40+ fields)
     rusty-hand-cli/         # CLI + TUI binary
-    rusty-hand-channels/    # 37 messaging adapters
+    rusty-hand-channels/    # Telegram + Discord + Slack adapters
     rusty-hand-skills/      # Skill system + ClawHub + OpenClaw compat
     rusty-hand-extensions/  # MCP + vault + OAuth2
 ```
@@ -1055,7 +1065,7 @@ All data from official documentation and public repositories — April 2026.
 | **Idle memory** | 40 MB | 5 MB | 180 MB | 200 MB | 250 MB | 394 MB |
 | **Install size** | 32 MB | 8.8 MB | 150 MB | 100 MB | 200 MB | 500 MB |
 | **Security layers** | 16 | 6 | 2 | 1 | 2 | 3 |
-| **Channel adapters** | 37 | 15 | 0 | 0 | 0 | 13 |
+| **Channel adapters** | 3 | 15 | 0 | 0 | 0 | 13 |
 | **LLM providers** | 7 (+ OpenRouter gateway) | 28 | 15 | 10 | 8 | 10 |
 | **Language** | Rust | Rust | Python | Python | Python | TypeScript |
 
@@ -1141,7 +1151,7 @@ An AI agent (Claude, GPT, etc.) can autonomously:
 
 - **Delegate work** — spawn specialized agents instead of doing everything yourself
 - **Persistent memory** — agents remember context across sessions (vector search + knowledge graph)
-- **37 channels** — reach users on Telegram, Discord, Slack, etc. without building integrations
+- **3 channels** — reach users on Telegram, Discord, and Slack without building integrations
 - **Budget control** — set spending limits so agents can't run up costs
 - **7 LLM providers** — Anthropic, Kimi, DeepSeek, Zhipu, MiniMax, OpenRouter, Ollama — plus OpenRouter gateway to any other model
 - **Autonomous scheduling** — cron jobs run agents on schedule, no human needed
