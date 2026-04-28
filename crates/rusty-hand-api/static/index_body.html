@@ -2041,17 +2041,6 @@
           </div>
           <div x-show="!loading && !loadError">
 
-          <!-- Category tabs -->
-          <div class="flex gap-2 mb-4" style="flex-wrap:wrap">
-            <template x-for="cat in categories" :key="cat.key">
-              <button class="btn btn-sm"
-                      :class="categoryFilter === cat.key ? 'btn-primary' : 'btn-ghost'"
-                      @click="categoryFilter = cat.key"
-                      x-text="cat.label + ' (' + categoryCount(cat.key) + ')'">
-              </button>
-            </template>
-          </div>
-
           <!-- Search bar -->
           <div class="mb-4">
             <input class="form-input" type="text" placeholder="Search channels..."

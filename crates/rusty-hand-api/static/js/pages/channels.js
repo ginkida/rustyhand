@@ -4,7 +4,6 @@
 function channelsPage() {
   return {
     allChannels: [],
-    categoryFilter: 'all',
     searchQuery: '',
     setupModal: null,
     configuring: false,
@@ -19,33 +18,19 @@ function channelsPage() {
     setupStep: 1, // 1=Configure, 2=Verify, 3=Ready
     testPassed: false,
 
-    categories: [
-      { key: 'all', label: 'All' },
-      { key: 'messaging', label: 'Messaging' }
-    ],
-
     get filteredChannels() {
       var self = this;
+      if (!this.searchQuery) return this.allChannels;
+      var q = this.searchQuery.toLowerCase();
       return this.allChannels.filter(function(ch) {
-        if (self.categoryFilter !== 'all' && ch.category !== self.categoryFilter) return false;
-        if (self.searchQuery) {
-          var q = self.searchQuery.toLowerCase();
-          return ch.name.toLowerCase().indexOf(q) !== -1 ||
-                 ch.display_name.toLowerCase().indexOf(q) !== -1 ||
-                 ch.description.toLowerCase().indexOf(q) !== -1;
-        }
-        return true;
+        return ch.name.toLowerCase().indexOf(q) !== -1 ||
+               ch.display_name.toLowerCase().indexOf(q) !== -1 ||
+               ch.description.toLowerCase().indexOf(q) !== -1;
       });
     },
 
     get configuredCount() {
       return this.allChannels.filter(function(ch) { return ch.configured; }).length;
-    },
-
-    categoryCount(cat) {
-      var all = this.allChannels.filter(function(ch) { return cat === 'all' || ch.category === cat; });
-      var configured = all.filter(function(ch) { return ch.configured; });
-      return configured.length + '/' + all.length;
     },
 
     basicFields() {

@@ -1478,26 +1478,21 @@ struct ChannelMeta {
     display_name: &'static str,
     icon: &'static str,
     description: &'static str,
-    category: &'static str,
     difficulty: &'static str,
     setup_time: &'static str,
     /// One-line quick setup hint shown in the simple form view.
     quick_setup: &'static str,
-    /// Setup type: "form" (default), "qr" (QR code scan + form fallback).
-    setup_type: &'static str,
     fields: &'static [ChannelField],
     setup_steps: &'static [&'static str],
     config_template: &'static str,
 }
 
 const CHANNEL_REGISTRY: &[ChannelMeta] = &[
-    // ── Messaging (12) ──────────────────────────────────────────────
     ChannelMeta {
         name: "telegram", display_name: "Telegram", icon: "TG",
         description: "Telegram Bot API — long-polling adapter",
-        category: "messaging", difficulty: "Easy", setup_time: "~2 min",
+        difficulty: "Easy", setup_time: "~2 min",
         quick_setup: "Paste your bot token from @BotFather",
-        setup_type: "form",
         fields: &[
             ChannelField { key: "bot_token_env", label: "Bot Token", field_type: FieldType::Secret, env_var: Some("TELEGRAM_BOT_TOKEN"), required: true, placeholder: "123456:ABC-DEF...", advanced: false },
             ChannelField { key: "allowed_users", label: "Allowed User IDs", field_type: FieldType::List, env_var: None, required: false, placeholder: "12345, 67890", advanced: true },
@@ -1510,9 +1505,8 @@ const CHANNEL_REGISTRY: &[ChannelMeta] = &[
     ChannelMeta {
         name: "discord", display_name: "Discord", icon: "DC",
         description: "Discord Gateway bot adapter",
-        category: "messaging", difficulty: "Easy", setup_time: "~3 min",
+        difficulty: "Easy", setup_time: "~3 min",
         quick_setup: "Paste your bot token from the Discord Developer Portal",
-        setup_type: "form",
         fields: &[
             ChannelField { key: "bot_token_env", label: "Bot Token", field_type: FieldType::Secret, env_var: Some("DISCORD_BOT_TOKEN"), required: true, placeholder: "MTIz...", advanced: false },
             ChannelField { key: "allowed_guilds", label: "Allowed Guild IDs", field_type: FieldType::List, env_var: None, required: false, placeholder: "123456789, 987654321", advanced: true },
@@ -1525,9 +1519,8 @@ const CHANNEL_REGISTRY: &[ChannelMeta] = &[
     ChannelMeta {
         name: "slack", display_name: "Slack", icon: "SL",
         description: "Slack Socket Mode + Events API",
-        category: "messaging", difficulty: "Medium", setup_time: "~5 min",
+        difficulty: "Medium", setup_time: "~5 min",
         quick_setup: "Paste your App Token and Bot Token from api.slack.com",
-        setup_type: "form",
         fields: &[
             ChannelField { key: "app_token_env", label: "App Token (xapp-)", field_type: FieldType::Secret, env_var: Some("SLACK_APP_TOKEN"), required: true, placeholder: "xapp-1-...", advanced: false },
             ChannelField { key: "bot_token_env", label: "Bot Token (xoxb-)", field_type: FieldType::Secret, env_var: Some("SLACK_BOT_TOKEN"), required: true, placeholder: "xoxb-...", advanced: false },
@@ -1604,11 +1597,9 @@ pub async fn list_channels(State(state): State<Arc<AppState>>) -> impl IntoRespo
             "display_name": meta.display_name,
             "icon": meta.icon,
             "description": meta.description,
-            "category": meta.category,
             "difficulty": meta.difficulty,
             "setup_time": meta.setup_time,
             "quick_setup": meta.quick_setup,
-            "setup_type": meta.setup_type,
             "configured": configured,
             "has_token": has_token,
             "fields": fields,
