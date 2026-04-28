@@ -1,4 +1,5 @@
-//! Channels screen: list all 40 adapters, setup wizards, test & toggle.
+//! Channels screen: list the supported adapters (Telegram, Discord, Slack),
+//! setup wizards, test & toggle.
 
 use crate::tui::theme;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -27,7 +28,7 @@ pub enum ChannelStatus {
     NotConfigured,
 }
 
-// ── Channel definitions — all 40 adapters ───────────────────────────────────
+// ── Channel definitions — Telegram + Discord + Slack ────────────────────────
 
 struct ChannelDef {
     name: &'static str,
@@ -38,20 +39,19 @@ struct ChannelDef {
 }
 
 const CHANNEL_DEFS: &[ChannelDef] = &[
-    // ── Messaging (12)
     ChannelDef {
         name: "telegram",
         display_name: "Telegram",
         category: "Messaging",
         env_vars: &["TELEGRAM_BOT_TOKEN"],
-        description: "Telegram Bot API adapter",
+        description: "Telegram Bot API adapter (long-polling)",
     },
     ChannelDef {
         name: "discord",
         display_name: "Discord",
         category: "Messaging",
         env_vars: &["DISCORD_BOT_TOKEN"],
-        description: "Discord bot adapter",
+        description: "Discord Gateway WebSocket adapter",
     },
     ChannelDef {
         name: "slack",
@@ -60,272 +60,9 @@ const CHANNEL_DEFS: &[ChannelDef] = &[
         env_vars: &["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN"],
         description: "Slack Socket Mode adapter",
     },
-    ChannelDef {
-        name: "whatsapp",
-        display_name: "WhatsApp",
-        category: "Messaging",
-        env_vars: &["WHATSAPP_ACCESS_TOKEN", "WHATSAPP_VERIFY_TOKEN"],
-        description: "WhatsApp Cloud API adapter",
-    },
-    ChannelDef {
-        name: "signal",
-        display_name: "Signal",
-        category: "Messaging",
-        env_vars: &[],
-        description: "Signal via signal-cli REST API",
-    },
-    ChannelDef {
-        name: "matrix",
-        display_name: "Matrix",
-        category: "Messaging",
-        env_vars: &["MATRIX_ACCESS_TOKEN"],
-        description: "Matrix/Element adapter",
-    },
-    ChannelDef {
-        name: "email",
-        display_name: "Email",
-        category: "Messaging",
-        env_vars: &["EMAIL_PASSWORD"],
-        description: "IMAP/SMTP email adapter",
-    },
-    ChannelDef {
-        name: "line",
-        display_name: "LINE",
-        category: "Messaging",
-        env_vars: &["LINE_CHANNEL_SECRET", "LINE_CHANNEL_ACCESS_TOKEN"],
-        description: "LINE Messaging API adapter",
-    },
-    ChannelDef {
-        name: "viber",
-        display_name: "Viber",
-        category: "Messaging",
-        env_vars: &["VIBER_AUTH_TOKEN"],
-        description: "Viber Bot API adapter",
-    },
-    ChannelDef {
-        name: "messenger",
-        display_name: "Messenger",
-        category: "Messaging",
-        env_vars: &["MESSENGER_PAGE_TOKEN", "MESSENGER_VERIFY_TOKEN"],
-        description: "Facebook Messenger adapter",
-    },
-    ChannelDef {
-        name: "threema",
-        display_name: "Threema",
-        category: "Messaging",
-        env_vars: &["THREEMA_SECRET"],
-        description: "Threema Gateway adapter",
-    },
-    ChannelDef {
-        name: "keybase",
-        display_name: "Keybase",
-        category: "Messaging",
-        env_vars: &["KEYBASE_PAPERKEY"],
-        description: "Keybase chat adapter",
-    },
-    // ── Social (5)
-    ChannelDef {
-        name: "reddit",
-        display_name: "Reddit",
-        category: "Social",
-        env_vars: &["REDDIT_CLIENT_SECRET", "REDDIT_PASSWORD"],
-        description: "Reddit API bot adapter",
-    },
-    ChannelDef {
-        name: "mastodon",
-        display_name: "Mastodon",
-        category: "Social",
-        env_vars: &["MASTODON_ACCESS_TOKEN"],
-        description: "Mastodon Streaming API adapter",
-    },
-    ChannelDef {
-        name: "bluesky",
-        display_name: "Bluesky",
-        category: "Social",
-        env_vars: &["BLUESKY_APP_PASSWORD"],
-        description: "Bluesky/AT Protocol adapter",
-    },
-    ChannelDef {
-        name: "linkedin",
-        display_name: "LinkedIn",
-        category: "Social",
-        env_vars: &["LINKEDIN_ACCESS_TOKEN"],
-        description: "LinkedIn Messaging API adapter",
-    },
-    // ── Enterprise (10)
-    ChannelDef {
-        name: "teams",
-        display_name: "Teams",
-        category: "Enterprise",
-        env_vars: &["TEAMS_APP_PASSWORD"],
-        description: "Microsoft Teams Bot Framework adapter",
-    },
-    ChannelDef {
-        name: "mattermost",
-        display_name: "Mattermost",
-        category: "Enterprise",
-        env_vars: &["MATTERMOST_TOKEN"],
-        description: "Mattermost WebSocket adapter",
-    },
-    ChannelDef {
-        name: "google_chat",
-        display_name: "Google Chat",
-        category: "Enterprise",
-        env_vars: &["GOOGLE_CHAT_SERVICE_ACCOUNT"],
-        description: "Google Chat service account adapter",
-    },
-    ChannelDef {
-        name: "webex",
-        display_name: "Webex",
-        category: "Enterprise",
-        env_vars: &["WEBEX_BOT_TOKEN"],
-        description: "Cisco Webex bot adapter",
-    },
-    ChannelDef {
-        name: "feishu",
-        display_name: "Feishu/Lark",
-        category: "Enterprise",
-        env_vars: &["FEISHU_APP_SECRET"],
-        description: "Feishu/Lark Open Platform adapter",
-    },
-    ChannelDef {
-        name: "dingtalk",
-        display_name: "DingTalk",
-        category: "Enterprise",
-        env_vars: &["DINGTALK_ACCESS_TOKEN", "DINGTALK_SECRET"],
-        description: "DingTalk Robot API adapter",
-    },
-    ChannelDef {
-        name: "pumble",
-        display_name: "Pumble",
-        category: "Enterprise",
-        env_vars: &["PUMBLE_BOT_TOKEN"],
-        description: "Pumble bot adapter",
-    },
-    ChannelDef {
-        name: "flock",
-        display_name: "Flock",
-        category: "Enterprise",
-        env_vars: &["FLOCK_BOT_TOKEN"],
-        description: "Flock bot adapter",
-    },
-    ChannelDef {
-        name: "twist",
-        display_name: "Twist",
-        category: "Enterprise",
-        env_vars: &["TWIST_TOKEN"],
-        description: "Twist API v3 adapter",
-    },
-    ChannelDef {
-        name: "zulip",
-        display_name: "Zulip",
-        category: "Enterprise",
-        env_vars: &["ZULIP_API_KEY"],
-        description: "Zulip event queue adapter",
-    },
-    // ── Developer (9)
-    ChannelDef {
-        name: "irc",
-        display_name: "IRC",
-        category: "Developer",
-        env_vars: &[],
-        description: "IRC raw TCP adapter",
-    },
-    ChannelDef {
-        name: "xmpp",
-        display_name: "XMPP",
-        category: "Developer",
-        env_vars: &["XMPP_PASSWORD"],
-        description: "XMPP/Jabber adapter",
-    },
-    ChannelDef {
-        name: "gitter",
-        display_name: "Gitter",
-        category: "Developer",
-        env_vars: &["GITTER_TOKEN"],
-        description: "Gitter Streaming API adapter",
-    },
-    ChannelDef {
-        name: "discourse",
-        display_name: "Discourse",
-        category: "Developer",
-        env_vars: &["DISCOURSE_API_KEY"],
-        description: "Discourse forum API adapter",
-    },
-    ChannelDef {
-        name: "revolt",
-        display_name: "Revolt",
-        category: "Developer",
-        env_vars: &["REVOLT_BOT_TOKEN"],
-        description: "Revolt bot adapter",
-    },
-    ChannelDef {
-        name: "guilded",
-        display_name: "Guilded",
-        category: "Developer",
-        env_vars: &["GUILDED_BOT_TOKEN"],
-        description: "Guilded bot adapter",
-    },
-    ChannelDef {
-        name: "nextcloud",
-        display_name: "Nextcloud",
-        category: "Developer",
-        env_vars: &["NEXTCLOUD_TOKEN"],
-        description: "Nextcloud Talk adapter",
-    },
-    ChannelDef {
-        name: "rocketchat",
-        display_name: "Rocket.Chat",
-        category: "Developer",
-        env_vars: &["ROCKETCHAT_TOKEN"],
-        description: "Rocket.Chat REST adapter",
-    },
-    ChannelDef {
-        name: "twitch",
-        display_name: "Twitch",
-        category: "Developer",
-        env_vars: &["TWITCH_OAUTH_TOKEN"],
-        description: "Twitch IRC gateway adapter",
-    },
-    // ── Notifications (4)
-    ChannelDef {
-        name: "ntfy",
-        display_name: "ntfy",
-        category: "Notifications",
-        env_vars: &["NTFY_TOKEN"],
-        description: "ntfy.sh pub/sub adapter",
-    },
-    ChannelDef {
-        name: "gotify",
-        display_name: "Gotify",
-        category: "Notifications",
-        env_vars: &["GOTIFY_APP_TOKEN", "GOTIFY_CLIENT_TOKEN"],
-        description: "Gotify WebSocket adapter",
-    },
-    ChannelDef {
-        name: "webhook",
-        display_name: "Webhook",
-        category: "Notifications",
-        env_vars: &["WEBHOOK_SECRET"],
-        description: "Generic webhook adapter",
-    },
-    ChannelDef {
-        name: "mumble",
-        display_name: "Mumble",
-        category: "Notifications",
-        env_vars: &["MUMBLE_PASSWORD"],
-        description: "Mumble text chat adapter",
-    },
 ];
 
-const CATEGORIES: &[&str] = &[
-    "All",
-    "Messaging",
-    "Social",
-    "Enterprise",
-    "Developer",
-    "Notifications",
-];
+const CATEGORIES: &[&str] = &["All", "Messaging"];
 
 // ── State ───────────────────────────────────────────────────────────────────
 

@@ -344,7 +344,7 @@ enum ChannelCommands {
     List,
     /// Interactive setup wizard for a channel.
     Setup {
-        /// Channel name (telegram, discord, slack, whatsapp, etc.). Shows picker if omitted.
+        /// Channel name (telegram, discord, or slack). Shows picker if omitted.
         channel: Option<String>,
     },
     /// Test a channel by sending a test message.
@@ -3499,10 +3499,6 @@ fn cmd_channel_list() {
         ("telegram", "TELEGRAM_BOT_TOKEN"),
         ("discord", "DISCORD_BOT_TOKEN"),
         ("slack", "SLACK_BOT_TOKEN"),
-        ("whatsapp", "WA_ACCESS_TOKEN"),
-        ("signal", ""),
-        ("matrix", "MATRIX_TOKEN"),
-        ("email", "EMAIL_PASSWORD"),
     ];
 
     for (name, env_var) in channels {
@@ -3541,10 +3537,6 @@ fn cmd_channel_setup(channel: Option<&str>) {
                 ("telegram", "Telegram bot (BotFather)"),
                 ("discord", "Discord bot"),
                 ("slack", "Slack app (Socket Mode)"),
-                ("whatsapp", "WhatsApp Cloud API"),
-                ("email", "Email (IMAP/SMTP)"),
-                ("signal", "Signal (signal-cli)"),
-                ("matrix", "Matrix homeserver"),
             ];
 
             for (i, (name, desc)) in channel_list.iter().enumerate() {
@@ -3659,147 +3651,10 @@ fn cmd_channel_setup(channel: Option<&str>) {
             ui::success("Slack configured");
             notify_daemon_restart();
         }
-        "whatsapp" => {
-            ui::section("Setting up WhatsApp");
-            ui::blank();
-            println!("  WhatsApp Cloud API (recommended for production):");
-            println!("  1. Go to https://developers.facebook.com");
-            println!("  2. Create a Business App");
-            println!("  3. Add WhatsApp product");
-            println!("  4. Set up a test phone number");
-            println!("  5. Copy Phone Number ID and Access Token");
-            ui::blank();
-
-            let phone_id = prompt_input("  Phone Number ID: ");
-            let access_token = prompt_input("  Access Token: ");
-            let verify_token = prompt_input("  Verify Token: ");
-
-            let config_block = "\n[channels.whatsapp]\nmode = \"cloud_api\"\nphone_number_id_env = \"WA_PHONE_ID\"\naccess_token_env = \"WA_ACCESS_TOKEN\"\nverify_token_env = \"WA_VERIFY_TOKEN\"\nwebhook_port = 8443\ndefault_agent = \"assistant\"\n";
-            maybe_write_channel_config("whatsapp", config_block);
-
-            for (key, val) in [
-                ("WA_PHONE_ID", &phone_id),
-                ("WA_ACCESS_TOKEN", &access_token),
-                ("WA_VERIFY_TOKEN", &verify_token),
-            ] {
-                if !val.is_empty() {
-                    match dotenv::save_env_key(key, val) {
-                        Ok(()) => ui::success(&format!("{key} saved to ~/.rustyhand/.env")),
-                        Err(_) => println!("    export {key}={val}"),
-                    }
-                }
-            }
-
-            ui::blank();
-            ui::success("WhatsApp configured");
-            notify_daemon_restart();
-        }
-        "email" => {
-            ui::section("Setting up Email");
-            ui::blank();
-            println!("  For Gmail, use an App Password:");
-            println!("  https://myaccount.google.com/apppasswords");
-            ui::blank();
-
-            let username = prompt_input("  Email address: ");
-            if username.is_empty() {
-                ui::error("No email provided. Setup cancelled.");
-                return;
-            }
-
-            let password = prompt_input("  App password (or Enter to set later): ");
-
-            let config_block = format!(
-                "\n[channels.email]\nimap_host = \"imap.gmail.com\"\nimap_port = 993\nsmtp_host = \"smtp.gmail.com\"\nsmtp_port = 587\nusername = \"{username}\"\npassword_env = \"EMAIL_PASSWORD\"\npoll_interval = 30\ndefault_agent = \"assistant\"\n"
-            );
-            maybe_write_channel_config("email", &config_block);
-
-            if !password.is_empty() {
-                match dotenv::save_env_key("EMAIL_PASSWORD", &password) {
-                    Ok(()) => ui::success("Password saved to ~/.rustyhand/.env"),
-                    Err(_) => println!("    export EMAIL_PASSWORD=your_app_password"),
-                }
-            } else {
-                ui::hint(
-                    "Set later: rustyhand config set-key email (or export EMAIL_PASSWORD=...)",
-                );
-            }
-
-            ui::blank();
-            ui::success("Email configured");
-            notify_daemon_restart();
-        }
-        "signal" => {
-            ui::section("Setting up Signal");
-            ui::blank();
-            println!("  Signal requires signal-cli (https://github.com/AsamK/signal-cli).");
-            ui::blank();
-            println!("  1. Install signal-cli:");
-            println!("     - macOS: brew install signal-cli");
-            println!("     - Linux: download from GitHub releases");
-            println!("     - Or use the Docker image");
-            println!("  2. Register or link a phone number:");
-            println!("     signal-cli -u +1YOURPHONE register");
-            println!("     signal-cli -u +1YOURPHONE verify CODE");
-            println!("  3. Start signal-cli in JSON-RPC mode:");
-            println!("     signal-cli -u +1YOURPHONE jsonRpc --socket /tmp/signal-cli.sock");
-            ui::blank();
-
-            let phone = prompt_input("  Your phone number (+1XXXX, or Enter to skip): ");
-
-            let config_block = "\n[channels.signal]\nphone_env = \"SIGNAL_PHONE\"\nsocket_path = \"/tmp/signal-cli.sock\"\ndefault_agent = \"assistant\"\n";
-            maybe_write_channel_config("signal", config_block);
-
-            if !phone.is_empty() {
-                match dotenv::save_env_key("SIGNAL_PHONE", &phone) {
-                    Ok(()) => ui::success("Phone saved to ~/.rustyhand/.env"),
-                    Err(_) => println!("    export SIGNAL_PHONE={phone}"),
-                }
-            }
-
-            ui::blank();
-            ui::success("Signal configured");
-            notify_daemon_restart();
-        }
-        "matrix" => {
-            ui::section("Setting up Matrix");
-            ui::blank();
-            println!("  1. Create a bot account on your Matrix homeserver");
-            println!("     (e.g., register @rusty-hand-bot:matrix.org)");
-            println!("  2. Obtain an access token:");
-            println!("     curl -X POST https://matrix.org/_matrix/client/r0/login \\");
-            println!("       -d '{{\"type\":\"m.login.password\",\"user\":\"rusty-hand-bot\",\"password\":\"...\"}}'");
-            println!("     Copy the access_token from the response.");
-            println!("  3. Invite the bot to rooms you want it to monitor.");
-            ui::blank();
-
-            let homeserver = prompt_input("  Homeserver URL [https://matrix.org]: ");
-            let homeserver = if homeserver.is_empty() {
-                "https://matrix.org".to_string()
-            } else {
-                homeserver
-            };
-            let token = prompt_input("  Access token: ");
-
-            let config_block = "\n[channels.matrix]\nhomeserver_env = \"MATRIX_HOMESERVER\"\naccess_token_env = \"MATRIX_ACCESS_TOKEN\"\ndefault_agent = \"assistant\"\n";
-            maybe_write_channel_config("matrix", config_block);
-
-            let _ = dotenv::save_env_key("MATRIX_HOMESERVER", &homeserver);
-            if !token.is_empty() {
-                match dotenv::save_env_key("MATRIX_ACCESS_TOKEN", &token) {
-                    Ok(()) => ui::success("Token saved to ~/.rustyhand/.env"),
-                    Err(_) => println!("    export MATRIX_ACCESS_TOKEN={token}"),
-                }
-            }
-
-            ui::blank();
-            ui::success("Matrix configured");
-            notify_daemon_restart();
-        }
         other => {
             ui::error_with_fix(
                 &format!("Unknown channel: {other}"),
-                "Available: telegram, discord, slack, whatsapp, email, signal, matrix",
+                "Available: telegram, discord, slack",
             );
             std::process::exit(1);
         }
