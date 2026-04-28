@@ -2084,7 +2084,7 @@
 
           </div>
 
-          <!-- Setup modal (OpenClaw-style with QR support + 3-step flow) -->
+          <!-- Setup modal — 3-step flow (Configure → Verify → Ready) -->
           <template x-if="setupModal">
             <div class="modal-overlay" @click.self="setupModal = null" @keydown.escape.window="setupModal = null">
               <div class="modal" style="max-width:480px">
@@ -2099,8 +2099,8 @@
                   <button class="modal-close" @click="setupModal = null">&times;</button>
                 </div>
 
-                <!-- 3-step progress indicator (non-QR channels only) -->
-                <div class="channel-steps" x-show="!isQrChannel()">
+                <!-- 3-step progress indicator -->
+                <div class="channel-steps">
                   <div class="channel-step-item">
                     <div class="channel-step-num" :class="{ active: setupStep === 1, done: setupStep > 1 }">
                       <span x-show="setupStep <= 1">1</span><span x-show="setupStep > 1">&#10003;</span>
@@ -2123,8 +2123,8 @@
                   </div>
                 </div>
 
-                <!-- Ready panel (step 3) for non-QR channels -->
-                <div x-show="!isQrChannel() && setupStep === 3 && testPassed" class="ready-panel">
+                <!-- Ready panel (step 3) -->
+                <div x-show="setupStep === 3 && testPassed" class="ready-panel">
                   <div class="ready-panel-icon">&#10003;</div>
                   <div class="ready-panel-title" x-text="setupModal.display_name + ' is ready!'"></div>
                   <div class="ready-panel-desc">
@@ -2136,78 +2136,11 @@
                   </div>
                 </div>
 
-                <!-- ═══ QR CODE FLOW (WhatsApp Web style) ═══ -->
-                <template x-if="isQrChannel() && !showBusinessApi">
+                <!-- Form flow (Configure / Verify) -->
+                <template x-if="!(setupStep === 3 && testPassed)">
                   <div>
-                    <!-- QR: Loading -->
-                    <div x-show="qr.loading" style="text-align:center;padding:2rem 0">
-                      <div class="spinner"></div>
-                      <p class="text-sm text-dim mt-2">Connecting to WhatsApp Web gateway...</p>
-                    </div>
-
-                    <!-- QR: Gateway available — show QR code -->
-                    <div x-show="!qr.loading && qr.available && qr.dataUrl && !qr.connected" style="text-align:center">
-                      <div style="background:#fff;display:inline-block;padding:1rem;border-radius:12px;margin:0.5rem 0">
-                        <img :src="qr.dataUrl" alt="WhatsApp QR Code" style="width:256px;height:256px;image-rendering:pixelated">
-                      </div>
-                      <ol style="text-align:left;font-size:0.85rem;margin:1rem 0;padding-left:1.5rem;opacity:0.8">
-                        <template x-for="(step, i) in setupModal.setup_steps || []" :key="i">
-                          <li x-text="step" style="margin-bottom:0.25rem"></li>
-                        </template>
-                      </ol>
-                      <p class="text-xs text-dim" x-text="qr.message"></p>
-                      <p class="text-xs text-dim mt-1" x-show="qr.error" style="color:var(--red,#ef4444)" x-text="qr.error"></p>
-                      <button class="btn btn-ghost btn-sm mt-2" x-show="qr.expired" @click="startQR()">Generate New QR</button>
-                    </div>
-
-                    <!-- QR: Connected! -->
-                    <div x-show="!qr.loading && qr.connected" style="text-align:center;padding:2rem 0">
-                      <div style="font-size:3rem;margin-bottom:0.5rem">&#10003;</div>
-                      <p class="text-sm" style="font-weight:600" x-text="qr.message || 'WhatsApp linked successfully!'"></p>
-                      <p class="text-xs text-dim mt-1">Channel will activate automatically.</p>
-                    </div>
-
-                    <!-- QR: Gateway not available — show setup hint -->
-                    <div x-show="!qr.loading && !qr.available" style="padding:1rem 0">
-                      <div style="background:var(--bg-secondary,#1a1a2e);border-radius:8px;padding:1.25rem;text-align:center">
-                        <div style="font-size:2rem;margin-bottom:0.5rem;opacity:0.5">&#128241;</div>
-                        <p class="text-sm" x-text="qr.message || 'WhatsApp Web gateway not available'"></p>
-                        <p class="text-xs text-dim mt-2" x-show="qr.help" x-text="qr.help"></p>
-                        <p class="text-xs text-dim mt-1" x-show="qr.error" style="color:var(--red,#ef4444)" x-text="qr.error"></p>
-                      </div>
-                      <p class="text-xs text-dim mt-3" style="text-align:center">
-                        Or use the <button class="btn-link" @click="showBusinessApi = true" style="font-size:inherit;text-decoration:underline;cursor:pointer;background:none;border:none;color:var(--accent,#818cf8);padding:0">Business API</button> with a Meta developer account.
-                      </p>
-                    </div>
-
-                    <!-- QR: Switch to Business API link (always visible when gateway is available) -->
-                    <div x-show="!qr.loading && qr.available" class="text-xs text-dim mt-2" style="text-align:center">
-                      Have a Meta Business account? <button class="btn-link" @click="showBusinessApi = true" style="font-size:inherit;text-decoration:underline;cursor:pointer;background:none;border:none;color:var(--accent,#818cf8);padding:0">Use Business API instead</button>
-                    </div>
-
-                    <!-- Action buttons for QR mode -->
-                    <div class="flex gap-2 mt-4" style="flex-wrap:wrap;justify-content:center" x-show="!qr.loading">
-                      <button class="btn btn-ghost" x-show="qr.available && !qr.connected && !qr.expired" @click="startQR()">Refresh QR</button>
-                      <button class="btn btn-ghost" x-show="setupModal.configured" @click="testChannel()"
-                              :disabled="testing[setupModal.name]"
-                              x-text="testing[setupModal.name] ? 'Testing...' : 'Test Connection'">
-                      </button>
-                      <button class="btn btn-ghost" style="color:var(--red,#ef4444)" x-show="setupModal.configured" @click="removeChannel()">Remove</button>
-                    </div>
-                  </div>
-                </template>
-
-                <!-- ═══ STANDARD FORM FLOW (for non-QR channels, or Business API fallback) ═══ -->
-                <template x-if="(!isQrChannel() || showBusinessApi) && !(setupStep === 3 && testPassed && !isQrChannel())">
-                  <div>
-                    <!-- Back to QR link (only for QR channels in Business API mode) -->
-                    <div x-show="isQrChannel() && showBusinessApi" class="mb-3">
-                      <button class="btn btn-ghost btn-sm" @click="showBusinessApi = false" style="font-size:0.8rem">&larr; Back to QR scan</button>
-                      <p class="text-xs text-dim mt-1">Configure via WhatsApp Cloud API (requires a Meta Business developer account).</p>
-                    </div>
-
                     <!-- Quick setup steps (collapsed, minimal) -->
-                    <details class="mb-4" style="font-size:0.8rem" x-show="!isQrChannel()">
+                    <details class="mb-4" style="font-size:0.8rem">
                       <summary class="text-dim" style="cursor:pointer">How to get credentials</summary>
                       <ol class="setup-steps" style="margin-top:0.5rem">
                         <template x-for="(step, i) in setupModal.setup_steps || []" :key="i">
@@ -2216,8 +2149,8 @@
                       </ol>
                     </details>
 
-                    <!-- Basic fields only (the minimum to get started) -->
-                    <template x-for="f in (isQrChannel() && showBusinessApi) ? advancedFields() : basicFields()" :key="f.key">
+                    <!-- Basic fields (minimum required to get started) -->
+                    <template x-for="f in basicFields()" :key="f.key">
                       <div style="margin-bottom:0.75rem">
                         <label class="text-sm" style="display:block;margin-bottom:0.25rem" x-text="f.label + (f.required ? ' *' : '')"></label>
                         <template x-if="f.type === 'secret'">
@@ -2242,8 +2175,8 @@
                       </div>
                     </template>
 
-                    <!-- Advanced toggle (only for non-QR channels) -->
-                    <template x-if="!isQrChannel() && hasAdvanced()">
+                    <!-- Advanced toggle -->
+                    <template x-if="hasAdvanced()">
                       <div>
                         <button class="btn btn-ghost btn-sm mb-2" @click="showAdvanced = !showAdvanced"
                                 x-text="showAdvanced ? 'Hide advanced' : 'Show advanced (' + advancedFields().length + ')'"></button>

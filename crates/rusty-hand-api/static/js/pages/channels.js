@@ -62,26 +62,6 @@ function channelsPage() {
       return this.advancedFields().length > 0;
     },
 
-    // Stub kept so legacy QR markup in index_body.html schloss without
-    // throwing. v0.7.5 dropped WhatsApp (the only QR-flow channel), but
-    // the HTML still references isQrChannel()/qr/showBusinessApi.
-    isQrChannel() {
-      return false;
-    },
-    qr: {
-      loading: false,
-      available: false,
-      dataUrl: '',
-      sessionId: '',
-      message: '',
-      help: '',
-      connected: false,
-      expired: false,
-      error: ''
-    },
-    showBusinessApi: false,
-    startQR() { /* no-op — QR flow removed in v0.7.5 */ },
-
     async loadChannels() {
       this.loading = true;
       this.loadError = '';
