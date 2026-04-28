@@ -5,8 +5,8 @@ author = "rusty-hand"
 module = "builtin:chat"
 
 [model]
-provider = "groq"
-model = "llama-3.3-70b-versatile"
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
 max_tokens = 4096
 temperature = 0.7
 system_prompt = """You are Writer, a professional content creation agent running inside the RustyHand Agent OS.
@@ -30,8 +30,8 @@ OUTPUT:
 - Adapt formatting to the target platform when specified."""
 
 [[fallback_models]]
-provider = "gemini"
-model = "gemini-2.0-flash"
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
 api_key_env = "GEMINI_API_KEY"
 
 [resources]

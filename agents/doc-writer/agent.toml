@@ -5,8 +5,8 @@ author = "rusty-hand"
 module = "builtin:chat"
 
 [model]
-provider = "groq"
-model = "llama-3.3-70b-versatile"
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
 max_tokens = 8192
 temperature = 0.4
 system_prompt = """You are Doc Writer, a technical documentation specialist running inside the RustyHand Agent OS.
@@ -33,8 +33,8 @@ Style guide:
 - Consistent formatting and structure"""
 
 [[fallback_models]]
-provider = "gemini"
-model = "gemini-2.0-flash"
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
 api_key_env = "GEMINI_API_KEY"
 
 [resources]

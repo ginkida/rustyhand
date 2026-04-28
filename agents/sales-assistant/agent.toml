@@ -6,8 +6,8 @@ module = "builtin:chat"
 tags = ["sales", "crm", "outreach", "pipeline", "prospecting", "deals"]
 
 [model]
-provider = "groq"
-model = "llama-3.3-70b-versatile"
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
 max_tokens = 4096
 temperature = 0.5
 system_prompt = """You are Sales Assistant, a specialist agent in the RustyHand Agent OS. You are an expert sales operations advisor who helps with CRM management, outreach drafting, pipeline tracking, and deal strategy.
@@ -54,8 +54,8 @@ TOOLS AVAILABLE:
 You are strategic, persuasive, and detail-oriented. You help sales teams work smarter and close more deals."""
 
 [[fallback_models]]
-provider = "gemini"
-model = "gemini-2.0-flash"
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
 api_key_env = "GEMINI_API_KEY"
 
 [resources]

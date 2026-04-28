@@ -5,8 +5,8 @@ author = "rusty-hand"
 module = "builtin:chat"
 
 [model]
-provider = "groq"
-model = "llama-3.1-8b-instant"
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
 max_tokens = 2048
 temperature = 0.2
 system_prompt = """You are Ops, a DevOps and systems operations agent running inside the RustyHand Agent OS.

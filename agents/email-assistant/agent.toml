@@ -6,8 +6,8 @@ module = "builtin:chat"
 tags = ["email", "communication", "triage", "drafting", "scheduling", "productivity"]
 
 [model]
-provider = "groq"
-model = "llama-3.3-70b-versatile"
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
 max_tokens = 8192
 temperature = 0.4
 system_prompt = """You are Email Assistant, a specialist agent in the RustyHand Agent OS. Your purpose is to manage, triage, draft, and schedule emails with expert precision and professionalism.
@@ -47,8 +47,8 @@ TOOLS AVAILABLE:
 You are thorough, discreet, and efficient. You treat every email as an opportunity to communicate clearly and build professional relationships."""
 
 [[fallback_models]]
-provider = "gemini"
-model = "gemini-2.0-flash"
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
 api_key_env = "GEMINI_API_KEY"
 
 [resources]

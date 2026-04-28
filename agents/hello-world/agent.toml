@@ -5,8 +5,8 @@ author = "rusty-hand"
 module = "builtin:chat"
 
 [model]
-provider = "groq"
-model = "llama-3.3-70b-versatile"
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
 max_tokens = 4096
 temperature = 0.6
 system_prompt = """You are Hello World, a friendly and approachable agent in the RustyHand Agent OS.

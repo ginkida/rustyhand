@@ -150,6 +150,43 @@ mod tests {
     use super::*;
     use rusty_hand_types::agent::AgentManifest;
 
+    /// Regression: every bundled manifest must use a provider that's still
+    /// in the v0.7.x catalog. v0.7.0 dropped `groq`, `gemini`, `openai`,
+    /// `xai`, `cohere`, etc. — but 27/40 bundled manifests still pointed
+    /// at `groq` or `gemini` until v0.7.9. With the entrypoint defaulting
+    /// `default_agent = "assistant"` (v0.7.7+), a fresh Docker container
+    /// would try to spawn `assistant`, hit "Unknown provider 'groq'" at
+    /// `create_driver`, fail to set the channel router's default, and
+    /// keep replying "No agent assigned" forever. Pin the supported set
+    /// here so the same regression can't sneak back via a future
+    /// manifest tweak.
+    #[test]
+    fn every_bundled_manifest_uses_a_supported_provider() {
+        const SUPPORTED: &[&str] = &[
+            "anthropic",
+            "kimi",
+            "deepseek",
+            "minimax",
+            "zhipu",
+            "openrouter",
+            "ollama",
+        ];
+        let mut bad: Vec<(String, String)> = Vec::new();
+        for (name, toml_src) in bundled_agents() {
+            let m: AgentManifest = toml::from_str(toml_src)
+                .unwrap_or_else(|e| panic!("{name} template should parse: {e}"));
+            if !SUPPORTED.contains(&m.model.provider.as_str()) {
+                bad.push((name.to_string(), m.model.provider.clone()));
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "Bundled manifests reference removed providers: {bad:?}. \
+             v0.7.0 dropped groq/gemini/openai/etc.; switch them to anthropic \
+             (the kernel default) or another supported provider: {SUPPORTED:?}"
+        );
+    }
+
     #[test]
     fn meta_agents_parse_and_use_anthropic() {
         for name in &["coordinator", "capability-builder", "diagnostic"] {
