@@ -97,18 +97,13 @@ impl ChannelBridgeHandle for KernelBridgeAdapter {
     }
 
     async fn spawn_agent_by_name(&self, manifest_name: &str) -> Result<AgentId, String> {
-        // Look for manifest at ~/.rustyhand/agents/{name}/agent.toml
-        let manifest_path = self
-            .kernel
-            .config
-            .home_dir
-            .join("agents")
-            .join(manifest_name)
-            .join("agent.toml");
-
-        if !manifest_path.exists() {
-            return Err(format!("Manifest not found: {}", manifest_path.display()));
-        }
+        let manifest_path = resolve_manifest_path(&self.kernel.config.home_dir, manifest_name)
+            .ok_or_else(|| {
+                format!(
+                    "Manifest '{manifest_name}' not found in {}/agents/ or $RUSTY_HAND_AGENTS_DIR",
+                    self.kernel.config.home_dir.display()
+                )
+            })?;
 
         let contents = std::fs::read_to_string(&manifest_path)
             .map_err(|e| format!("Failed to read manifest: {e}"))?;
@@ -999,6 +994,34 @@ async fn resolve_default_agent(
     }
 }
 
+/// Locate an agent manifest file by name, checking the user's home directory
+/// first and falling back to `$RUSTY_HAND_AGENTS_DIR` (set by the Docker
+/// image to `/opt/rustyhand/agents`).
+///
+/// Without the env-var fallback, the Docker daemon couldn't auto-spawn the
+/// `default_agent` configured for a channel: bundled manifests live in
+/// `/opt/rustyhand/agents/`, but `kernel.config.home_dir` is `/data` and
+/// `/data/agents/` is empty on a fresh volume — so every Telegram message
+/// returned "No agent assigned" until the user manually copied a manifest
+/// or ran `rustyhand init` somewhere.
+fn resolve_manifest_path(home_dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    let local = home_dir.join("agents").join(name).join("agent.toml");
+    if local.exists() {
+        return Some(local);
+    }
+    if let Ok(env_dir) = std::env::var("RUSTY_HAND_AGENTS_DIR") {
+        if !env_dir.is_empty() {
+            let p = std::path::PathBuf::from(env_dir)
+                .join(name)
+                .join("agent.toml");
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
 /// Read a token from an env var, returning None with a warning if missing/empty.
 fn read_token(env_var: &str, adapter_name: &str) -> Option<String> {
     match std::env::var(env_var) {
@@ -1251,11 +1274,60 @@ pub async fn reload_channels_from_disk(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[tokio::test]
     async fn test_bridge_skips_when_no_config() {
         let config = rusty_hand_types::config::KernelConfig::default();
         assert!(config.channels.telegram.is_none());
         assert!(config.channels.discord.is_none());
         assert!(config.channels.slack.is_none());
+    }
+
+    /// Regression: the channel bridge must find bundled agent manifests
+    /// via `RUSTY_HAND_AGENTS_DIR` even when `home_dir/agents/` is empty.
+    /// Before the fix this returned `None` for the Docker case
+    /// (home_dir = /data, manifests at /opt/rustyhand/agents/), which
+    /// made every Telegram message respond "No agent assigned".
+    ///
+    /// The three cases are folded into one test because they all mutate
+    /// the same process-wide env var; the parallel cargo test runner would
+    /// otherwise race them.
+    #[test]
+    fn resolve_manifest_path_covers_home_env_and_missing() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let home = tmp.path().join("home");
+        let bundle = tmp.path().join("bundle");
+        std::fs::create_dir_all(home.join("agents")).unwrap();
+        std::fs::create_dir_all(bundle.join("assistant")).unwrap();
+        std::fs::write(bundle.join("assistant/agent.toml"), "name = \"bundle\"").unwrap();
+
+        // 1. With the env var set and home_dir empty, the bundled manifest
+        //    must be found — this is the Docker case.
+        std::env::set_var("RUSTY_HAND_AGENTS_DIR", &bundle);
+        let env_only = resolve_manifest_path(&home, "assistant");
+        assert_eq!(
+            env_only.as_deref(),
+            Some(bundle.join("assistant/agent.toml").as_path()),
+            "RUSTY_HAND_AGENTS_DIR fallback should resolve missing manifests"
+        );
+
+        // 2. When the user has customized home_dir/agents/<name>/agent.toml,
+        //    that copy must win over the bundle dir.
+        std::fs::create_dir_all(home.join("agents/assistant")).unwrap();
+        std::fs::write(home.join("agents/assistant/agent.toml"), "name = \"home\"").unwrap();
+        let home_wins = resolve_manifest_path(&home, "assistant");
+        assert_eq!(
+            home_wins.as_deref(),
+            Some(home.join("agents/assistant/agent.toml").as_path()),
+            "user-customized home_dir manifest must win over the bundle dir"
+        );
+
+        // 3. Unknown manifest with the env var still set → None.
+        assert!(resolve_manifest_path(&home, "ghost").is_none());
+
+        // 4. With the env var unset and home_dir empty for that name → None.
+        std::env::remove_var("RUSTY_HAND_AGENTS_DIR");
+        assert!(resolve_manifest_path(&home, "ghost").is_none());
     }
 }

@@ -112,14 +112,21 @@ TOML
     # `channels` subtable; a stray `[telegram]` is silently dropped
     # by serde and the inbound listener never starts.
     if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
+        # Default to the bundled `assistant` agent so a fresh container
+        # actually responds to messages instead of returning "No agent
+        # assigned" on every inbound. Override with any agent name, or
+        # set `RUSTYHAND_TELEGRAM_DEFAULT_AGENT=` (empty) to leave it
+        # blank and let bindings/direct routes drive routing.
+        _tg_default_agent="${RUSTYHAND_TELEGRAM_DEFAULT_AGENT-assistant}"
         cat >> "$CONFIG" <<TOML
 
 [channels.telegram]
 bot_token_env = "TELEGRAM_BOT_TOKEN"
 TOML
-        if [ -n "$RUSTYHAND_TELEGRAM_DEFAULT_AGENT" ]; then
-            echo "default_agent = \"$RUSTYHAND_TELEGRAM_DEFAULT_AGENT\"" >> "$CONFIG"
+        if [ -n "$_tg_default_agent" ]; then
+            echo "default_agent = \"$_tg_default_agent\"" >> "$CONFIG"
         fi
+        unset _tg_default_agent
         # RUSTYHAND_TELEGRAM_USERS is a comma-separated list of Telegram
         # user IDs (i64, may be negative for channels). We accept the
         # raw value with or without TOML array brackets, quotes, or
@@ -167,18 +174,21 @@ TOML
 
     # ── Discord ──
     if [ -n "$DISCORD_BOT_TOKEN" ]; then
+        _dc_default_agent="${RUSTYHAND_DISCORD_DEFAULT_AGENT-assistant}"
         cat >> "$CONFIG" <<TOML
 
 [channels.discord]
 bot_token_env = "DISCORD_BOT_TOKEN"
 TOML
-        if [ -n "$RUSTYHAND_DISCORD_DEFAULT_AGENT" ]; then
-            echo "default_agent = \"$RUSTYHAND_DISCORD_DEFAULT_AGENT\"" >> "$CONFIG"
+        if [ -n "$_dc_default_agent" ]; then
+            echo "default_agent = \"$_dc_default_agent\"" >> "$CONFIG"
         fi
+        unset _dc_default_agent
     fi
 
     # ── Slack ──
     if [ -n "$SLACK_BOT_TOKEN" ]; then
+        _sl_default_agent="${RUSTYHAND_SLACK_DEFAULT_AGENT-assistant}"
         cat >> "$CONFIG" <<TOML
 
 [channels.slack]
@@ -187,9 +197,10 @@ TOML
         if [ -n "$SLACK_APP_TOKEN" ]; then
             echo "app_token_env = \"SLACK_APP_TOKEN\"" >> "$CONFIG"
         fi
-        if [ -n "$RUSTYHAND_SLACK_DEFAULT_AGENT" ]; then
-            echo "default_agent = \"$RUSTYHAND_SLACK_DEFAULT_AGENT\"" >> "$CONFIG"
+        if [ -n "$_sl_default_agent" ]; then
+            echo "default_agent = \"$_sl_default_agent\"" >> "$CONFIG"
         fi
+        unset _sl_default_agent
     fi
 
     # ── Exec policy ──
