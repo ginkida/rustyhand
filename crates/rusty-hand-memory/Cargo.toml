@@ -14,7 +14,6 @@ rmp-serde = { workspace = true }
 rusqlite = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
-thiserror = { workspace = true }
 async-trait = { workspace = true }
 tracing = { workspace = true }
 

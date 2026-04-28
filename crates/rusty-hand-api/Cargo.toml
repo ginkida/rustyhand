@@ -11,7 +11,6 @@ rusty-hand-kernel = { path = "../rusty-hand-kernel" }
 rusty-hand-runtime = { path = "../rusty-hand-runtime" }
 rusty-hand-memory = { path = "../rusty-hand-memory" }
 rusty-hand-channels = { path = "../rusty-hand-channels" }
-rusty-hand-wire = { path = "../rusty-hand-wire" }
 rusty-hand-skills = { path = "../rusty-hand-skills" }
 rusty-hand-extensions = { path = "../rusty-hand-extensions" }
 dashmap = { workspace = true }

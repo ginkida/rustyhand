@@ -6,7 +6,6 @@ license.workspace = true
 description = "RustyHand Protocol (RHP) — agent-to-agent networking"
 
 [dependencies]
-rusty-hand-types = { path = "../rusty-hand-types" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
