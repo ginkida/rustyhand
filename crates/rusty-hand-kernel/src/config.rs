@@ -253,10 +253,114 @@ pub fn rusty_hand_home() -> PathBuf {
     rusty_hand_types::config::rusty_hand_home_dir()
 }
 
+/// Ordered list of directories to search for agent manifests.
+///
+/// 1. `<home>/agents/` — user-customized templates (via `rustyhand init`
+///    or hand-edited).
+/// 2. `$RUSTY_HAND_AGENTS_DIR` — image-bundled templates. The official
+///    Docker image sets this to `/opt/rustyhand/agents/` so a fresh
+///    container with an empty `/data/agents/` still finds the bundled
+///    `assistant`, `coordinator`, etc.
+///
+/// Without the env-var fallback, the channel bridge / template list
+/// API / MCP `agent.list_templates` tool all came up empty on Docker
+/// and the daemon replied "No agent assigned" to every Telegram
+/// message.
+pub fn agents_search_dirs_with_home(home_dir: &std::path::Path) -> Vec<PathBuf> {
+    let mut dirs = vec![home_dir.join("agents")];
+    if let Ok(env_dir) = std::env::var("RUSTY_HAND_AGENTS_DIR") {
+        if !env_dir.is_empty() {
+            let p = PathBuf::from(env_dir);
+            if !dirs.iter().any(|d| d == &p) {
+                dirs.push(p);
+            }
+        }
+    }
+    dirs
+}
+
+/// Same as `agents_search_dirs_with_home(&rusty_hand_home())`.
+pub fn agents_search_dirs() -> Vec<PathBuf> {
+    agents_search_dirs_with_home(&rusty_hand_home())
+}
+
+/// Find the first existing `<dir>/<name>/agent.toml` across the agents
+/// search dirs.
+pub fn resolve_agent_manifest_with_home(home_dir: &std::path::Path, name: &str) -> Option<PathBuf> {
+    agents_search_dirs_with_home(home_dir)
+        .into_iter()
+        .map(|d| d.join(name).join("agent.toml"))
+        .find(|p| p.exists())
+}
+
+/// Same as `resolve_agent_manifest_with_home(&rusty_hand_home(), name)`.
+pub fn resolve_agent_manifest(name: &str) -> Option<PathBuf> {
+    resolve_agent_manifest_with_home(&rusty_hand_home(), name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
+
+    /// Regression: agents-search must include `$RUSTY_HAND_AGENTS_DIR`.
+    /// Before this fallback the channel bridge / template list / MCP
+    /// `agent.list_templates` tool all came up empty on Docker (where
+    /// the bundled manifests live in `/opt/rustyhand/agents/` but
+    /// `home_dir/agents/` is empty on a fresh volume) — every Telegram
+    /// message replied "No agent assigned".
+    ///
+    /// All four cases are folded into one test because they mutate the
+    /// process-wide env var and the parallel runner would otherwise race
+    /// them.
+    #[test]
+    fn agents_search_dirs_falls_back_to_env_var() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let home = tmp.path().join("home");
+        let bundle = tmp.path().join("bundle");
+        std::fs::create_dir_all(home.join("agents")).unwrap();
+        std::fs::create_dir_all(bundle.join("assistant")).unwrap();
+        std::fs::write(bundle.join("assistant/agent.toml"), "name = \"bundle\"").unwrap();
+
+        // 1. Env var set, home empty → bundle manifest resolves (Docker).
+        std::env::set_var("RUSTY_HAND_AGENTS_DIR", &bundle);
+        let env_only = resolve_agent_manifest_with_home(&home, "assistant");
+        assert_eq!(
+            env_only.as_deref(),
+            Some(bundle.join("assistant/agent.toml").as_path()),
+            "RUSTY_HAND_AGENTS_DIR fallback should resolve missing manifests"
+        );
+        let dirs = agents_search_dirs_with_home(&home);
+        assert_eq!(dirs.len(), 2);
+        assert_eq!(dirs[0], home.join("agents"));
+        assert_eq!(dirs[1], bundle);
+
+        // 2. User-customized home wins over bundle dir.
+        std::fs::create_dir_all(home.join("agents/assistant")).unwrap();
+        std::fs::write(home.join("agents/assistant/agent.toml"), "name = \"home\"").unwrap();
+        let home_wins = resolve_agent_manifest_with_home(&home, "assistant");
+        assert_eq!(
+            home_wins.as_deref(),
+            Some(home.join("agents/assistant/agent.toml").as_path()),
+            "user-customized home_dir manifest must win over the bundle dir"
+        );
+
+        // 3. Unknown name still returns None even with both dirs available.
+        assert!(resolve_agent_manifest_with_home(&home, "ghost").is_none());
+
+        // 4. Env var unset → only home dir is searched.
+        std::env::remove_var("RUSTY_HAND_AGENTS_DIR");
+        let dirs = agents_search_dirs_with_home(&home);
+        assert_eq!(dirs.len(), 1);
+        assert_eq!(dirs[0], home.join("agents"));
+        assert!(resolve_agent_manifest_with_home(&home, "ghost").is_none());
+
+        // 5. Empty env var is treated as unset.
+        std::env::set_var("RUSTY_HAND_AGENTS_DIR", "");
+        let dirs = agents_search_dirs_with_home(&home);
+        assert_eq!(dirs.len(), 1, "empty env var must be ignored");
+        std::env::remove_var("RUSTY_HAND_AGENTS_DIR");
+    }
 
     #[test]
     fn test_load_config_defaults() {

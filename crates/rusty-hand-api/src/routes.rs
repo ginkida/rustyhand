@@ -1838,33 +1838,45 @@ pub async fn reload_channels(State(state): State<Arc<AppState>>) -> impl IntoRes
 
 /// GET /api/templates — List available agent templates.
 pub async fn list_templates() -> impl IntoResponse {
-    let agents_dir = rusty_hand_kernel::config::rusty_hand_home().join("agents");
     let mut templates = Vec::new();
+    let mut seen = std::collections::HashSet::new();
 
-    if let Ok(entries) = std::fs::read_dir(&agents_dir) {
+    // Scan home_dir/agents/ first, then `$RUSTY_HAND_AGENTS_DIR` (the
+    // image-bundled location). User-customized templates win on name
+    // collision because the home dir is searched first.
+    for agents_dir in rusty_hand_kernel::config::agents_search_dirs() {
+        let entries = match std::fs::read_dir(&agents_dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() {
-                let manifest_path = path.join("agent.toml");
-                if manifest_path.exists() {
-                    let name = path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string();
-
-                    let description = std::fs::read_to_string(&manifest_path)
-                        .ok()
-                        .and_then(|content| toml::from_str::<AgentManifest>(&content).ok())
-                        .map(|m| m.description)
-                        .unwrap_or_default();
-
-                    templates.push(serde_json::json!({
-                        "name": name,
-                        "description": description,
-                    }));
-                }
+            if !path.is_dir() {
+                continue;
             }
+            let manifest_path = path.join("agent.toml");
+            if !manifest_path.exists() {
+                continue;
+            }
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+
+            let description = std::fs::read_to_string(&manifest_path)
+                .ok()
+                .and_then(|content| toml::from_str::<AgentManifest>(&content).ok())
+                .map(|m| m.description)
+                .unwrap_or_default();
+
+            templates.push(serde_json::json!({
+                "name": name,
+                "description": description,
+            }));
         }
     }
 
@@ -1876,15 +1888,15 @@ pub async fn list_templates() -> impl IntoResponse {
 
 /// GET /api/templates/:name — Get template details.
 pub async fn get_template(Path(name): Path<String>) -> impl IntoResponse {
-    let agents_dir = rusty_hand_kernel::config::rusty_hand_home().join("agents");
-    let manifest_path = agents_dir.join(&name).join("agent.toml");
-
-    if !manifest_path.exists() {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "Template not found"})),
-        );
-    }
+    let manifest_path = match rusty_hand_kernel::config::resolve_agent_manifest(&name) {
+        Some(p) => p,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Template not found"})),
+            );
+        }
+    };
 
     match std::fs::read_to_string(&manifest_path) {
         Ok(content) => match toml::from_str::<AgentManifest>(&content) {

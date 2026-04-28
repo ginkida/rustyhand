@@ -822,24 +822,37 @@ impl McpBackend {
                 Self::daemon_get(client, base_url, "/api/templates")
             }
             McpBackend::InProcess { .. } => {
-                let agents_dir = rusty_hand_kernel::config::rusty_hand_home().join("agents");
                 let mut templates = Vec::new();
-                if let Ok(entries) = std::fs::read_dir(&agents_dir) {
+                let mut seen = std::collections::HashSet::new();
+                // Scan home_dir/agents/ then `$RUSTY_HAND_AGENTS_DIR` so
+                // bundled templates show up on Docker even when /data/agents
+                // is empty. Home wins on name collision.
+                for agents_dir in rusty_hand_kernel::config::agents_search_dirs() {
+                    let entries = match std::fs::read_dir(&agents_dir) {
+                        Ok(e) => e,
+                        Err(_) => continue,
+                    };
                     for entry in entries.flatten() {
                         let manifest_path = entry.path().join("agent.toml");
-                        if manifest_path.exists() {
-                            if let Ok(contents) = std::fs::read_to_string(&manifest_path) {
-                                if let Ok(manifest) = toml::from_str::<
-                                    rusty_hand_types::agent::AgentManifest,
-                                >(&contents)
-                                {
-                                    templates.push(json!({
-                                        "name": manifest.name,
-                                        "description": manifest.description,
-                                    }));
-                                }
-                            }
+                        if !manifest_path.exists() {
+                            continue;
                         }
+                        let contents = match std::fs::read_to_string(&manifest_path) {
+                            Ok(c) => c,
+                            Err(_) => continue,
+                        };
+                        let manifest: rusty_hand_types::agent::AgentManifest =
+                            match toml::from_str(&contents) {
+                                Ok(m) => m,
+                                Err(_) => continue,
+                            };
+                        if !seen.insert(manifest.name.clone()) {
+                            continue;
+                        }
+                        templates.push(json!({
+                            "name": manifest.name,
+                            "description": manifest.description,
+                        }));
                     }
                 }
                 let total = templates.len();
