@@ -1273,10 +1273,6 @@ impl App {
                     event::spawn_test_channel(backend, name, self.event_tx.clone());
                 }
             }
-            channels::ChannelAction::ToggleChannel(_name, _enabled) => {
-                // Toggle is handled locally in the state; daemon toggle
-                // could be spawned here if the API supports it.
-            }
             channels::ChannelAction::SaveChannel(name, values) => {
                 // Save channel credentials via daemon API
                 if let Some(backend) = self.backend.to_ref() {

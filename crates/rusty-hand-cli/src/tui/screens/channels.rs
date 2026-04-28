@@ -18,7 +18,6 @@ pub struct ChannelInfo {
     pub category: String,
     pub status: ChannelStatus,
     pub env_vars: Vec<(String, bool)>, // (var_name, is_set)
-    pub enabled: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -95,7 +94,6 @@ pub enum ChannelAction {
     Continue,
     Refresh,
     TestChannel(String),
-    ToggleChannel(String, bool),
     SaveChannel(String, Vec<(String, String)>),
 }
 
@@ -164,7 +162,6 @@ impl ChannelState {
                 category: def.category.to_string(),
                 status,
                 env_vars,
-                enabled: false,
             });
         }
         self.list_state.select(Some(0));
@@ -250,30 +247,6 @@ impl ChannelState {
                         self.test_result = None;
                         self.sub = ChannelSubScreen::Testing;
                         return ChannelAction::TestChannel(name);
-                    }
-                }
-            }
-            KeyCode::Char('e') => {
-                if let Some(sel) = self.list_state.selected() {
-                    let filtered = self.filtered_channels();
-                    if let Some(ch) = filtered.get(sel) {
-                        let name = ch.name.clone();
-                        if let Some(c) = self.channels.iter_mut().find(|c| c.name == name) {
-                            c.enabled = true;
-                        }
-                        return ChannelAction::ToggleChannel(name, true);
-                    }
-                }
-            }
-            KeyCode::Char('d') => {
-                if let Some(sel) = self.list_state.selected() {
-                    let filtered = self.filtered_channels();
-                    if let Some(ch) = filtered.get(sel) {
-                        let name = ch.name.clone();
-                        if let Some(c) = self.channels.iter_mut().find(|c| c.name == name) {
-                            c.enabled = false;
-                        }
-                        return ChannelAction::ToggleChannel(name, false);
                     }
                 }
             }
@@ -456,7 +429,7 @@ fn draw_list(f: &mut Frame, area: Rect, state: &mut ChannelState) {
     }
 
     let hints = Paragraph::new(Line::from(vec![Span::styled(
-        "  [\u{2191}\u{2193}] Navigate  [Tab] Category  [Enter] Setup  [t] Test  [e/d] Enable/Disable  [r] Refresh",
+        "  [\u{2191}\u{2193}] Navigate  [Tab] Category  [Enter] Setup  [t] Test  [r] Refresh",
         theme::hint_style(),
     )]));
     f.render_widget(hints, chunks[3]);

@@ -592,7 +592,6 @@ pub fn spawn_fetch_channels(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
                                             .to_string(),
                                         status,
                                         env_vars: Vec::new(),
-                                        enabled: ch["enabled"].as_bool().unwrap_or(false),
                                     }
                                 })
                                 .collect()

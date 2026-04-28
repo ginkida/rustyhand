@@ -352,16 +352,6 @@ enum ChannelCommands {
         /// Channel name.
         channel: String,
     },
-    /// Enable a channel.
-    Enable {
-        /// Channel name.
-        channel: String,
-    },
-    /// Disable a channel without removing its configuration.
-    Disable {
-        /// Channel name.
-        channel: String,
-    },
 }
 
 #[derive(Subcommand)]
@@ -853,8 +843,6 @@ fn main() {
             ChannelCommands::List => cmd_channel_list(),
             ChannelCommands::Setup { channel } => cmd_channel_setup(channel.as_deref()),
             ChannelCommands::Test { channel } => cmd_channel_test(&channel),
-            ChannelCommands::Enable { channel } => cmd_channel_toggle(&channel, true),
-            ChannelCommands::Disable { channel } => cmd_channel_toggle(&channel, false),
         },
         Some(Commands::Config(sub)) => match sub {
             ConfigCommands::Show => cmd_config_show(),
@@ -3719,30 +3707,6 @@ fn cmd_channel_test(channel: &str) {
     } else {
         eprintln!("Channel test requires a running daemon. Start with: rustyhand start");
         std::process::exit(1);
-    }
-}
-
-fn cmd_channel_toggle(channel: &str, enable: bool) {
-    let action = if enable { "enabled" } else { "disabled" };
-    if let Some(base) = find_daemon() {
-        let client = daemon_client();
-        let endpoint = if enable { "enable" } else { "disable" };
-        let body = daemon_json(
-            client
-                .post(format!("{base}/api/channels/{channel}/{endpoint}"))
-                .send(),
-        );
-        if body.get("status").is_some() {
-            println!("Channel {channel} {action}.");
-        } else {
-            eprintln!(
-                "Failed: {}",
-                body["error"].as_str().unwrap_or("Unknown error")
-            );
-        }
-    } else {
-        println!("Note: Channel {channel} will be {action} when the daemon starts.");
-        println!("Edit ~/.rustyhand/config.toml to persist this change.");
     }
 }
 
