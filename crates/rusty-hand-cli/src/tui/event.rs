@@ -586,10 +586,6 @@ pub fn spawn_fetch_channels(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
                                             .as_str()
                                             .unwrap_or(ch["name"].as_str().unwrap_or("?"))
                                             .to_string(),
-                                        category: ch["category"]
-                                            .as_str()
-                                            .unwrap_or("messaging")
-                                            .to_string(),
                                         status,
                                         env_vars: Vec::new(),
                                     }
