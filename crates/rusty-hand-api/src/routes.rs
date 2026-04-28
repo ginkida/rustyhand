@@ -6667,8 +6667,7 @@ pub async fn config_schema() -> impl IntoResponse {
                 "fields": {
                     "telegram": "object",
                     "discord": "object",
-                    "slack": "object",
-                    "whatsapp": "object"
+                    "slack": "object"
                 }
             },
             "proxy": {

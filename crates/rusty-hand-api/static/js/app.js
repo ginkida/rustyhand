@@ -581,7 +581,7 @@ function app() {
       approvals: { title: 'Approvals', section: 'Safety', description: 'Review sensitive actions waiting for a human decision.', hotkey: '2', keywords: 'approvals permissions review queue' },
       workflows: { title: 'Workflows', section: 'Automation', description: 'Compose multi-step pipelines and inspect execution history.', hotkey: '3', keywords: 'workflows automation runs builder' },
       automation: { title: 'Automation', section: 'Automation', description: 'Manage cron jobs, event triggers, and timed execution.', hotkey: '4', keywords: 'automation cron jobs triggers schedules timed execution' },
-      channels: { title: 'Channels', section: 'Integrations', description: 'Connect messaging surfaces and verify delivery setup.', hotkey: '5', keywords: 'channels whatsapp telegram slack discord integrations' },
+      channels: { title: 'Channels', section: 'Integrations', description: 'Connect messaging surfaces and verify delivery setup.', hotkey: '5', keywords: 'channels telegram slack discord integrations' },
       skills: { title: 'Skills', section: 'Capabilities', description: 'Discover and install reusable skills for specialized workflows.', hotkey: '6', keywords: 'skills install discover capabilities' },
       settings: { title: 'Settings', section: 'System', description: 'Configure providers, models, security, peers, and runtime behavior.', hotkey: '7', keywords: 'settings models providers security peers config' }
     },

@@ -1,4 +1,4 @@
-// RustyHand Channels Page — OpenClaw-style setup UX with QR code support
+// RustyHand Channels Page — Telegram / Discord / Slack setup UX.
 'use strict';
 
 function channelsPage() {
@@ -11,7 +11,6 @@ function channelsPage() {
     testing: {},
     formValues: {},
     showAdvanced: false,
-    showBusinessApi: false,
     loading: true,
     loadError: '',
     pollTimer: null,
@@ -20,28 +19,9 @@ function channelsPage() {
     setupStep: 1, // 1=Configure, 2=Verify, 3=Ready
     testPassed: false,
 
-    // WhatsApp QR state
-    qr: {
-      loading: false,
-      available: false,
-      dataUrl: '',
-      sessionId: '',
-      pollErrors: 0,
-      message: '',
-      help: '',
-      connected: false,
-      expired: false,
-      error: ''
-    },
-    qrPollTimer: null,
-
     categories: [
       { key: 'all', label: 'All' },
-      { key: 'messaging', label: 'Messaging' },
-      { key: 'social', label: 'Social' },
-      { key: 'enterprise', label: 'Enterprise' },
-      { key: 'developer', label: 'Developer' },
-      { key: 'notifications', label: 'Notifications' }
+      { key: 'messaging', label: 'Messaging' }
     ],
 
     get filteredChannels() {
@@ -82,9 +62,25 @@ function channelsPage() {
       return this.advancedFields().length > 0;
     },
 
+    // Stub kept so legacy QR markup in index_body.html schloss without
+    // throwing. v0.7.5 dropped WhatsApp (the only QR-flow channel), but
+    // the HTML still references isQrChannel()/qr/showBusinessApi.
     isQrChannel() {
-      return this.setupModal && this.setupModal.setup_type === 'qr';
+      return false;
     },
+    qr: {
+      loading: false,
+      available: false,
+      dataUrl: '',
+      sessionId: '',
+      message: '',
+      help: '',
+      connected: false,
+      expired: false,
+      error: ''
+    },
+    showBusinessApi: false,
+    startQR() { /* no-op — QR flow removed in v0.7.5 */ },
 
     async loadChannels() {
       this.loading = true;
@@ -144,86 +140,8 @@ function channelsPage() {
       this.setupModal = ch;
       this.formValues = {};
       this.showAdvanced = false;
-      this.showBusinessApi = false;
       this.setupStep = ch.configured ? 3 : 1;
       this.testPassed = !!ch.configured;
-      this.resetQR();
-      // Auto-start QR flow for QR-type channels
-      if (ch.setup_type === 'qr') {
-        this.startQR();
-      }
-    },
-
-    // ── QR Code Flow (WhatsApp Web style) ──────────────────────────
-
-    resetQR() {
-      this.qr = {
-        loading: false, available: false, dataUrl: '', sessionId: '',
-        pollErrors: 0, message: '', help: '', connected: false, expired: false, error: ''
-      };
-      if (this.qrPollTimer) { clearInterval(this.qrPollTimer); this.qrPollTimer = null; }
-    },
-
-    async startQR() {
-      this.qr.loading = true;
-      this.qr.error = '';
-      this.qr.connected = false;
-      this.qr.expired = false;
-      this.qr.pollErrors = 0;
-      try {
-        var result = await RustyHandAPI.post('/api/channels/whatsapp/qr/start', {});
-        this.qr.available = result.available || false;
-        this.qr.dataUrl = result.qr_data_url || '';
-        this.qr.sessionId = result.session_id || '';
-        this.qr.message = result.message || '';
-        this.qr.help = result.help || '';
-        this.qr.connected = result.connected || false;
-        if (this.qr.available && this.qr.dataUrl && !this.qr.connected) {
-          this.pollQR();
-        }
-        if (this.qr.connected) {
-          RustyHandToast.success('WhatsApp connected!');
-          await this.refreshStatus();
-        }
-      } catch(e) {
-        this.qr.error = e.message || 'Could not start QR login';
-      }
-      this.qr.loading = false;
-    },
-
-    pollQR() {
-      var self = this;
-      if (this.qrPollTimer) clearInterval(this.qrPollTimer);
-      this.qrPollTimer = setInterval(async function() {
-        try {
-          var result = await RustyHandAPI.get('/api/channels/whatsapp/qr/status?session_id=' + encodeURIComponent(self.qr.sessionId));
-          self.qr.pollErrors = 0;
-          self.qr.error = '';
-          if (result.connected) {
-            clearInterval(self.qrPollTimer);
-            self.qrPollTimer = null;
-            self.qr.connected = true;
-            self.qr.message = result.message || 'Connected!';
-            RustyHandToast.success('WhatsApp linked successfully!');
-            await self.refreshStatus();
-          } else if (result.expired) {
-            clearInterval(self.qrPollTimer);
-            self.qrPollTimer = null;
-            self.qr.expired = true;
-            self.qr.message = 'QR code expired. Click to generate a new one.';
-          } else {
-            self.qr.message = result.message || 'Waiting for scan...';
-          }
-        } catch(e) {
-          self.qr.pollErrors = (self.qr.pollErrors || 0) + 1;
-          if (self.qr.pollErrors >= 3) {
-            clearInterval(self.qrPollTimer);
-            self.qrPollTimer = null;
-            self.qr.error = e.message || 'Lost connection to the QR gateway';
-            self.qr.message = 'QR status updates stopped. Refresh the QR code to retry.';
-          }
-        }
-      }, 3000);
     },
 
     // ── Standard Form Flow ─────────────────────────────────────────
@@ -306,7 +224,6 @@ function channelsPage() {
 
     destroy() {
       if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
-      if (this.qrPollTimer) { clearInterval(this.qrPollTimer); this.qrPollTimer = null; }
     }
   };
 }
