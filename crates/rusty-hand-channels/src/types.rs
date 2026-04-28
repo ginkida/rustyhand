@@ -13,16 +13,13 @@ use futures::Stream;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ChannelType {
     Telegram,
-    WhatsApp,
-    Slack,
     Discord,
-    Signal,
-    Matrix,
-    Email,
-    Teams,
-    Mattermost,
+    Slack,
+    /// Browser dashboard (internal — not a real messaging adapter).
     WebChat,
+    /// CLI / terminal (internal — not a real messaging adapter).
     CLI,
+    /// Escape hatch for ad-hoc external adapters.
     Custom(String),
 }
 
@@ -427,19 +424,11 @@ mod tests {
     }
 
     #[test]
-    fn test_channel_type_matrix_serde() {
-        let ct = ChannelType::Matrix;
+    fn test_channel_type_custom_serde() {
+        let ct = ChannelType::Custom("matrix".to_string());
         let json = serde_json::to_string(&ct).unwrap();
         let back: ChannelType = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, ChannelType::Matrix);
-    }
-
-    #[test]
-    fn test_channel_type_email_serde() {
-        let ct = ChannelType::Email;
-        let json = serde_json::to_string(&ct).unwrap();
-        let back: ChannelType = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, ChannelType::Email);
+        assert_eq!(back, ChannelType::Custom("matrix".to_string()));
     }
 
     #[test]

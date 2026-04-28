@@ -320,12 +320,6 @@ fn channel_type_to_str(ct: &ChannelType) -> &str {
         ChannelType::Telegram => "telegram",
         ChannelType::Discord => "discord",
         ChannelType::Slack => "slack",
-        ChannelType::WhatsApp => "whatsapp",
-        ChannelType::Signal => "signal",
-        ChannelType::Matrix => "matrix",
-        ChannelType::Email => "email",
-        ChannelType::Teams => "teams",
-        ChannelType::Mattermost => "mattermost",
         ChannelType::WebChat => "webchat",
         ChannelType::CLI => "cli",
         ChannelType::Custom(s) => s.as_str(),
@@ -358,7 +352,7 @@ mod tests {
         assert_eq!(resolved, Some(direct_agent));
 
         // User default for non-direct-routed user
-        let resolved = router.resolve(&ChannelType::WhatsApp, "wa_456", Some("alice"));
+        let resolved = router.resolve(&ChannelType::Slack, "wa_456", Some("alice"));
         assert_eq!(resolved, Some(user_agent));
 
         // System default for unknown user

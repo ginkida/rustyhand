@@ -107,12 +107,19 @@ TOML
     fi
 
     # ── Telegram ──
+    # NOTE: TOML section is `[channels.telegram]`, not top-level
+    # `[telegram]`. The daemon only reads channel configs from the
+    # `channels` subtable; a stray `[telegram]` is silently dropped
+    # by serde and the inbound listener never starts.
     if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
         cat >> "$CONFIG" <<TOML
 
-[telegram]
+[channels.telegram]
 bot_token_env = "TELEGRAM_BOT_TOKEN"
 TOML
+        if [ -n "$RUSTYHAND_TELEGRAM_DEFAULT_AGENT" ]; then
+            echo "default_agent = \"$RUSTYHAND_TELEGRAM_DEFAULT_AGENT\"" >> "$CONFIG"
+        fi
         # RUSTYHAND_TELEGRAM_USERS is a comma-separated list of Telegram
         # user IDs (i64, may be negative for channels). We accept the
         # raw value with or without TOML array brackets, quotes, or
@@ -162,20 +169,26 @@ TOML
     if [ -n "$DISCORD_BOT_TOKEN" ]; then
         cat >> "$CONFIG" <<TOML
 
-[discord]
+[channels.discord]
 bot_token_env = "DISCORD_BOT_TOKEN"
 TOML
+        if [ -n "$RUSTYHAND_DISCORD_DEFAULT_AGENT" ]; then
+            echo "default_agent = \"$RUSTYHAND_DISCORD_DEFAULT_AGENT\"" >> "$CONFIG"
+        fi
     fi
 
     # ── Slack ──
     if [ -n "$SLACK_BOT_TOKEN" ]; then
         cat >> "$CONFIG" <<TOML
 
-[slack]
+[channels.slack]
 bot_token_env = "SLACK_BOT_TOKEN"
 TOML
         if [ -n "$SLACK_APP_TOKEN" ]; then
             echo "app_token_env = \"SLACK_APP_TOKEN\"" >> "$CONFIG"
+        fi
+        if [ -n "$RUSTYHAND_SLACK_DEFAULT_AGENT" ]; then
+            echo "default_agent = \"$RUSTYHAND_SLACK_DEFAULT_AGENT\"" >> "$CONFIG"
         fi
     fi
 

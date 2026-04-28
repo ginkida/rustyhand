@@ -1,49 +1,15 @@
 //! Channel Bridge Layer for the RustyHand Agent OS.
 //!
-//! Provides 38 pluggable messaging integrations that convert platform messages
-//! into unified `ChannelMessage` events for the kernel.
+//! Provides messaging integrations that convert platform messages into
+//! unified `ChannelMessage` events for the kernel. RustyHand ships
+//! adapters for the three platforms whose APIs work without a public
+//! webhook URL — Telegram (long-polling), Discord (Gateway WebSocket),
+//! and Slack (Socket Mode).
 
 pub mod bridge;
 pub mod discord;
 pub mod formatter;
-pub mod google_chat;
-pub mod irc;
-pub mod matrix;
-pub mod mattermost;
-pub mod rocketchat;
 pub mod router;
-pub mod signal;
 pub mod slack;
-pub mod teams;
 pub mod telegram;
-pub mod twitch;
 pub mod types;
-pub mod whatsapp;
-pub mod zulip;
-// Wave 3 — High-value channels
-pub mod bluesky;
-pub mod feishu;
-pub mod line;
-pub mod mastodon;
-pub mod messenger;
-pub mod reddit;
-pub mod revolt;
-pub mod viber;
-// Wave 4 — Enterprise & community channels
-pub mod flock;
-pub mod guilded;
-pub mod keybase;
-pub mod nextcloud;
-pub mod pumble;
-pub mod threema;
-pub mod twist;
-pub mod webex;
-// Wave 5 — Niche & differentiating channels
-pub mod dingtalk;
-pub mod discourse;
-pub mod gitter;
-pub mod gotify;
-pub mod linkedin;
-pub mod mumble;
-pub mod ntfy;
-pub mod webhook;

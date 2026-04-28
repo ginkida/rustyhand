@@ -461,12 +461,6 @@ fn channel_type_str(channel: &crate::types::ChannelType) -> &str {
         crate::types::ChannelType::Telegram => "telegram",
         crate::types::ChannelType::Discord => "discord",
         crate::types::ChannelType::Slack => "slack",
-        crate::types::ChannelType::WhatsApp => "whatsapp",
-        crate::types::ChannelType::Signal => "signal",
-        crate::types::ChannelType::Matrix => "matrix",
-        crate::types::ChannelType::Email => "email",
-        crate::types::ChannelType::Teams => "teams",
-        crate::types::ChannelType::Mattermost => "mattermost",
         crate::types::ChannelType::WebChat => "webchat",
         crate::types::ChannelType::CLI => "cli",
         crate::types::ChannelType::Custom(s) => s.as_str(),
@@ -1460,11 +1454,13 @@ mod tests {
     #[test]
     fn test_channel_type_str() {
         assert_eq!(channel_type_str(&ChannelType::Telegram), "telegram");
-        assert_eq!(channel_type_str(&ChannelType::Matrix), "matrix");
-        assert_eq!(channel_type_str(&ChannelType::Email), "email");
+        assert_eq!(channel_type_str(&ChannelType::Discord), "discord");
+        assert_eq!(channel_type_str(&ChannelType::Slack), "slack");
+        assert_eq!(channel_type_str(&ChannelType::WebChat), "webchat");
+        assert_eq!(channel_type_str(&ChannelType::CLI), "cli");
         assert_eq!(
-            channel_type_str(&ChannelType::Custom("irc".to_string())),
-            "irc"
+            channel_type_str(&ChannelType::Custom("matrix".to_string())),
+            "matrix"
         );
     }
 }
