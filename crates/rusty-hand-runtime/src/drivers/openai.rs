@@ -723,8 +723,11 @@ impl LlmDriver for OpenAIDriver {
                         continue;
                     }
 
-                    let data = match line.strip_prefix("data: ") {
-                        Some(d) => d,
+                    // SSE spec: the space after `data:` is optional. Some
+                    // OpenAI-compat upstreams behind minifying CDNs (Cloudflare,
+                    // Fastly) emit `data:{...}` with no space. Accept both.
+                    let data = match line.strip_prefix("data:") {
+                        Some(rest) => rest.strip_prefix(' ').unwrap_or(rest),
                         None => continue,
                     };
 
@@ -736,6 +739,69 @@ impl LlmDriver for OpenAIDriver {
                         Ok(v) => v,
                         Err(_) => continue,
                     };
+
+                    // Some OpenAI-compat providers (DeepSeek, OpenRouter, Groq,
+                    // local proxies, etc.) emit errors mid-stream as
+                    // `data: {"error": {"message": ..., "type": ..., "code": ...}}`
+                    // with HTTP 200. Without this branch the chunk has no
+                    // `choices` field and we just `continue`d, ending up with
+                    // empty content + zero usage — the truncation guard would
+                    // then misclassify as Overloaded and the agent looped over
+                    // a real, terminal error (auth, quota, content filter).
+                    if let Some(err) = json.get("error") {
+                        let err_type = err["type"].as_str().unwrap_or("unknown_error").to_string();
+                        let err_code = err["code"].as_str().unwrap_or("").to_string();
+                        let err_msg = err["message"]
+                            .as_str()
+                            .unwrap_or("(no message)")
+                            .to_string();
+                        warn!(
+                            base_url = %self.base_url,
+                            err_type = %err_type,
+                            err_code = %err_code,
+                            err_msg = %err_msg,
+                            "Upstream sent error mid-stream as data event"
+                        );
+                        let combined = if err_code.is_empty() {
+                            format!("{err_type}: {err_msg}")
+                        } else {
+                            format!("{err_type} ({err_code}): {err_msg}")
+                        };
+                        return Err(match err_type.as_str() {
+                            "rate_limit_exceeded" | "rate_limit_error" => LlmError::RateLimited {
+                                retry_after_ms: 5000,
+                            },
+                            "server_error" | "overloaded_error" | "service_unavailable" => {
+                                LlmError::Overloaded {
+                                    retry_after_ms: 5000,
+                                }
+                            }
+                            "authentication_error" | "invalid_api_key" => LlmError::Api {
+                                status: 401,
+                                message: combined,
+                            },
+                            "permission_error" | "insufficient_quota" => LlmError::Api {
+                                status: 403,
+                                message: combined,
+                            },
+                            "not_found_error" | "model_not_found" => LlmError::Api {
+                                status: 404,
+                                message: combined,
+                            },
+                            "context_length_exceeded" | "request_too_large" => LlmError::Api {
+                                status: 413,
+                                message: combined,
+                            },
+                            "invalid_request_error" | "tool_use_failed" => LlmError::Api {
+                                status: 400,
+                                message: combined,
+                            },
+                            _ => LlmError::Api {
+                                status: 502,
+                                message: combined,
+                            },
+                        });
+                    }
 
                     // Extract usage if present (some providers send it in the last chunk)
                     if let Some(u) = json.get("usage") {

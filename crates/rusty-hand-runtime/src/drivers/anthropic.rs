@@ -445,10 +445,18 @@ impl LlmDriver for AnthropicDriver {
                     let mut event_type = String::new();
                     let mut data = String::new();
                     for line in event_text.lines() {
-                        if let Some(et) = line.strip_prefix("event: ") {
-                            event_type = et.to_string();
-                        } else if let Some(d) = line.strip_prefix("data: ") {
-                            data = d.to_string();
+                        // SSE spec: `field:value` — the leading space after the
+                        // colon is OPTIONAL. Some upstreams (notably Kimi via
+                        // Cloudflare) minify the stream and drop the space, e.g.
+                        // `event:message_start` and `data:{...}`. Pre-fix we
+                        // matched `"event: "` / `"data: "` (with space) and
+                        // silently dropped every event from such providers,
+                        // surfacing as the "empty stream" symptom that the
+                        // truncation guard then misclassified as Overloaded.
+                        if let Some(rest) = line.strip_prefix("event:") {
+                            event_type = rest.strip_prefix(' ').unwrap_or(rest).to_string();
+                        } else if let Some(rest) = line.strip_prefix("data:") {
+                            data = rest.strip_prefix(' ').unwrap_or(rest).to_string();
                         }
                     }
 
@@ -574,7 +582,71 @@ impl LlmDriver for AnthropicDriver {
                                 usage.output_tokens = ot;
                             }
                         }
-                        _ => {} // message_stop, ping, etc.
+                        // Anthropic SSE protocol: in-stream errors come as
+                        // `event: error\ndata: {"type":"error","error":{...}}`.
+                        // Without this branch, the unknown-event arm silently
+                        // discarded them and the loop ended with empty content
+                        // + zero usage — the driver retried, the agent retried,
+                        // and the user saw a generic "overloaded" message even
+                        // when the upstream had told us *exactly* what was
+                        // wrong (auth, quota, content moderation, etc).
+                        // Kimi-for-Coding reuses this driver, so this fix
+                        // covers both api.anthropic.com and api.kimi.com.
+                        "error" => {
+                            let err_type = json["error"]["type"]
+                                .as_str()
+                                .unwrap_or("unknown_error")
+                                .to_string();
+                            let err_msg = json["error"]["message"]
+                                .as_str()
+                                .unwrap_or("(no message)")
+                                .to_string();
+                            warn!(
+                                base_url = %self.base_url,
+                                err_type = %err_type,
+                                err_msg = %err_msg,
+                                "Upstream sent SSE error event mid-stream"
+                            );
+                            return Err(match err_type.as_str() {
+                                "overloaded_error" => LlmError::Overloaded {
+                                    retry_after_ms: 5000,
+                                },
+                                "rate_limit_error" => LlmError::RateLimited {
+                                    retry_after_ms: 5000,
+                                },
+                                "authentication_error" => LlmError::Api {
+                                    status: 401,
+                                    message: format!("{err_type}: {err_msg}"),
+                                },
+                                "permission_error" => LlmError::Api {
+                                    status: 403,
+                                    message: format!("{err_type}: {err_msg}"),
+                                },
+                                "not_found_error" => LlmError::Api {
+                                    status: 404,
+                                    message: format!("{err_type}: {err_msg}"),
+                                },
+                                "request_too_large" => LlmError::Api {
+                                    status: 413,
+                                    message: format!("{err_type}: {err_msg}"),
+                                },
+                                "invalid_request_error" => LlmError::Api {
+                                    status: 400,
+                                    message: format!("{err_type}: {err_msg}"),
+                                },
+                                _ => LlmError::Api {
+                                    status: 502,
+                                    message: format!("{err_type}: {err_msg}"),
+                                },
+                            });
+                        }
+                        // message_stop, ping, content_block_stop already
+                        // handled above. Anything else is logged at debug
+                        // so future protocol changes are visible without
+                        // surprising users.
+                        other => {
+                            debug!(event_type = other, "Ignoring unknown SSE event type");
+                        }
                     }
                 }
             }

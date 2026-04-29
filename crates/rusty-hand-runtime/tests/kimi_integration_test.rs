@@ -272,6 +272,12 @@ const KIMI_SSE_RESPONSE: &str = "event: message_start\ndata: {\"type\":\"message
 /// the AnthropicDriver's streaming path gets exercised against a Kimi-shaped
 /// base URL. Returns (base_url, captured).
 fn spawn_mock_sse_server() -> (String, Arc<Mutex<CapturedRequest>>) {
+    spawn_mock_sse_server_with_body(KIMI_SSE_RESPONSE)
+}
+
+/// Variant that lets callers control the SSE body so we can exercise edge
+/// cases like in-stream `event: error` payloads.
+fn spawn_mock_sse_server_with_body(body: &'static str) -> (String, Arc<Mutex<CapturedRequest>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock sse server");
     let addr = listener.local_addr().expect("local addr");
     let base_url = format!("http://{}", addr);
@@ -313,8 +319,8 @@ fn spawn_mock_sse_server() -> (String, Arc<Mutex<CapturedRequest>>) {
         // AnthropicDriver accepts Content-Length too since reqwest handles both).
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            KIMI_SSE_RESPONSE.len(),
-            KIMI_SSE_RESPONSE
+            body.len(),
+            body
         );
         let _ = stream.write_all(response.as_bytes());
         let _ = stream.flush();
@@ -398,5 +404,197 @@ async fn kimi_driver_rejects_missing_api_key() {
             ),
             "kimi provider with no key must surface a MissingApiKey error"
         );
+    }
+}
+
+// ── In-stream error event handling ────────────────────────────────────────
+// These tests exercise the path where the upstream sends HTTP 200 + SSE
+// `event: error` mid-stream (the path that v0.7.13 silently swallowed,
+// causing 6 redundant retries before giving up with a generic message).
+// The fix surfaces these as the matching `LlmError::*` variant immediately,
+// and the agent_loop's existing handler reports the upstream's actual
+// error message instead of a hardcoded "overloaded" string.
+
+/// Minified SSE format (`event:foo` / `data:{...}` — NO space after colon).
+/// This is the exact wire format Kimi (api.kimi.com/coding) emits via its
+/// Cloudflare front. Pre-fix the SSE parser required `"event: "` / `"data: "`
+/// (with space) and silently dropped every event from this upstream, which
+/// is why a fresh Docker install with KIMI_API_KEY produced the "agent
+/// doesn't reply on Telegram" symptom.
+const KIMI_SSE_MINIFIED_OK: &str = "event:message_start\ndata:{\"type\":\"message_start\",\"message\":{\"id\":\"msg_m\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"kimi-for-coding\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":7,\"output_tokens\":0}}}\n\nevent:content_block_start\ndata:{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent:content_block_delta\ndata:{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Pong!\"}}\n\nevent:content_block_stop\ndata:{\"type\":\"content_block_stop\",\"index\":0}\n\nevent:message_delta\ndata:{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":3}}\n\nevent:message_stop\ndata:{\"type\":\"message_stop\"}\n\n";
+
+const KIMI_SSE_OVERLOADED: &str = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_e\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"kimi-k2-thinking\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":5,\"output_tokens\":0}}}\n\nevent: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Upstream is overloaded right now\"}}\n\n";
+
+const KIMI_SSE_AUTH_FAILED: &str = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"invalid api key\"}}\n\n";
+
+const KIMI_SSE_INVALID_REQ: &str = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"max_tokens too large\"}}\n\n";
+
+/// Regression: the Kimi production endpoint emits SSE *without* the space
+/// after `event:` / `data:`. Pre-fix our parser required the space and
+/// dropped every event silently — this test pins the lenient parsing.
+#[tokio::test]
+async fn kimi_driver_parses_minified_sse_format_without_space_after_colon() {
+    let (base_url, _captured) = spawn_mock_sse_server_with_body(KIMI_SSE_MINIFIED_OK);
+
+    let config = DriverConfig {
+        provider: "kimi".to_string(),
+        api_key: Some("sk-kimi-mini-test".to_string()),
+        base_url: Some(base_url),
+    };
+    let driver = create_driver(&config).expect("kimi driver must build");
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+    let request = CompletionRequest {
+        model: "kimi-for-coding".to_string(),
+        messages: vec![Message::user("ping")],
+        tools: vec![],
+        max_tokens: 32,
+        temperature: 0.0,
+        system: None,
+        thinking: None,
+        response_format: Default::default(),
+    };
+
+    let final_response = driver
+        .stream(request, tx)
+        .await
+        .expect("stream() must parse the minified SSE format Kimi sends");
+
+    let mut text_deltas = Vec::new();
+    while let Ok(evt) = tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await
+    {
+        match evt {
+            Some(rusty_hand_runtime::llm_driver::StreamEvent::TextDelta { text }) => {
+                text_deltas.push(text);
+            }
+            Some(_) => {}
+            None => break,
+        }
+    }
+
+    assert_eq!(
+        text_deltas.join(""),
+        "Pong!",
+        "minified SSE (no space after colon) must produce text deltas — \
+         this is the exact wire format the live Kimi API emits"
+    );
+    assert_eq!(final_response.usage.input_tokens, 7);
+    assert_eq!(final_response.usage.output_tokens, 3);
+}
+
+#[tokio::test]
+async fn kimi_driver_sse_error_event_overloaded_returns_overloaded() {
+    let (base_url, _captured) = spawn_mock_sse_server_with_body(KIMI_SSE_OVERLOADED);
+
+    let config = DriverConfig {
+        provider: "kimi".to_string(),
+        api_key: Some("sk-kimi-err-test".to_string()),
+        base_url: Some(base_url),
+    };
+    let driver = create_driver(&config).expect("kimi driver must build");
+
+    let (tx, _rx) = tokio::sync::mpsc::channel(64);
+    let request = CompletionRequest {
+        model: "kimi-k2-thinking".to_string(),
+        messages: vec![Message::user("hi")],
+        tools: vec![],
+        max_tokens: 32,
+        temperature: 0.5,
+        system: None,
+        thinking: None,
+        response_format: Default::default(),
+    };
+
+    let err = driver
+        .stream(request, tx)
+        .await
+        .expect_err("SSE error event must surface as LlmError, not Ok");
+
+    assert!(
+        matches!(
+            err,
+            rusty_hand_runtime::llm_driver::LlmError::Overloaded { .. }
+        ),
+        "overloaded_error type must map to LlmError::Overloaded, got: {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn kimi_driver_sse_error_event_auth_returns_api_401() {
+    let (base_url, _captured) = spawn_mock_sse_server_with_body(KIMI_SSE_AUTH_FAILED);
+
+    let config = DriverConfig {
+        provider: "kimi".to_string(),
+        api_key: Some("sk-kimi-err-test".to_string()),
+        base_url: Some(base_url),
+    };
+    let driver = create_driver(&config).expect("kimi driver must build");
+
+    let (tx, _rx) = tokio::sync::mpsc::channel(64);
+    let request = CompletionRequest {
+        model: "kimi-k2-thinking".to_string(),
+        messages: vec![Message::user("hi")],
+        tools: vec![],
+        max_tokens: 32,
+        temperature: 0.5,
+        system: None,
+        thinking: None,
+        response_format: Default::default(),
+    };
+
+    let err = driver
+        .stream(request, tx)
+        .await
+        .expect_err("auth error event must surface as LlmError, not Ok");
+
+    match err {
+        rusty_hand_runtime::llm_driver::LlmError::Api { status, message } => {
+            assert_eq!(status, 401, "auth error must map to HTTP 401");
+            assert!(
+                message.contains("invalid api key"),
+                "user-facing message must include upstream detail, got: {message}"
+            );
+        }
+        other => panic!("expected LlmError::Api(401), got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn kimi_driver_sse_error_event_invalid_request_returns_api_400() {
+    let (base_url, _captured) = spawn_mock_sse_server_with_body(KIMI_SSE_INVALID_REQ);
+
+    let config = DriverConfig {
+        provider: "kimi".to_string(),
+        api_key: Some("sk-kimi-err-test".to_string()),
+        base_url: Some(base_url),
+    };
+    let driver = create_driver(&config).expect("kimi driver must build");
+
+    let (tx, _rx) = tokio::sync::mpsc::channel(64);
+    let request = CompletionRequest {
+        model: "kimi-k2-thinking".to_string(),
+        messages: vec![Message::user("hi")],
+        tools: vec![],
+        max_tokens: 99999,
+        temperature: 0.5,
+        system: None,
+        thinking: None,
+        response_format: Default::default(),
+    };
+
+    let err = driver
+        .stream(request, tx)
+        .await
+        .expect_err("invalid_request error event must surface as LlmError");
+
+    match err {
+        rusty_hand_runtime::llm_driver::LlmError::Api { status, message } => {
+            assert_eq!(status, 400);
+            assert!(
+                message.contains("max_tokens too large"),
+                "user must see upstream's exact reason, got: {message}"
+            );
+        }
+        other => panic!("expected LlmError::Api(400), got {other:?}"),
     }
 }
