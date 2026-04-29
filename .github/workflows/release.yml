@@ -78,21 +78,12 @@ jobs:
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
         with:
           files: rustyhand-${{ matrix.target }}.*
-          body: |
-            ## Installation
-
-            **From source:**
-            ```bash
-            git clone https://github.com/ginkida/rustyhand.git
-            cd rustyhand && cargo build --release -p rusty-hand-cli
-            ```
-
-            **Docker:**
-            ```bash
-            docker pull ghcr.io/ginkida/rustyhand:latest
-            ```
-
-            See [README](https://github.com/ginkida/rustyhand#readme) for full documentation.
+          # No `body:` here — release notes are authored via
+          # `gh release create vX.Y.Z --notes ...` before this workflow
+          # runs. Setting `body` in 6 parallel matrix jobs would clobber
+          # those notes (last writer wins) with a generic install template,
+          # which is exactly what happened to v0.7.13–v0.7.15 before this
+          # fix. Leaving body unset preserves the manually-authored notes.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
