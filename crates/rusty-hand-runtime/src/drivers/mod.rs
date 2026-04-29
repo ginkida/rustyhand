@@ -82,6 +82,29 @@ fn provider_defaults(provider: &str) -> Option<ProviderDefaults> {
     }
 }
 
+/// Read an env var, treating an empty string the same as unset.
+///
+/// Without this, a manifest with `api_key_env = "GEMINI_API_KEY"` plus
+/// an env that exports `GEMINI_API_KEY=""` (a common shell mistake)
+/// would build an LLM driver with an empty bearer token. The provider
+/// would then 401 on every call and the agent_loop would silently
+/// surface an empty response — exactly the v0.7.9-era regression.
+fn env_nonempty(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|s| !s.is_empty())
+}
+
+/// Like `Option<String>::or_else(env_nonempty(name))` but also rejects
+/// `Some("")` from the `config.api_key` side. The kernel's
+/// `resolve_driver` reads `std::env::var(api_key_env).ok()` which
+/// produces `Some("")` when the env var is set but empty — that
+/// cannot fall through to a sensible default without this guard.
+fn pick_api_key(explicit: &Option<String>, env_var: &str) -> Option<String> {
+    explicit
+        .clone()
+        .filter(|s| !s.is_empty())
+        .or_else(|| env_nonempty(env_var))
+}
+
 /// Create an LLM driver based on provider name and configuration.
 ///
 /// Supported providers:
@@ -106,13 +129,9 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
 
     // Anthropic uses its own API format — special case.
     if provider == "anthropic" {
-        let api_key = config
-            .api_key
-            .clone()
-            .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok())
-            .ok_or_else(|| {
-                LlmError::MissingApiKey("Set ANTHROPIC_API_KEY environment variable".to_string())
-            })?;
+        let api_key = pick_api_key(&config.api_key, "ANTHROPIC_API_KEY").ok_or_else(|| {
+            LlmError::MissingApiKey("Set ANTHROPIC_API_KEY environment variable".to_string())
+        })?;
         let base_url = config
             .base_url
             .clone()
@@ -125,15 +144,11 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
     // so we reuse AnthropicDriver with a different base URL. Env var is KIMI_API_KEY
     // (distinct from ANTHROPIC_API_KEY).
     if provider == "kimi" {
-        let api_key = config
-            .api_key
-            .clone()
-            .or_else(|| std::env::var("KIMI_API_KEY").ok())
-            .ok_or_else(|| {
-                LlmError::MissingApiKey(
-                    "Set KIMI_API_KEY environment variable (get one at https://platform.moonshot.ai/console/code)".to_string(),
-                )
-            })?;
+        let api_key = pick_api_key(&config.api_key, "KIMI_API_KEY").ok_or_else(|| {
+            LlmError::MissingApiKey(
+                "Set KIMI_API_KEY environment variable (get one at https://platform.moonshot.ai/console/code)".to_string(),
+            )
+        })?;
         let base_url = config
             .base_url
             .clone()
@@ -143,11 +158,7 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
 
     // All other providers use OpenAI-compatible format.
     if let Some(defaults) = provider_defaults(provider) {
-        let api_key = config
-            .api_key
-            .clone()
-            .or_else(|| std::env::var(defaults.api_key_env).ok())
-            .unwrap_or_default();
+        let api_key = pick_api_key(&config.api_key, defaults.api_key_env).unwrap_or_default();
 
         if defaults.key_required && api_key.is_empty() {
             return Err(LlmError::MissingApiKey(format!(
@@ -251,6 +262,61 @@ pub fn known_providers() -> &'static [&'static str] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: `Some("")` on either side must not slip through.
+    /// `std::env::var("X").ok()` returns `Some("")` for an env var that's
+    /// declared but empty (a common shell mistake), and the kernel's
+    /// `resolve_driver` passes that straight into `DriverConfig.api_key`.
+    /// Pre-fix the `or_else` chain only fired on `None`, so an empty
+    /// string slipped through and the driver was instantiated with no
+    /// auth — the v0.7.9 "silent empty Telegram reply" failure mode.
+    #[test]
+    fn create_driver_treats_empty_api_key_as_missing() {
+        fn assert_missing(label: &str, result: Result<Arc<dyn LlmDriver>, LlmError>) {
+            match result {
+                Err(LlmError::MissingApiKey(_)) => {}
+                Err(e) => panic!("{label}: expected MissingApiKey, got {e:?}"),
+                Ok(_) => panic!("{label}: expected MissingApiKey, got Ok"),
+            }
+        }
+
+        // 1. Explicit empty string, no env var set → MissingApiKey.
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        assert_missing(
+            "anthropic explicit-empty",
+            create_driver(&DriverConfig {
+                provider: "anthropic".to_string(),
+                api_key: Some(String::new()),
+                base_url: None,
+            }),
+        );
+
+        // 2. Explicit empty + non-empty env → driver instantiated with
+        //    the env value (the env_var fallback fires).
+        std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-test");
+        let with_env = create_driver(&DriverConfig {
+            provider: "anthropic".to_string(),
+            api_key: Some(String::new()),
+            base_url: None,
+        });
+        assert!(
+            with_env.is_ok(),
+            "empty api_key with valid env fallback should succeed"
+        );
+
+        // 3. Same shape for OpenAI-compat providers.
+        std::env::remove_var("DEEPSEEK_API_KEY");
+        assert_missing(
+            "deepseek explicit-empty",
+            create_driver(&DriverConfig {
+                provider: "deepseek".to_string(),
+                api_key: Some(String::new()),
+                base_url: None,
+            }),
+        );
+
+        std::env::remove_var("ANTHROPIC_API_KEY");
+    }
 
     #[test]
     fn test_provider_defaults_openrouter() {
