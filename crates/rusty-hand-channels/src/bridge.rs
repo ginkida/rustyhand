@@ -929,9 +929,15 @@ async fn dispatch_message(
         Some(id) => id,
         None => match resolve_fallback_agent(handle.as_ref()).await {
             Ok(id) => {
+                // Cache the resolved fallback as the system default so
+                // subsequent messages skip the `handle.list_agents()`
+                // round-trip. The cache lives for the lifetime of
+                // `Arc<AgentRouter>` (the channel bridge); a reload
+                // builds a fresh router and re-resolves.
+                router.set_default(id);
                 info!(
                     channel = ct_str,
-                    "No default agent configured — auto-routed to fallback (set [channels.<x>].default_agent in config.toml to make this explicit)"
+                    "No default agent configured — auto-routed to fallback and cached as system default (set [channels.<x>].default_agent in config.toml to make this explicit)"
                 );
                 id
             }

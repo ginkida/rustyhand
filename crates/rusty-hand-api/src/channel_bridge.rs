@@ -974,10 +974,14 @@ fn parse_trigger_pattern(s: &str) -> Option<rusty_hand_kernel::triggers::Trigger
 }
 
 /// Resolve a default agent by name — find running or spawn from manifest.
+///
+/// Takes `&AgentRouter` (not `&mut`) so the function can also be called
+/// after the router is wrapped in `Arc<>`. The interior `set_default`
+/// has been Mutex-backed since the v0.7.12 router-cache refactor.
 async fn resolve_default_agent(
     handle: &KernelBridgeAdapter,
     name: &str,
-    router: &mut AgentRouter,
+    router: &AgentRouter,
     adapter_name: &str,
 ) {
     match handle.find_agent_by_name(name).await {
@@ -1087,10 +1091,10 @@ pub async fn start_channel_bridge_with_config(
     }
 
     // Resolve default agent from first adapter that has one configured
-    let mut router = AgentRouter::new();
+    let router = AgentRouter::new();
     for (_, default_agent) in &adapters {
         if let Some(ref name) = default_agent {
-            resolve_default_agent(&handle, name, &mut router, "Channel bridge").await;
+            resolve_default_agent(&handle, name, &router, "Channel bridge").await;
             break; // Only need one default
         }
     }

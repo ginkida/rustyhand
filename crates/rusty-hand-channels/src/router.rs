@@ -30,8 +30,13 @@ pub struct AgentRouter {
     user_defaults: DashMap<String, AgentId>,
     /// Direct routes: (channel_type_key, platform_user_id) -> AgentId.
     direct_routes: DashMap<(String, String), AgentId>,
-    /// System-wide default agent.
-    default_agent: Option<AgentId>,
+    /// System-wide default agent. `Mutex` so the channel bridge can
+    /// lazy-set it from `&self` after the runtime fallback chain
+    /// (in `bridge.rs::resolve_fallback_agent`) picks an agent —
+    /// without this, every inbound message re-does the
+    /// `handle.list_agents()` round-trip even though the answer is
+    /// stable for the lifetime of the bridge.
+    default_agent: Mutex<Option<AgentId>>,
     /// Sorted bindings (most specific first). Uses Mutex for runtime updates via Arc.
     bindings: Mutex<Vec<(AgentBinding, String)>>,
     /// Broadcast configuration. Uses Mutex for runtime updates via Arc.
@@ -49,7 +54,7 @@ impl AgentRouter {
         Self {
             user_defaults: DashMap::new(),
             direct_routes: DashMap::new(),
-            default_agent: None,
+            default_agent: Mutex::new(None),
             bindings: Mutex::new(Vec::new()),
             broadcast: Mutex::new(BroadcastConfig::default()),
             agent_name_cache: DashMap::new(),
@@ -71,9 +76,18 @@ impl AgentRouter {
             .map(|r| r.value().clone())
     }
 
-    /// Set the system-wide default agent.
-    pub fn set_default(&mut self, agent_id: AgentId) {
-        self.default_agent = Some(agent_id);
+    /// Set the system-wide default agent. Takes `&self` so the bridge
+    /// can cache a runtime-resolved fallback after start-up without
+    /// re-acquiring exclusive ownership of the Arc.
+    pub fn set_default(&self, agent_id: AgentId) {
+        if let Ok(mut guard) = self.default_agent.lock() {
+            *guard = Some(agent_id);
+        }
+    }
+
+    /// Read the system-wide default agent (None if unset).
+    pub fn default_agent(&self) -> Option<AgentId> {
+        self.default_agent.lock().ok().and_then(|g| *g)
     }
 
     /// Set a user's default agent.
@@ -160,7 +174,7 @@ impl AgentRouter {
         }
 
         // 3. System default
-        self.default_agent
+        self.default_agent()
     }
 
     /// Resolve with full binding context (supports guild_id, roles, account_id).
@@ -191,7 +205,7 @@ impl AgentRouter {
         if let Some(agent) = self.user_defaults.get(platform_user_id) {
             return Some(*agent);
         }
-        self.default_agent
+        self.default_agent()
     }
 
     /// Resolve broadcast: returns all agents that should receive a message for the given peer.
@@ -338,7 +352,7 @@ mod tests {
 
     #[test]
     fn test_routing_priority() {
-        let mut router = AgentRouter::new();
+        let router = AgentRouter::new();
         let default_agent = AgentId::new();
         let user_agent = AgentId::new();
         let direct_agent = AgentId::new();
@@ -365,6 +379,41 @@ mod tests {
         let router = AgentRouter::new();
         let resolved = router.resolve(&ChannelType::CLI, "local", None);
         assert_eq!(resolved, None);
+    }
+
+    /// Regression: `set_default` must work via `&self` so the channel
+    /// bridge can lazy-cache a runtime-resolved fallback agent into
+    /// `Arc<AgentRouter>` after start-up. Pre-fix the field was
+    /// `Option<AgentId>` with a `&mut self` setter — unusable from an
+    /// `Arc`, which forced `dispatch_message` to call
+    /// `handle.list_agents()` on every inbound message when no
+    /// `default_agent` was configured.
+    #[test]
+    fn test_set_default_through_arc() {
+        let router = std::sync::Arc::new(AgentRouter::new());
+        // Before: no default → resolve returns None.
+        assert_eq!(router.default_agent(), None);
+        assert!(router
+            .resolve(&ChannelType::Telegram, "tg_user", None)
+            .is_none());
+
+        // Lazy-set via `&self` (the cache write the dispatcher does
+        // after the fallback chain succeeds).
+        let agent_id = AgentId::new();
+        router.set_default(agent_id);
+
+        // After: default_agent() returns the cached id, and resolve
+        // routes there for any user that has no specific binding.
+        assert_eq!(router.default_agent(), Some(agent_id));
+        assert_eq!(
+            router.resolve(&ChannelType::Telegram, "tg_user", None),
+            Some(agent_id)
+        );
+
+        // Overwrite is allowed (re-resolution after reload).
+        let agent_id2 = AgentId::new();
+        router.set_default(agent_id2);
+        assert_eq!(router.default_agent(), Some(agent_id2));
     }
 
     #[test]
@@ -515,7 +564,7 @@ mod tests {
 
     #[test]
     fn test_empty_bindings_legacy_behavior() {
-        let mut router = AgentRouter::new();
+        let router = AgentRouter::new();
         let default_id = AgentId::new();
         router.set_default(default_id);
         router.load_bindings(&[]);
