@@ -844,9 +844,9 @@ async fn call_with_retry(
                     if let (Some(provider), Some(cooldown)) = (provider, cooldown) {
                         cooldown.record_failure(provider, false);
                     }
-                    return Err(RustyHandError::LlmDriver(format!(
-                        "Model overloaded after {} retries",
-                        MAX_RETRIES
+                    return Err(RustyHandError::LlmDriver(llm_errors::sanitize_for_user(
+                        llm_errors::LlmErrorCategory::Overloaded,
+                        "",
                     )));
                 }
                 let delay = retry_delay_with_jitter(retry_after_ms, attempt);
@@ -955,9 +955,9 @@ async fn stream_with_retry(
                     if let (Some(provider), Some(cooldown)) = (provider, cooldown) {
                         cooldown.record_failure(provider, false);
                     }
-                    return Err(RustyHandError::LlmDriver(format!(
-                        "Model overloaded after {} retries",
-                        MAX_RETRIES
+                    return Err(RustyHandError::LlmDriver(llm_errors::sanitize_for_user(
+                        llm_errors::LlmErrorCategory::Overloaded,
+                        "",
                     )));
                 }
                 let delay = retry_delay_with_jitter(retry_after_ms, attempt);
