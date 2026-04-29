@@ -631,19 +631,30 @@ impl LlmDriver for AnthropicDriver {
                 if attempt < max_retries {
                     let retry_ms = (attempt + 1) as u64 * 500;
                     warn!(
+                        base_url = %self.base_url,
                         attempt,
-                        retry_ms, "Anthropic stream returned no content and no usage; retrying"
+                        retry_ms,
+                        "Anthropic-wire stream returned no content and no usage; retrying \
+                         (note: Kimi Code uses this driver too — check base_url to see \
+                         which upstream is failing)"
                     );
                     tokio::time::sleep(std::time::Duration::from_millis(retry_ms)).await;
                     continue;
                 }
-                return Err(LlmError::Api {
-                    status: 200,
-                    message: "Anthropic stream returned no content and no usage \
-                              after retries — the connection was likely dropped or \
-                              the upstream silently closed the stream. Check network, \
-                              API key validity, and provider status."
-                        .to_string(),
+                // Classify as Overloaded so agent_loop retries with the
+                // longer 503-style backoff and surfaces the
+                // user-friendly "AI provider is temporarily overloaded"
+                // message. Returning `LlmError::Api { status: 200 }` had
+                // a string containing "connection" which the classifier
+                // routed to Timeout, producing a misleading "request
+                // timed out" reply.
+                warn!(
+                    base_url = %self.base_url,
+                    "Stream returned no content + no usage after retries — \
+                     surfacing as Overloaded so the higher-level retry kicks in"
+                );
+                return Err(LlmError::Overloaded {
+                    retry_after_ms: 5000,
                 });
             }
 

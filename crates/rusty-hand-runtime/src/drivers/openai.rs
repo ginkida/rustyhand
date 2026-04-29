@@ -890,19 +890,25 @@ impl LlmDriver for OpenAIDriver {
                 if attempt < max_retries {
                     let retry_ms = (attempt + 1) as u64 * 500;
                     warn!(
+                        base_url = %self.base_url,
                         attempt,
-                        retry_ms, "OpenAI-compat stream returned no content and no usage; retrying"
+                        retry_ms,
+                        "OpenAI-compat stream returned no content and no usage; retrying"
                     );
                     tokio::time::sleep(std::time::Duration::from_millis(retry_ms)).await;
                     continue;
                 }
-                return Err(LlmError::Api {
-                    status: 200,
-                    message: "OpenAI-compat stream returned no content and no usage \
-                              after retries — the connection was likely dropped or \
-                              the upstream silently closed the stream. Check network, \
-                              API key validity, and provider status."
-                        .to_string(),
+                // Classify as Overloaded so agent_loop retries with the
+                // longer 503-style backoff and surfaces the
+                // user-friendly "AI provider is temporarily overloaded"
+                // message. See the symmetric note in anthropic.rs.
+                warn!(
+                    base_url = %self.base_url,
+                    "Stream returned no content + no usage after retries — \
+                     surfacing as Overloaded so the higher-level retry kicks in"
+                );
+                return Err(LlmError::Overloaded {
+                    retry_after_ms: 5000,
                 });
             }
 
