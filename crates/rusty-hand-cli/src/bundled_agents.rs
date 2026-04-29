@@ -130,19 +130,47 @@ pub fn bundled_agents() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-/// Install bundled agent templates to `~/.rustyhand/agents/`.
-/// Skips any template that already exists on disk (user customization preserved).
-pub fn install_bundled_agents(agents_dir: &std::path::Path) {
+/// Counts returned by `install_bundled_agents_with_options`.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct InstallCounts {
+    /// Files newly written (or overwritten in refresh mode).
+    pub written: usize,
+    /// Files skipped because they already existed (only meaningful when
+    /// `overwrite == false`; always 0 in refresh mode).
+    pub skipped: usize,
+}
+
+/// Install bundled agent templates with explicit overwrite control.
+///
+/// `overwrite = false` preserves user-edited manifests (the historical
+/// behaviour from `install_bundled_agents`).
+/// `overwrite = true` rewrites every bundled file — used by
+/// `rustyhand init --refresh` to wipe stale manifests after an
+/// upgrade where a previous `init` materialized templates referencing
+/// providers that v0.7.0 dropped (groq/gemini/openai/etc.). The
+/// channel bridge does have a runtime fallthrough that prefers the
+/// image-bundled copy over a stale home copy (kernel/config:
+/// `resolve_agent_manifest_with_home`), but `--refresh` is the
+/// explicit knob for binary installs that don't have an
+/// image-bundled location.
+pub fn install_bundled_agents_with_options(
+    agents_dir: &std::path::Path,
+    overwrite: bool,
+) -> InstallCounts {
+    let mut counts = InstallCounts::default();
     for (name, content) in bundled_agents() {
         let dest_dir = agents_dir.join(name);
         let dest_file = dest_dir.join("agent.toml");
-        if dest_file.exists() {
-            continue; // Preserve user customization
+        if dest_file.exists() && !overwrite {
+            counts.skipped += 1;
+            continue;
         }
-        if std::fs::create_dir_all(&dest_dir).is_ok() {
-            let _ = std::fs::write(&dest_file, content);
+        if std::fs::create_dir_all(&dest_dir).is_ok() && std::fs::write(&dest_file, content).is_ok()
+        {
+            counts.written += 1;
         }
     }
+    counts
 }
 
 #[cfg(test)]

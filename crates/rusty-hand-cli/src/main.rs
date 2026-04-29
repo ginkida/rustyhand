@@ -114,6 +114,15 @@ enum Commands {
         /// Quick mode: no prompts, just write config + .env (for CI/scripts).
         #[arg(long)]
         quick: bool,
+        /// Overwrite existing bundled agent manifests under
+        /// ~/.rustyhand/agents/ with the current image's copies. Useful
+        /// after upgrading from an older version where `init` already
+        /// materialized stale templates (e.g. ones referencing the
+        /// removed `groq` / `gemini` providers from v0.7.0). Without
+        /// this flag, `init` preserves user-edited manifests by
+        /// skipping any file that already exists on disk.
+        #[arg(long)]
+        refresh: bool,
     },
     /// Start the RustyHand kernel daemon (API server + kernel).
     Start,
@@ -793,7 +802,7 @@ fn main() {
                 return;
             }
             match launcher::run(cli.config.clone()) {
-                launcher::LauncherChoice::GetStarted => cmd_init(false),
+                launcher::LauncherChoice::GetStarted => cmd_init(false, false),
                 launcher::LauncherChoice::Chat => cmd_quick_chat(cli.config, None),
                 launcher::LauncherChoice::Dashboard => cmd_dashboard(),
                 launcher::LauncherChoice::DesktopApp => launcher::launch_desktop_app(),
@@ -807,7 +816,7 @@ fn main() {
             }
         }
         Some(Commands::Tui) => tui::run(cli.config),
-        Some(Commands::Init { quick }) => cmd_init(quick),
+        Some(Commands::Init { quick, refresh }) => cmd_init(quick, refresh),
         Some(Commands::Start) => cmd_start(cli.config),
         Some(Commands::Stop) => cmd_stop(),
         Some(Commands::Agent(sub)) => match sub {
@@ -927,8 +936,10 @@ fn main() {
             WebhooksCommands::Delete { id } => cmd_webhooks_delete(&id),
             WebhooksCommands::Test { id } => cmd_webhooks_test(&id),
         },
-        Some(Commands::Onboard { quick }) | Some(Commands::Setup { quick }) => cmd_init(quick),
-        Some(Commands::Configure) => cmd_init(false),
+        Some(Commands::Onboard { quick }) | Some(Commands::Setup { quick }) => {
+            cmd_init(quick, false)
+        }
+        Some(Commands::Configure) => cmd_init(false, false),
         Some(Commands::Message { agent, text, json }) => cmd_message(&agent, &text, json),
         Some(Commands::System(sub)) => match sub {
             SystemCommands::Info { json } => cmd_system_info(json),
@@ -1270,7 +1281,7 @@ pub(crate) fn daemon_json(
 // Commands
 // ---------------------------------------------------------------------------
 
-fn cmd_init(quick: bool) {
+fn cmd_init(quick: bool, refresh: bool) {
     let rusty_hand_dir = rusty_hand_home();
     let base_dir = rusty_hand_dir
         .parent()
@@ -1300,8 +1311,23 @@ fn cmd_init(quick: bool) {
         }
     }
 
-    // Install bundled agent templates (skips existing ones to preserve user edits)
-    bundled_agents::install_bundled_agents(&rusty_hand_dir.join("agents"));
+    // Install bundled agent templates. With --refresh, overwrite
+    // existing files (use after upgrading to wipe stale manifests
+    // referencing removed providers like groq/gemini); without it,
+    // preserve user edits by skipping existing files.
+    let agents_dir = rusty_hand_dir.join("agents");
+    let counts = bundled_agents::install_bundled_agents_with_options(&agents_dir, refresh);
+    if refresh {
+        ui::success(&format!(
+            "Refreshed {} bundled agent template(s) (overwrote existing copies)",
+            counts.written
+        ));
+    } else if counts.written > 0 {
+        ui::hint(&format!(
+            "Installed {} new bundled agent template(s) ({} preserved as-is)",
+            counts.written, counts.skipped
+        ));
+    }
 
     if quick {
         cmd_init_quick(&rusty_hand_dir);
