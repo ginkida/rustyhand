@@ -610,6 +610,43 @@ impl LlmDriver for AnthropicDriver {
                 }
             }
 
+            // Detect a truncated/empty stream: the SSE connection
+            // returned 200 but produced no content blocks and no
+            // usage. This happens when the upstream connection is
+            // dropped after the headers but before any event, or when
+            // the API silently returns an empty body for an auth/quota
+            // edge case. Without this guard the driver returned
+            // `Ok(empty)` and the agent_loop's empty-response guard
+            // fired with `input_tokens=0 output_tokens=0` — exactly
+            // the user-reported "agent doesn't reply" symptom.
+            //
+            // Keep the legitimate case of "tool-use only, no text" by
+            // requiring BOTH blocks to be empty AND usage to be all
+            // zeros before declaring failure.
+            if content.is_empty()
+                && tool_calls.is_empty()
+                && usage.input_tokens == 0
+                && usage.output_tokens == 0
+            {
+                if attempt < max_retries {
+                    let retry_ms = (attempt + 1) as u64 * 500;
+                    warn!(
+                        attempt,
+                        retry_ms, "Anthropic stream returned no content and no usage; retrying"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(retry_ms)).await;
+                    continue;
+                }
+                return Err(LlmError::Api {
+                    status: 200,
+                    message: "Anthropic stream returned no content and no usage \
+                              after retries — the connection was likely dropped or \
+                              the upstream silently closed the stream. Check network, \
+                              API key validity, and provider status."
+                        .to_string(),
+                });
+            }
+
             let _ = tx
                 .send(StreamEvent::ContentComplete { stop_reason, usage })
                 .await;
