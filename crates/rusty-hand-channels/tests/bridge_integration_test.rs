@@ -357,9 +357,14 @@ async fn test_bridge_dispatch_agent_select_command() {
     manager.stop().await;
 }
 
-/// Test that unrouted messages (no agent assigned) get a helpful error.
+/// Test that unrouted messages get a helpful error pointing at the
+/// `default_agent` config knob — used to literally say "No agent
+/// assigned" until the v0.7.10+ fallback chain replaced it with
+/// either an auto-routed running agent or a clearer hint.
 #[tokio::test]
 async fn test_bridge_dispatch_no_agent_assigned() {
+    // MockHandle with no agents AND with a `spawn_agent_by_name` that
+    // fails — both fallbacks unavailable.
     let handle = Arc::new(MockHandle::new(vec![]));
     let router = Arc::new(AgentRouter::new());
 
@@ -369,7 +374,6 @@ async fn test_bridge_dispatch_no_agent_assigned() {
     let mut manager = BridgeManager::new(handle, router);
     manager.start_adapter(adapter.clone()).await.unwrap();
 
-    // Send message with no agent routed
     tx.send(make_text_msg(ChannelType::Telegram, "user1", "hello"))
         .await
         .unwrap();
@@ -379,8 +383,8 @@ async fn test_bridge_dispatch_no_agent_assigned() {
     let sent = adapter_ref.get_sent();
     assert_eq!(sent.len(), 1);
     assert!(
-        sent[0].1.contains("No agent assigned"),
-        "Expected 'No agent assigned' message, got: {}",
+        sent[0].1.contains("default_agent") && sent[0].1.contains("config.toml"),
+        "fallback error must point the user at the config knob, got: {}",
         sent[0].1
     );
 

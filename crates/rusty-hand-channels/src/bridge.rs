@@ -455,6 +455,46 @@ impl BridgeManager {
     }
 }
 
+/// Bundled agent names tried (in order) as a last-ditch fallback when
+/// no router rule matches an inbound message and no `default_agent`
+/// is set on the channel.
+const FALLBACK_AGENT_NAMES: &[&str] = &["assistant", "coordinator", "coder"];
+
+/// Pick an agent for an inbound message that the router couldn't route.
+///
+/// The fresh-install path: a Telegram bot token is set, no
+/// `default_agent` was configured (or the configured one couldn't
+/// spawn), no bindings match. Without this fallback the user sees
+/// "No agent assigned" forever. With it, we look at running agents
+/// first (any will do, sorted by name for determinism), then try to
+/// spawn one of the standard bundled meta-agents.
+///
+/// Returns either the resolved agent id or a user-facing error message
+/// with a hint about how to fix the misconfiguration.
+async fn resolve_fallback_agent(handle: &dyn ChannelBridgeHandle) -> Result<AgentId, String> {
+    if let Ok(mut agents) = handle.list_agents().await {
+        agents.sort_by(|a, b| a.1.cmp(&b.1));
+        if let Some((id, _)) = agents.into_iter().next() {
+            return Ok(id);
+        }
+    }
+    for name in FALLBACK_AGENT_NAMES {
+        match handle.spawn_agent_by_name(name).await {
+            Ok(id) => return Ok(id),
+            Err(e) => {
+                debug!("Fallback spawn '{name}' failed: {e}");
+            }
+        }
+    }
+    Err(
+        "No agents are running and no bundled fallback could be spawned. \
+         Set `default_agent` under your channel section in config.toml \
+         (e.g. `[channels.telegram] default_agent = \"assistant\"`) and \
+         restart the daemon."
+            .to_string(),
+    )
+}
+
 /// Resolve channel type to its config string key.
 fn channel_type_str(channel: &crate::types::ChannelType) -> &str {
     match channel {
@@ -887,16 +927,19 @@ async fn dispatch_message(
 
     let agent_id = match agent_id {
         Some(id) => id,
-        None => {
-            send_response(
-                adapter,
-                &message.sender,
-                "No agent assigned. Use /agents to list available agents, then /agent <name> to select one.".to_string(),
-                thread_id,
-                output_format,
-            ).await;
-            return;
-        }
+        None => match resolve_fallback_agent(handle.as_ref()).await {
+            Ok(id) => {
+                info!(
+                    channel = ct_str,
+                    "No default agent configured — auto-routed to fallback (set [channels.<x>].default_agent in config.toml to make this explicit)"
+                );
+                id
+            }
+            Err(msg) => {
+                send_response(adapter, &message.sender, msg, thread_id, output_format).await;
+                return;
+            }
+        },
     };
 
     // Track the last sender for this agent (used for approval push notifications)
@@ -1322,6 +1365,40 @@ mod tests {
         async fn spawn_agent_by_name(&self, _manifest_name: &str) -> Result<AgentId, String> {
             Err("spawn not implemented in mock".to_string())
         }
+    }
+
+    /// Regression: when no router rule matches, the dispatcher must
+    /// fall through to a running agent or a bundled fallback rather
+    /// than dead-ending with "No agent assigned". The user complaint
+    /// that prompted the v0.7.7 → v0.7.10 rescue chain.
+    #[tokio::test]
+    async fn fallback_routes_to_running_agent_alphabetically() {
+        let coder = AgentId::new();
+        let assistant = AgentId::new();
+        let zeta = AgentId::new();
+        // Insert in deliberately non-alphabetical order to make sure
+        // the helper sorts.
+        let mock: Arc<dyn ChannelBridgeHandle> = Arc::new(MockHandle {
+            agents: Mutex::new(vec![
+                (zeta, "zeta".to_string()),
+                (coder, "coder".to_string()),
+                (assistant, "assistant".to_string()),
+            ]),
+        });
+        let resolved = resolve_fallback_agent(mock.as_ref()).await.unwrap();
+        assert_eq!(resolved, assistant, "fallback picks first agent by name");
+    }
+
+    #[tokio::test]
+    async fn fallback_errors_clearly_when_nothing_running_or_spawnable() {
+        let mock: Arc<dyn ChannelBridgeHandle> = Arc::new(MockHandle {
+            agents: Mutex::new(vec![]),
+        });
+        let err = resolve_fallback_agent(mock.as_ref()).await.unwrap_err();
+        assert!(
+            err.contains("default_agent") && err.contains("config.toml"),
+            "fallback error must point the user at the config knob, got: {err}"
+        );
     }
 
     #[test]
