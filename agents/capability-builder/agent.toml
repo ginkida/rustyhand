@@ -149,9 +149,9 @@ After completing your work, reply to Coordinator with:
 """
 
 [[fallback_models]]
-provider = "openai"
-model = "gpt-4o"
-api_key_env = "OPENAI_API_KEY"
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
 
 [schedule]
 reactive = {}

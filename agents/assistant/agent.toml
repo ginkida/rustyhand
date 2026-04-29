@@ -65,7 +65,7 @@ You are reliable, adaptable, and genuinely helpful. You are the user's trusted f
 [[fallback_models]]
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"
-api_key_env = "GEMINI_API_KEY"
+api_key_env = "ANTHROPIC_API_KEY"
 
 [resources]
 max_llm_tokens_per_hour = 300000

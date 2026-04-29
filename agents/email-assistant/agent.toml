@@ -49,7 +49,7 @@ You are thorough, discreet, and efficient. You treat every email as an opportuni
 [[fallback_models]]
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"
-api_key_env = "GEMINI_API_KEY"
+api_key_env = "ANTHROPIC_API_KEY"
 
 [resources]
 max_llm_tokens_per_hour = 150000

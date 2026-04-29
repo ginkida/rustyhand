@@ -7,7 +7,7 @@ module = "builtin:chat"
 [model]
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"
-api_key_env = "GEMINI_API_KEY"
+api_key_env = "ANTHROPIC_API_KEY"
 max_tokens = 4096
 temperature = 0.3
 system_prompt = """You are Data Scientist, an analytics expert running inside the RustyHand Agent OS.
@@ -38,7 +38,7 @@ Output format:
 [[fallback_models]]
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"
-api_key_env = "GROQ_API_KEY"
+api_key_env = "ANTHROPIC_API_KEY"
 
 [resources]
 max_llm_tokens_per_hour = 150000

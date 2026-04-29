@@ -8,7 +8,7 @@ tags = ["coding", "implementation", "rust", "python"]
 [model]
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"
-api_key_env = "GEMINI_API_KEY"
+api_key_env = "ANTHROPIC_API_KEY"
 max_tokens = 8192
 temperature = 0.3
 system_prompt = """You are Coder, an expert software engineer agent running inside the RustyHand Agent OS.
@@ -33,7 +33,7 @@ RESEARCH:
 [[fallback_models]]
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"
-api_key_env = "GROQ_API_KEY"
+api_key_env = "ANTHROPIC_API_KEY"
 
 [resources]
 max_llm_tokens_per_hour = 200000

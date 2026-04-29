@@ -37,9 +37,9 @@ Severity levels: CRITICAL / HIGH / MEDIUM / LOW / INFO
 Report format: Finding → Impact → Evidence → Remediation"""
 
 [[fallback_models]]
-provider = "groq"
-model = "llama-3.3-70b-versatile"
-api_key_env = "GROQ_API_KEY"
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
 
 [schedule]
 proactive = { conditions = ["event:agent_spawned", "event:agent_terminated"] }

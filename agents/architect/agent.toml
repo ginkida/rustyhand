@@ -31,9 +31,9 @@ Output format: Use clear headings, diagrams (ASCII), and structured reasoning.
 When asked to review, be honest about weaknesses."""
 
 [[fallback_models]]
-provider = "groq"
-model = "llama-3.3-70b-versatile"
-api_key_env = "GROQ_API_KEY"
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
 
 [resources]
 max_llm_tokens_per_hour = 200000

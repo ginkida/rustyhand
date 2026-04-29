@@ -84,9 +84,9 @@ Your output to the user should sound human, not like a JSON blob.
 """
 
 [[fallback_models]]
-provider = "openai"
-model = "gpt-4o-mini"
-api_key_env = "OPENAI_API_KEY"
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
 
 [schedule]
 reactive = {}
