@@ -1570,6 +1570,18 @@ pub async fn list_channels(State(state): State<Arc<AppState>>) -> impl IntoRespo
     // Read the live channels config (updated on every hot-reload) instead of the
     // stale boot-time kernel.config, so newly configured channels show correctly.
     let live_channels = state.channels_config.read().await;
+    // Snapshot the bridge's started-adapter set. An adapter is in this
+    // set iff its `start()` method returned Ok — for Telegram that
+    // means `getMe` succeeded, for Discord/Slack that the gateway/socket
+    // handshake completed. Lets us split `configured + has_token` into
+    // `auth_status: "ok"` vs `auth_status: "auth_failed"`.
+    let started: std::collections::HashSet<String> = {
+        let guard = state.bridge_manager.lock().await;
+        guard
+            .as_ref()
+            .map(|m| m.started_channels())
+            .unwrap_or_default()
+    };
     let mut channels = Vec::new();
     let mut configured_count = 0u32;
 
@@ -1590,6 +1602,22 @@ pub async fn list_channels(State(state): State<Arc<AppState>>) -> impl IntoRespo
                     .unwrap_or(true)
             });
 
+        // Auth state, derived from configured + has_token + started:
+        // - "not_configured": no `[channels.<name>]` section in config
+        // - "missing_token":  configured but the required env var is unset
+        // - "ok":             configured + token + bridge accepted the token
+        // - "auth_failed":    configured + token but bridge couldn't start
+        //                     (Telegram getMe 401, Slack handshake failed, etc.)
+        let auth_status = if !configured {
+            "not_configured"
+        } else if !has_token {
+            "missing_token"
+        } else if started.contains(meta.name) {
+            "ok"
+        } else {
+            "auth_failed"
+        };
+
         let fields: Vec<serde_json::Value> = meta.fields.iter().map(build_field_json).collect();
 
         channels.push(serde_json::json!({
@@ -1602,6 +1630,7 @@ pub async fn list_channels(State(state): State<Arc<AppState>>) -> impl IntoRespo
             "quick_setup": meta.quick_setup,
             "configured": configured,
             "has_token": has_token,
+            "auth_status": auth_status,
             "fields": fields,
             "setup_steps": meta.setup_steps,
             "config_template": meta.config_template,

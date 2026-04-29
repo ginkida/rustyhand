@@ -303,6 +303,12 @@ pub struct BridgeManager {
     shutdown_tx: watch::Sender<bool>,
     shutdown_rx: watch::Receiver<bool>,
     tasks: Vec<tokio::task::JoinHandle<()>>,
+    /// Names of adapters whose `start()` returned Ok. Used by
+    /// `/api/channels` to differentiate "configured + token + bridge
+    /// running" from "configured + token + bridge rejected the token at
+    /// startup" (e.g. Telegram returns 401 from `getMe`, the adapter's
+    /// start() returns Err, and we never insert into this set).
+    started: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 impl BridgeManager {
@@ -315,7 +321,17 @@ impl BridgeManager {
             shutdown_tx,
             shutdown_rx,
             tasks: Vec::new(),
+            started: std::sync::Mutex::new(std::collections::HashSet::new()),
         }
+    }
+
+    /// Names of adapters that started successfully (passed their auth
+    /// check or equivalent). Routes consume this to distinguish
+    /// `auth_status: "ok"` vs `auth_status: "auth_failed"` for channels
+    /// that have config + token but where the upstream rejected the
+    /// credentials.
+    pub fn started_channels(&self) -> std::collections::HashSet<String> {
+        self.started.lock().map(|g| g.clone()).unwrap_or_default()
     }
 
     /// Start an adapter: subscribe to its message stream and spawn a dispatch task.
@@ -324,6 +340,10 @@ impl BridgeManager {
         adapter: Arc<dyn ChannelAdapter>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let stream = adapter.start().await?;
+        // start() succeeded — record before any further fallible work.
+        if let Ok(mut guard) = self.started.lock() {
+            guard.insert(adapter.name().to_string());
+        }
         let handle = self.handle.clone();
         let router = self.router.clone();
         let rate_limiter = self.rate_limiter.clone();
@@ -451,6 +471,9 @@ impl BridgeManager {
                     abort_handle.abort();
                 }
             }
+        }
+        if let Ok(mut guard) = self.started.lock() {
+            guard.clear();
         }
     }
 }

@@ -196,6 +196,42 @@ fn make_command_msg(
 // Tests
 // ---------------------------------------------------------------------------
 
+/// Regression: `BridgeManager::started_channels()` returns the names
+/// of adapters whose `start()` returned Ok. v0.7.12 (Tier 2.4)
+/// surfaces this through `/api/channels` as
+/// `auth_status: "ok" | "auth_failed" | "missing_token" |
+/// "not_configured"`. Without this set the dashboard couldn't
+/// distinguish "configured + valid token + bridge running" from
+/// "configured + token + Telegram returned 401 from getMe".
+#[tokio::test]
+async fn test_bridge_started_channels_tracks_successful_adapters() {
+    let handle = Arc::new(MockHandle::new(vec![]));
+    let router = Arc::new(AgentRouter::new());
+
+    let (telegram, _tx) = MockAdapter::new("telegram", ChannelType::Telegram);
+    let (discord, _tx2) = MockAdapter::new("discord", ChannelType::Discord);
+
+    let mut manager = BridgeManager::new(handle, router);
+
+    // Before starting any adapter — empty.
+    assert!(manager.started_channels().is_empty());
+
+    manager.start_adapter(telegram).await.unwrap();
+    let started = manager.started_channels();
+    assert_eq!(started.len(), 1);
+    assert!(started.contains("telegram"));
+
+    manager.start_adapter(discord).await.unwrap();
+    let started = manager.started_channels();
+    assert_eq!(started.len(), 2);
+    assert!(started.contains("telegram"));
+    assert!(started.contains("discord"));
+
+    // After stop() — set is cleared.
+    manager.stop().await;
+    assert!(manager.started_channels().is_empty());
+}
+
 /// Test that text messages are dispatched to the correct agent and responses
 /// are sent back through the adapter.
 #[tokio::test]

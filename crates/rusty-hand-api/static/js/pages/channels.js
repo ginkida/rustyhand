@@ -53,7 +53,11 @@ function channelsPage() {
       try {
         var data = await RustyHandAPI.get('/api/channels');
         this.allChannels = (data.channels || []).map(function(ch) {
-          ch.connected = ch.configured && ch.has_token;
+          // `auth_status` (added v0.7.12) is the source of truth.
+          // Fall back to deriving from `configured` + `has_token` for
+          // older daemons.
+          ch.connected = ch.auth_status === 'ok'
+            || (ch.auth_status == null && ch.configured && ch.has_token);
           return ch;
         });
       } catch(e) {
@@ -81,7 +85,9 @@ function channelsPage() {
           if (fresh) {
             c.configured = fresh.configured;
             c.has_token = fresh.has_token;
-            c.connected = fresh.configured && fresh.has_token;
+            c.auth_status = fresh.auth_status;
+            c.connected = fresh.auth_status === 'ok'
+              || (fresh.auth_status == null && fresh.configured && fresh.has_token);
             c.fields = fresh.fields;
           }
         });
@@ -89,9 +95,17 @@ function channelsPage() {
     },
 
     statusBadge(ch) {
+      // Prefer the v0.7.12+ `auth_status` for precise wording.
+      switch (ch.auth_status) {
+        case 'not_configured': return { text: 'Not Configured', cls: 'badge-muted' };
+        case 'missing_token':  return { text: 'Missing Token',   cls: 'badge-warn'  };
+        case 'auth_failed':    return { text: 'Auth Failed',     cls: 'badge-danger' };
+        case 'ok':             return { text: 'Ready',           cls: 'badge-success' };
+      }
+      // Fallback for older daemons that don't emit auth_status.
       if (!ch.configured) return { text: 'Not Configured', cls: 'badge-muted' };
-      if (!ch.has_token) return { text: 'Missing Token', cls: 'badge-warn' };
-      if (ch.connected) return { text: 'Ready', cls: 'badge-success' };
+      if (!ch.has_token)  return { text: 'Missing Token',  cls: 'badge-warn'  };
+      if (ch.connected)   return { text: 'Ready',          cls: 'badge-success' };
       return { text: 'Configured', cls: 'badge-info' };
     },
 
