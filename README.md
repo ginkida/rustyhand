@@ -19,8 +19,8 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT" />
-  <img src="https://img.shields.io/badge/version-0.7.5-green?style=flat-square" alt="v0.7.5" />
-  <img src="https://img.shields.io/badge/tests-1,475%20passing-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/version-0.7.10-green?style=flat-square" alt="v0.7.10" />
+  <img src="https://img.shields.io/badge/tests-1,481%20passing-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/clippy-0%20warnings-brightgreen?style=flat-square" alt="Clippy" />
 </p>
 
@@ -645,6 +645,22 @@ group_policy = "MentionOnly"           # All | MentionOnly | CommandsOnly | Igno
 output_format = "TelegramHtml"         # Markdown | TelegramHtml | SlackMrkdwn | PlainText
 ```
 
+### Zero-config Telegram on Docker
+
+Since v0.7.10, the Docker entrypoint generates `default_agent = "assistant"`
+under each `[channels.*]` section automatically (override with the
+`RUSTYHAND_{TELEGRAM,DISCORD,SLACK}_DEFAULT_AGENT` env var, or set it to
+an empty string to leave it blank). The bundled `assistant` manifest uses
+`provider = "anthropic"`, so a fresh container with `ANTHROPIC_API_KEY`
+plus a bot token replies to the first message without any extra config or
+`rustyhand init` step.
+
+If the router can't resolve a target at message time (no
+`default_agent`, no bindings, no direct routes), the bridge tries to
+auto-route to a running agent first, then to spawn one of the bundled
+meta-agents (`assistant` → `coordinator` → `coder`). The user only sees
+a config-pointing error message when every fallback fails.
+
 ---
 
 ## 7 LLM Providers
@@ -981,7 +997,7 @@ cross build --release --target aarch64-unknown-linux-gnu -p rusty-hand-cli
 # Compile all crates (use --lib if the daemon binary is locked)
 cargo build --workspace --lib
 
-# Run all tests (1,733 as of v0.7.0)
+# Run all tests (1,481 as of v0.7.10)
 cargo test --workspace
 
 # Lint — must be 0 warnings
