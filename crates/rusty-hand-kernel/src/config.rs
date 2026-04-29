@@ -284,13 +284,74 @@ pub fn agents_search_dirs() -> Vec<PathBuf> {
     agents_search_dirs_with_home(&rusty_hand_home())
 }
 
-/// Find the first existing `<dir>/<name>/agent.toml` across the agents
+/// LLM providers still in the v0.7.x catalog. Manifests referencing
+/// any other provider (e.g. groq, gemini, openai) won't spawn — `create_driver`
+/// returns `Unknown provider`.
+const SUPPORTED_PROVIDERS: &[&str] = &[
+    "anthropic",
+    "kimi",
+    "deepseek",
+    "minimax",
+    "zhipu",
+    "openrouter",
+    "ollama",
+];
+
+/// Validate that a manifest at `path` parses and points at a supported
+/// provider. Returns `Ok(())` on success, `Err(reason)` on failure.
+fn validate_manifest_for_spawn(path: &std::path::Path) -> Result<(), String> {
+    let contents = std::fs::read_to_string(path).map_err(|e| format!("read failed: {e}"))?;
+    let manifest: rusty_hand_types::agent::AgentManifest =
+        toml::from_str(&contents).map_err(|e| format!("toml parse failed: {e}"))?;
+    let provider = manifest.model.provider.as_str();
+    if !SUPPORTED_PROVIDERS.contains(&provider) {
+        return Err(format!(
+            "manifest declares removed provider '{provider}'; supported: {SUPPORTED_PROVIDERS:?}"
+        ));
+    }
+    Ok(())
+}
+
+/// Find the first **valid** `<dir>/<name>/agent.toml` across the agents
 /// search dirs.
+///
+/// "Valid" = parses as `AgentManifest` and uses a supported provider.
+/// If a home-dir copy is invalid (typically a stale manifest persisted
+/// before v0.7.0 stripped most providers), we log a warning and fall
+/// through to the next dir — typically the image-bundled
+/// `/opt/rustyhand/agents/` which has been kept current. Without this
+/// fallthrough a stale `/data/agents/assistant/agent.toml` from an old
+/// `rustyhand init` would silently mask every image upgrade.
 pub fn resolve_agent_manifest_with_home(home_dir: &std::path::Path, name: &str) -> Option<PathBuf> {
-    agents_search_dirs_with_home(home_dir)
+    let candidates: Vec<PathBuf> = agents_search_dirs_with_home(home_dir)
         .into_iter()
         .map(|d| d.join(name).join("agent.toml"))
-        .find(|p| p.exists())
+        .filter(|p| p.exists())
+        .collect();
+
+    let total = candidates.len();
+    for (idx, path) in candidates.iter().enumerate() {
+        match validate_manifest_for_spawn(path) {
+            Ok(()) => return Some(path.clone()),
+            Err(reason) => {
+                if idx + 1 < total {
+                    tracing::warn!(
+                        manifest = %path.display(),
+                        next = %candidates[idx + 1].display(),
+                        reason = %reason,
+                        "Stale agent manifest, falling through to next search dir"
+                    );
+                } else {
+                    tracing::warn!(
+                        manifest = %path.display(),
+                        reason = %reason,
+                        "Last available manifest is invalid; nothing to fall back to"
+                    );
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Same as `resolve_agent_manifest_with_home(&rusty_hand_home(), name)`.
@@ -313,6 +374,28 @@ mod tests {
     /// All four cases are folded into one test because they mutate the
     /// process-wide env var and the parallel runner would otherwise race
     /// them.
+    /// Build a minimum valid AgentManifest with the given provider, so
+    /// resolve_agent_manifest_with_home can validate it.
+    fn manifest_toml(name: &str, provider: &str) -> String {
+        format!(
+            r#"name = "{name}"
+version = "0.1.0"
+description = "test"
+author = "test"
+module = "builtin:chat"
+
+[model]
+provider = "{provider}"
+model = "test-model"
+max_tokens = 8192
+temperature = 0.5
+system_prompt = "test"
+
+[capabilities]
+"#
+        )
+    }
+
     #[test]
     fn agents_search_dirs_falls_back_to_env_var() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -320,7 +403,11 @@ mod tests {
         let bundle = tmp.path().join("bundle");
         std::fs::create_dir_all(home.join("agents")).unwrap();
         std::fs::create_dir_all(bundle.join("assistant")).unwrap();
-        std::fs::write(bundle.join("assistant/agent.toml"), "name = \"bundle\"").unwrap();
+        std::fs::write(
+            bundle.join("assistant/agent.toml"),
+            manifest_toml("assistant", "anthropic"),
+        )
+        .unwrap();
 
         // 1. Env var set, home empty → bundle manifest resolves (Docker).
         std::env::set_var("RUSTY_HAND_AGENTS_DIR", &bundle);
@@ -337,7 +424,11 @@ mod tests {
 
         // 2. User-customized home wins over bundle dir.
         std::fs::create_dir_all(home.join("agents/assistant")).unwrap();
-        std::fs::write(home.join("agents/assistant/agent.toml"), "name = \"home\"").unwrap();
+        std::fs::write(
+            home.join("agents/assistant/agent.toml"),
+            manifest_toml("assistant", "anthropic"),
+        )
+        .unwrap();
         let home_wins = resolve_agent_manifest_with_home(&home, "assistant");
         assert_eq!(
             home_wins.as_deref(),
@@ -360,6 +451,27 @@ mod tests {
         let dirs = agents_search_dirs_with_home(&home);
         assert_eq!(dirs.len(), 1, "empty env var must be ignored");
         std::env::remove_var("RUSTY_HAND_AGENTS_DIR");
+
+        // 6. Stale home-dir manifest (v0.7.0-removed provider) must
+        //    fall through to the bundled copy. This is the real-world
+        //    chain that broke users on v0.7.9: a /data/agents/<name>/
+        //    persisted by an old `rustyhand init` masks the fixed image
+        //    copy; without fallthrough every spawn errors with
+        //    "Unknown provider 'groq'" and the channel reply is "No
+        //    agent assigned" forever.
+        std::fs::write(
+            home.join("agents/assistant/agent.toml"),
+            manifest_toml("assistant", "groq"),
+        )
+        .unwrap();
+        std::env::set_var("RUSTY_HAND_AGENTS_DIR", &bundle);
+        let stale_skipped = resolve_agent_manifest_with_home(&home, "assistant");
+        std::env::remove_var("RUSTY_HAND_AGENTS_DIR");
+        assert_eq!(
+            stale_skipped.as_deref(),
+            Some(bundle.join("assistant/agent.toml").as_path()),
+            "stale home manifest must fall through to the bundled copy"
+        );
     }
 
     #[test]
