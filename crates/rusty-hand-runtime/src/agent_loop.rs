@@ -160,7 +160,7 @@ pub async fn run_agent_loop(
                     .unwrap_or_default()
             }
             Err(e) => {
-                warn!("Embedding recall failed, falling back to text search: {e}");
+                debug!("Embedding recall failed, falling back to text search: {e}");
                 memory
                     .recall(
                         user_message,
@@ -429,7 +429,7 @@ pub async fn run_agent_loop(
                                 .await;
                         }
                         Err(e) => {
-                            warn!("Embedding for remember failed: {e}");
+                            debug!("Embedding for remember failed: {e}");
                             let _ = memory
                                 .remember(
                                     session.agent_id,
@@ -1057,7 +1057,7 @@ pub async fn run_agent_loop_streaming(
                     .unwrap_or_default()
             }
             Err(e) => {
-                warn!("Embedding recall failed (streaming), falling back to text search: {e}");
+                debug!("Embedding recall failed (streaming), falling back to text search: {e}");
                 memory
                     .recall(
                         user_message,
@@ -1339,7 +1339,7 @@ pub async fn run_agent_loop_streaming(
                                 .await;
                         }
                         Err(e) => {
-                            warn!("Embedding for remember failed (streaming): {e}");
+                            debug!("Embedding for remember failed (streaming): {e}");
                             let _ = memory
                                 .remember(
                                     session.agent_id,

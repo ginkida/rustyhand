@@ -10,8 +10,16 @@ use rusty_hand_types::model_catalog::{
     OLLAMA_BASE_URL, OPENAI_EMBEDDING_BASE_URL, VOYAGE_BASE_URL,
 };
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+use tracing::{debug, info, warn};
 use zeroize::Zeroizing;
+
+/// How long the driver short-circuits embed() calls after a failure.
+/// On a fresh install where Ollama isn't running, this prevents every
+/// agent message from spamming an `error sending request` warning and
+/// from issuing a real HTTP attempt that's certain to fail.
+const FAILURE_COOLDOWN: Duration = Duration::from_secs(30);
 
 /// Error type for embedding operations.
 #[derive(Debug, thiserror::Error)]
@@ -24,6 +32,12 @@ pub enum EmbeddingError {
     Parse(String),
     #[error("Missing API key: {0}")]
     MissingApiKey(String),
+    /// Last call failed and we're still within the cooldown window —
+    /// no HTTP attempt was made. Callers should treat this as a normal
+    /// "embedding unavailable, fall back to text search" signal and
+    /// log at `debug!` level only.
+    #[error("Embedding endpoint unavailable (last error: {0})")]
+    Unavailable(String),
 }
 
 /// Configuration for creating an embedding driver.
@@ -58,6 +72,17 @@ pub trait EmbeddingDriver: Send + Sync {
     fn dimensions(&self) -> usize;
 }
 
+/// State machine for the per-driver failure circuit breaker.
+struct CircuitState {
+    /// Embed() short-circuits to `Unavailable` until this instant.
+    open_until: Instant,
+    /// Last error message, returned in the short-circuited error.
+    last_error: String,
+    /// Whether we already logged the WARN line for this outage. Cleared
+    /// on first successful call.
+    warned: bool,
+}
+
 /// OpenAI-compatible embedding driver.
 ///
 /// Works with any provider that implements the `/v1/embeddings` endpoint:
@@ -68,6 +93,8 @@ pub struct OpenAIEmbeddingDriver {
     model: String,
     client: reqwest::Client,
     dims: usize,
+    /// Failure circuit breaker — see `FAILURE_COOLDOWN`.
+    circuit: Mutex<Option<CircuitState>>,
 }
 
 #[derive(Serialize)]
@@ -101,7 +128,55 @@ impl OpenAIEmbeddingDriver {
                 .build()
                 .unwrap_or_default(),
             dims,
+            circuit: Mutex::new(None),
         })
+    }
+
+    /// If the circuit is currently open, return the cached `Unavailable`
+    /// error without making an HTTP call.
+    fn check_circuit(&self) -> Option<EmbeddingError> {
+        let guard = self.circuit.lock().ok()?;
+        let state = guard.as_ref()?;
+        if Instant::now() < state.open_until {
+            Some(EmbeddingError::Unavailable(state.last_error.clone()))
+        } else {
+            None
+        }
+    }
+
+    /// Trip the circuit breaker. Returns `true` on the first failure of
+    /// an outage so the caller can emit a single WARN; subsequent calls
+    /// inside the cooldown window return `false` for `debug!`-level
+    /// logging.
+    fn record_failure(&self, msg: String) -> bool {
+        let mut guard = match self.circuit.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        let already_warned = guard.as_ref().map(|s| s.warned).unwrap_or(false);
+        *guard = Some(CircuitState {
+            open_until: Instant::now() + FAILURE_COOLDOWN,
+            last_error: msg,
+            warned: true,
+        });
+        !already_warned
+    }
+
+    /// Reset the circuit on a successful call. If we previously warned
+    /// the user about an outage, log the recovery once.
+    fn record_success(&self) {
+        let mut guard = match self.circuit.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        if let Some(state) = guard.take() {
+            if state.warned {
+                info!(
+                    base_url = %self.base_url,
+                    "Embedding endpoint recovered"
+                );
+            }
+        }
     }
 }
 
@@ -137,6 +212,13 @@ impl EmbeddingDriver for OpenAIEmbeddingDriver {
             return Ok(vec![]);
         }
 
+        // Short-circuit while the breaker is open — avoids spamming the
+        // dead endpoint and lets the caller fall back to text search
+        // immediately.
+        if let Some(err) = self.check_circuit() {
+            return Err(err);
+        }
+
         let url = format!("{}/embeddings", self.base_url);
         let body = EmbedRequest {
             model: &self.model,
@@ -148,10 +230,24 @@ impl EmbeddingDriver for OpenAIEmbeddingDriver {
             req = req.header("Authorization", format!("Bearer {}", self.api_key.as_str()));
         }
 
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| EmbeddingError::Http(e.to_string()))?;
+        let resp = match req.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                let msg = e.to_string();
+                let first = self.record_failure(msg.clone());
+                if first {
+                    warn!(
+                        base_url = %self.base_url,
+                        error = %msg,
+                        cooldown_secs = FAILURE_COOLDOWN.as_secs(),
+                        "Embedding endpoint unreachable; suppressing further warnings during cooldown"
+                    );
+                } else {
+                    debug!(error = %msg, "Embedding endpoint still unreachable");
+                }
+                return Err(EmbeddingError::Http(msg));
+            }
+        };
         let status = resp.status().as_u16();
 
         if status != 200 {
@@ -159,6 +255,18 @@ impl EmbeddingDriver for OpenAIEmbeddingDriver {
                 .text()
                 .await
                 .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
+            let first = self.record_failure(format!("status {status}"));
+            if first {
+                warn!(
+                    base_url = %self.base_url,
+                    status,
+                    body = %body_text,
+                    cooldown_secs = FAILURE_COOLDOWN.as_secs(),
+                    "Embedding endpoint returned error; suppressing further warnings during cooldown"
+                );
+            } else {
+                debug!(status, body = %body_text, "Embedding endpoint still erroring");
+            }
             return Err(EmbeddingError::Api {
                 status,
                 message: body_text,
@@ -178,6 +286,9 @@ impl EmbeddingDriver for OpenAIEmbeddingDriver {
             embeddings.len(),
             embeddings.first().map(|e| e.len()).unwrap_or(0)
         );
+
+        // Successful round-trip — clear the breaker if it was tripped.
+        self.record_success();
 
         Ok(embeddings)
     }
@@ -281,6 +392,39 @@ pub fn embedding_from_bytes(bytes: &[u8]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: when the embedding endpoint is down, the driver must
+    /// short-circuit subsequent calls instead of issuing fresh HTTP
+    /// attempts every message. Without this, a fresh install with no
+    /// Ollama running floods the logs with two warnings per inbound
+    /// Telegram message (one for memory recall, one for "remember")
+    /// AND blocks the agent for the duration of two HTTP timeouts.
+    #[tokio::test]
+    async fn embed_short_circuits_after_failure() {
+        // Point at a port that's guaranteed to refuse the connection.
+        let driver = OpenAIEmbeddingDriver::new(EmbeddingConfig {
+            provider: "ollama".to_string(),
+            model: "nomic-embed-text".to_string(),
+            api_key: String::new(),
+            base_url: "http://127.0.0.1:1".to_string(),
+        })
+        .expect("driver");
+
+        // First call: real HTTP attempt, fails with Http error, trips
+        // the breaker and emits the WARN log.
+        let first = driver.embed(&["hello"]).await;
+        assert!(matches!(first, Err(EmbeddingError::Http(_))));
+
+        // Second call within the cooldown window: no HTTP, returns
+        // Unavailable immediately. agent_loop logs at debug! level.
+        let second = driver.embed(&["world"]).await;
+        match second {
+            Err(EmbeddingError::Unavailable(msg)) => {
+                assert!(!msg.is_empty(), "Unavailable carries the cached error msg");
+            }
+            other => panic!("expected Unavailable, got {other:?}"),
+        }
+    }
 
     #[test]
     fn test_cosine_similarity_identical() {
