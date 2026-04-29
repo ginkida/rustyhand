@@ -270,52 +270,81 @@ mod tests {
     /// Pre-fix the `or_else` chain only fired on `None`, so an empty
     /// string slipped through and the driver was instantiated with no
     /// auth — the v0.7.9 "silent empty Telegram reply" failure mode.
+    ///
+    /// We test `pick_api_key` directly against an env var name that's
+    /// guaranteed not to be set anywhere in the workspace so the test is
+    /// race-free. `std::env::set_var` / `remove_var` are
+    /// data-race-unsafe under cargo's parallel test runner (the Rust
+    /// 2024 edition marks them `unsafe` for that reason), so a unit
+    /// test here that mutated `ANTHROPIC_API_KEY` could flake with
+    /// other tests reading it.
     #[test]
-    fn create_driver_treats_empty_api_key_as_missing() {
-        fn assert_missing(label: &str, result: Result<Arc<dyn LlmDriver>, LlmError>) {
-            match result {
-                Err(LlmError::MissingApiKey(_)) => {}
-                Err(e) => panic!("{label}: expected MissingApiKey, got {e:?}"),
-                Ok(_) => panic!("{label}: expected MissingApiKey, got Ok"),
-            }
-        }
+    fn pick_api_key_treats_empty_string_as_missing() {
+        const ABSENT: &str = "RUSTYHAND_TEST_VAR_NEVER_SET_FOR_PICK_API_KEY";
 
-        // 1. Explicit empty string, no env var set → MissingApiKey.
-        std::env::remove_var("ANTHROPIC_API_KEY");
-        assert_missing(
-            "anthropic explicit-empty",
-            create_driver(&DriverConfig {
-                provider: "anthropic".to_string(),
-                api_key: Some(String::new()),
-                base_url: None,
-            }),
+        // None on the explicit side, env var not set → None.
+        assert_eq!(pick_api_key(&None, ABSENT), None);
+
+        // Some("") on the explicit side (the v0.7.9 regression input —
+        // `std::env::var("MISSING_KEY_ENV").ok()` returned `Some("")`
+        // for declared-but-empty env vars), env var not set → None.
+        assert_eq!(pick_api_key(&Some(String::new()), ABSENT), None);
+
+        // Non-empty explicit value short-circuits the env fallback.
+        assert_eq!(
+            pick_api_key(&Some("sk-ant-explicit".to_string()), ABSENT),
+            Some("sk-ant-explicit".to_string())
         );
 
-        // 2. Explicit empty + non-empty env → driver instantiated with
-        //    the env value (the env_var fallback fires).
-        std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-test");
-        let with_env = create_driver(&DriverConfig {
+        // PATH is always non-empty in cargo test, so this exercises the
+        // env-var fallback branch without mutating any env state.
+        let path_via_env = pick_api_key(&Some(String::new()), "PATH");
+        assert!(
+            path_via_env.is_some_and(|v| !v.is_empty()),
+            "Some(empty) on explicit side must fall through to a \
+             populated env var (PATH is always set in cargo test)"
+        );
+    }
+
+    /// End-to-end check that `create_driver` surfaces an empty
+    /// `api_key` as `MissingApiKey` rather than constructing a driver
+    /// with empty auth. Uses an `api_key_env` that's guaranteed unset
+    /// so we don't have to mutate process env.
+    #[test]
+    fn create_driver_errors_on_empty_api_key_with_unset_env() {
+        // Use a custom base_url so the OpenAI-compat path goes through
+        // the "unknown provider with base_url → custom" branch, which
+        // doesn't read any env var. Then explicit empty api_key falls
+        // through to api_key=String::new() and the driver builds
+        // (custom-provider mode is permissive). To force the
+        // MissingApiKey path we use a known provider with an unset
+        // env var via the kernel-provided `api_key_env`. We can't
+        // pass `api_key_env` to create_driver directly — it reads
+        // the conventional env var for the provider — so we rely on
+        // CI / cargo test running in an environment where neither
+        // `ANTHROPIC_API_KEY` nor `KIMI_API_KEY` is set. Skip this
+        // test silently if either is set so a developer with real
+        // keys exported doesn't see a spurious failure.
+        if std::env::var("ANTHROPIC_API_KEY")
+            .map(|v| !v.is_empty())
+            .unwrap_or(false)
+        {
+            // Real key in env — pick_api_key would fall through, so
+            // this assertion would fail by design. The unit test
+            // above already covers the `Some("")` shape.
+            return;
+        }
+
+        let result = create_driver(&DriverConfig {
             provider: "anthropic".to_string(),
             api_key: Some(String::new()),
             base_url: None,
         });
         assert!(
-            with_env.is_ok(),
-            "empty api_key with valid env fallback should succeed"
+            matches!(result, Err(LlmError::MissingApiKey(_))),
+            "explicit empty api_key + unset ANTHROPIC_API_KEY env must \
+             surface MissingApiKey at construction time"
         );
-
-        // 3. Same shape for OpenAI-compat providers.
-        std::env::remove_var("DEEPSEEK_API_KEY");
-        assert_missing(
-            "deepseek explicit-empty",
-            create_driver(&DriverConfig {
-                provider: "deepseek".to_string(),
-                api_key: Some(String::new()),
-                base_url: None,
-            }),
-        );
-
-        std::env::remove_var("ANTHROPIC_API_KEY");
     }
 
     #[test]

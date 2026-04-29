@@ -267,13 +267,25 @@ pub fn rusty_hand_home() -> PathBuf {
 /// and the daemon replied "No agent assigned" to every Telegram
 /// message.
 pub fn agents_search_dirs_with_home(home_dir: &std::path::Path) -> Vec<PathBuf> {
+    let env_dir = std::env::var("RUSTY_HAND_AGENTS_DIR")
+        .ok()
+        .filter(|s| !s.is_empty());
+    agents_search_dirs_with_override(home_dir, env_dir.as_deref())
+}
+
+/// Same as `agents_search_dirs_with_home` but with the bundled-dir
+/// override passed in explicitly. Lets unit tests exercise the
+/// home-vs-bundle priority without mutating `RUSTY_HAND_AGENTS_DIR`,
+/// which is data-race-unsafe under cargo's parallel test runner.
+fn agents_search_dirs_with_override(
+    home_dir: &std::path::Path,
+    env_dir_override: Option<&str>,
+) -> Vec<PathBuf> {
     let mut dirs = vec![home_dir.join("agents")];
-    if let Ok(env_dir) = std::env::var("RUSTY_HAND_AGENTS_DIR") {
-        if !env_dir.is_empty() {
-            let p = PathBuf::from(env_dir);
-            if !dirs.iter().any(|d| d == &p) {
-                dirs.push(p);
-            }
+    if let Some(env_dir) = env_dir_override.filter(|s| !s.is_empty()) {
+        let p = PathBuf::from(env_dir);
+        if !dirs.iter().any(|d| d == &p) {
+            dirs.push(p);
         }
     }
     dirs
@@ -323,8 +335,17 @@ fn validate_manifest_for_spawn(path: &std::path::Path) -> Result<(), String> {
 /// fallthrough a stale `/data/agents/assistant/agent.toml` from an old
 /// `rustyhand init` would silently mask every image upgrade.
 pub fn resolve_agent_manifest_with_home(home_dir: &std::path::Path, name: &str) -> Option<PathBuf> {
-    let candidates: Vec<PathBuf> = agents_search_dirs_with_home(home_dir)
-        .into_iter()
+    resolve_agent_manifest_in(&agents_search_dirs_with_home(home_dir), name)
+}
+
+/// Test seam for `resolve_agent_manifest_with_home`: take an explicit
+/// list of search dirs instead of reading the env var. Lets unit tests
+/// exercise the home-vs-bundle priority and the stale-manifest
+/// fallthrough without mutating `RUSTY_HAND_AGENTS_DIR` (which is
+/// data-race-unsafe under cargo's parallel test runner).
+fn resolve_agent_manifest_in(dirs: &[PathBuf], name: &str) -> Option<PathBuf> {
+    let candidates: Vec<PathBuf> = dirs
+        .iter()
         .map(|d| d.join(name).join("agent.toml"))
         .filter(|p| p.exists())
         .collect();
@@ -409,18 +430,30 @@ system_prompt = "test"
         )
         .unwrap();
 
+        // The tests use the explicit-override helpers
+        // (`agents_search_dirs_with_override`,
+        // `resolve_agent_manifest_in`) so we never mutate
+        // `RUSTY_HAND_AGENTS_DIR` — `std::env::set_var` /
+        // `remove_var` are data-race-unsafe under cargo's parallel
+        // test runner (Rust 2024 edition marks them `unsafe` for that
+        // reason). Race-free fixtures here mean CI doesn't flake when
+        // unrelated tests in the same binary inspect process env.
+        let bundle_str = bundle.to_string_lossy().to_string();
+        let with_bundle = || agents_search_dirs_with_override(&home, Some(bundle_str.as_str()));
+        let no_bundle = || agents_search_dirs_with_override(&home, None);
+        let empty_bundle = || agents_search_dirs_with_override(&home, Some(""));
+
         // 1. Env var set, home empty → bundle manifest resolves (Docker).
-        std::env::set_var("RUSTY_HAND_AGENTS_DIR", &bundle);
-        let env_only = resolve_agent_manifest_with_home(&home, "assistant");
+        let dirs = with_bundle();
+        assert_eq!(dirs.len(), 2);
+        assert_eq!(dirs[0], home.join("agents"));
+        assert_eq!(dirs[1], bundle);
+        let env_only = resolve_agent_manifest_in(&dirs, "assistant");
         assert_eq!(
             env_only.as_deref(),
             Some(bundle.join("assistant/agent.toml").as_path()),
             "RUSTY_HAND_AGENTS_DIR fallback should resolve missing manifests"
         );
-        let dirs = agents_search_dirs_with_home(&home);
-        assert_eq!(dirs.len(), 2);
-        assert_eq!(dirs[0], home.join("agents"));
-        assert_eq!(dirs[1], bundle);
 
         // 2. User-customized home wins over bundle dir.
         std::fs::create_dir_all(home.join("agents/assistant")).unwrap();
@@ -429,7 +462,7 @@ system_prompt = "test"
             manifest_toml("assistant", "anthropic"),
         )
         .unwrap();
-        let home_wins = resolve_agent_manifest_with_home(&home, "assistant");
+        let home_wins = resolve_agent_manifest_in(&with_bundle(), "assistant");
         assert_eq!(
             home_wins.as_deref(),
             Some(home.join("agents/assistant/agent.toml").as_path()),
@@ -437,20 +470,17 @@ system_prompt = "test"
         );
 
         // 3. Unknown name still returns None even with both dirs available.
-        assert!(resolve_agent_manifest_with_home(&home, "ghost").is_none());
+        assert!(resolve_agent_manifest_in(&with_bundle(), "ghost").is_none());
 
         // 4. Env var unset → only home dir is searched.
-        std::env::remove_var("RUSTY_HAND_AGENTS_DIR");
-        let dirs = agents_search_dirs_with_home(&home);
+        let dirs = no_bundle();
         assert_eq!(dirs.len(), 1);
         assert_eq!(dirs[0], home.join("agents"));
-        assert!(resolve_agent_manifest_with_home(&home, "ghost").is_none());
+        assert!(resolve_agent_manifest_in(&dirs, "ghost").is_none());
 
         // 5. Empty env var is treated as unset.
-        std::env::set_var("RUSTY_HAND_AGENTS_DIR", "");
-        let dirs = agents_search_dirs_with_home(&home);
+        let dirs = empty_bundle();
         assert_eq!(dirs.len(), 1, "empty env var must be ignored");
-        std::env::remove_var("RUSTY_HAND_AGENTS_DIR");
 
         // 6. Stale home-dir manifest (v0.7.0-removed provider) must
         //    fall through to the bundled copy. This is the real-world
@@ -464,9 +494,7 @@ system_prompt = "test"
             manifest_toml("assistant", "groq"),
         )
         .unwrap();
-        std::env::set_var("RUSTY_HAND_AGENTS_DIR", &bundle);
-        let stale_skipped = resolve_agent_manifest_with_home(&home, "assistant");
-        std::env::remove_var("RUSTY_HAND_AGENTS_DIR");
+        let stale_skipped = resolve_agent_manifest_in(&with_bundle(), "assistant");
         assert_eq!(
             stale_skipped.as_deref(),
             Some(bundle.join("assistant/agent.toml").as_path()),
