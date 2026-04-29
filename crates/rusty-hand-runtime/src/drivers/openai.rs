@@ -870,6 +870,42 @@ impl LlmDriver for OpenAIDriver {
                 }
             }
 
+            // Detect a truncated/empty SSE stream — same guard the
+            // Anthropic driver got in v0.7.11. The OpenAI-compat
+            // streaming pattern can also return HTTP 200 with zero
+            // events when the upstream connection is dropped after
+            // the headers, when the API silently closes the stream
+            // for a quota/auth edge case, or when an OpenAI-compat
+            // proxy is misconfigured. Without this guard the driver
+            // returns `Ok(empty)` and the agent_loop's empty-response
+            // guard fires with `input_tokens=0 output_tokens=0` —
+            // the same silent-empty failure mode that bit Anthropic
+            // users.
+            if text_content.is_empty()
+                && thinking_content.is_empty()
+                && tool_accum.is_empty()
+                && usage.input_tokens == 0
+                && usage.output_tokens == 0
+            {
+                if attempt < max_retries {
+                    let retry_ms = (attempt + 1) as u64 * 500;
+                    warn!(
+                        attempt,
+                        retry_ms, "OpenAI-compat stream returned no content and no usage; retrying"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(retry_ms)).await;
+                    continue;
+                }
+                return Err(LlmError::Api {
+                    status: 200,
+                    message: "OpenAI-compat stream returned no content and no usage \
+                              after retries — the connection was likely dropped or \
+                              the upstream silently closed the stream. Check network, \
+                              API key validity, and provider status."
+                        .to_string(),
+                });
+            }
+
             // Build the final response
             let mut content = Vec::new();
             let mut tool_calls = Vec::new();
