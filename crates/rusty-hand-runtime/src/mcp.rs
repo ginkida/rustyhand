@@ -116,6 +116,65 @@ impl std::fmt::Display for JsonRpcError {
     }
 }
 
+/// Maximum non-JSON-RPC lines (blank, log noise, banner output) we'll
+/// skip over while waiting for the next JSON-RPC message on stdio.
+/// Real-world MCP servers (especially Python ones using the official
+/// SDK) sometimes leak warnings or stray prints to stdout before the
+/// first response; without this skip the request fails with a useless
+/// "Invalid MCP JSON-RPC response: expected value at line 1 column 1".
+const MAX_NOISE_LINES: usize = 32;
+
+/// Read the next plausibly JSON-RPC line from an MCP server's stdout,
+/// skipping blank lines and obvious log/banner noise. Returns the raw
+/// line (untrimmed) so the caller can re-trim and parse.
+///
+/// Honors the supplied timeout for the *entire* read attempt — not per
+/// noise line — so a chatty server can't keep us waiting forever even
+/// if it stays under the per-line read budget.
+async fn read_next_jsonrpc_line<R>(
+    reader: &mut R,
+    timeout: tokio::time::Duration,
+) -> Result<String, String>
+where
+    R: AsyncBufReadExt + Unpin,
+{
+    let deadline = tokio::time::Instant::now() + timeout;
+
+    for _ in 0..MAX_NOISE_LINES {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return Err("MCP request timed out".to_string());
+        }
+        let remaining = deadline - now;
+
+        let mut line = String::new();
+        match tokio::time::timeout(remaining, reader.read_line(&mut line)).await {
+            Ok(Ok(0)) => return Err("MCP server closed connection".to_string()),
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => return Err(format!("Failed to read MCP response: {e}")),
+            Err(_) => return Err("MCP request timed out".to_string()),
+        }
+
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        // JSON-RPC responses are always JSON objects. Anything else
+        // (Python warnings to stdout, ANSI banners, dotfile messages)
+        // gets silently skipped at debug level so noisy servers don't
+        // break the protocol.
+        if !trimmed.starts_with('{') {
+            debug!(noise = %trimmed, "Skipping non-JSON-RPC line from MCP server stdout");
+            continue;
+        }
+        return Ok(line);
+    }
+
+    Err(format!(
+        "MCP server emitted {MAX_NOISE_LINES} non-JSON-RPC lines before any valid response"
+    ))
+}
+
 // ---------------------------------------------------------------------------
 // McpConnection implementation
 // ---------------------------------------------------------------------------
@@ -302,16 +361,8 @@ impl McpConnection {
                     .await
                     .map_err(|e| format!("Failed to flush stdin: {e}"))?;
 
-                // Read response line
-                let mut line = String::new();
                 let timeout = tokio::time::Duration::from_secs(self.config.timeout_secs);
-                match tokio::time::timeout(timeout, stdout.read_line(&mut line)).await {
-                    Ok(Ok(0)) => return Err("MCP server closed connection".to_string()),
-                    Ok(Ok(_)) => {}
-                    Ok(Err(e)) => return Err(format!("Failed to read MCP response: {e}")),
-                    Err(_) => return Err("MCP request timed out".to_string()),
-                }
-
+                let line = read_next_jsonrpc_line(stdout, timeout).await?;
                 let response: JsonRpcResponse = serde_json::from_str(line.trim())
                     .map_err(|e| format!("Invalid MCP JSON-RPC response: {e}"))?;
 
@@ -638,5 +689,80 @@ mod tests {
             McpTransport::Sse { url } => assert_eq!(url, "https://example.com/mcp"),
             _ => panic!("Expected SSE transport"),
         }
+    }
+
+    // ── read_next_jsonrpc_line: noise tolerance ──────────────────────────
+    //
+    // These exercise the helper directly using `tokio::io::BufReader<&[u8]>`
+    // so we can simulate Python MCP servers that leak warnings or blank
+    // lines to stdout before the first JSON-RPC response.
+
+    use tokio::io::BufReader;
+
+    #[tokio::test]
+    async fn read_next_jsonrpc_line_skips_blank_lines() {
+        let stream = b"\n\n   \n{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n";
+        let mut reader = BufReader::new(&stream[..]);
+        let line = read_next_jsonrpc_line(&mut reader, std::time::Duration::from_secs(2))
+            .await
+            .expect("must skip blank lines and return JSON line");
+        assert!(line.contains("\"jsonrpc\""));
+        assert!(line.contains("\"result\""));
+    }
+
+    #[tokio::test]
+    async fn read_next_jsonrpc_line_skips_log_noise() {
+        // Realistic Python MCP server: deprecation warning + banner + valid response.
+        let stream = b"DeprecationWarning: foo\n\
+            [INFO] starting up\n\
+            Warning: PYTHONUNBUFFERED is unset\n\
+            {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[]}}\n";
+        let mut reader = BufReader::new(&stream[..]);
+        let line = read_next_jsonrpc_line(&mut reader, std::time::Duration::from_secs(2))
+            .await
+            .expect("must skip non-JSON-RPC noise lines");
+        let parsed: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(parsed["id"], 1);
+    }
+
+    #[tokio::test]
+    async fn read_next_jsonrpc_line_returns_first_json_line() {
+        // Two JSON-RPC lines back-to-back: should return the first.
+        let stream = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"first\"}\n\
+            {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":\"second\"}\n";
+        let mut reader = BufReader::new(&stream[..]);
+        let line = read_next_jsonrpc_line(&mut reader, std::time::Duration::from_secs(2))
+            .await
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(parsed["result"], "first");
+    }
+
+    #[tokio::test]
+    async fn read_next_jsonrpc_line_errors_when_only_noise() {
+        // Pure log noise, no JSON-RPC, then EOF — must surface a clear error.
+        let stream = b"WARNING\nINFO foo\nERROR bar\n";
+        let mut reader = BufReader::new(&stream[..]);
+        let result = read_next_jsonrpc_line(&mut reader, std::time::Duration::from_secs(2)).await;
+        // EOF after only noise lines → "MCP server closed connection" (since
+        // read_line returns Ok(0) at EOF after we drained the buffered noise).
+        let err = result.expect_err("must error when only noise + EOF");
+        assert!(
+            err.contains("closed connection") || err.contains("noise"),
+            "expected closed/noise error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_next_jsonrpc_line_propagates_eof_immediately() {
+        let stream: &[u8] = b"";
+        let mut reader = BufReader::new(stream);
+        let err = read_next_jsonrpc_line(&mut reader, std::time::Duration::from_secs(2))
+            .await
+            .expect_err("empty stream must error");
+        assert!(
+            err.contains("closed connection"),
+            "empty stream must produce closed-connection error, got: {err}"
+        );
     }
 }
