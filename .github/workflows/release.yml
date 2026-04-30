@@ -86,30 +86,70 @@ jobs:
           # fix. Leaving body unset preserves the manually-authored notes.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Cross-job handoff to the docker job — saves rebuilding the
+      # binary inside QEMU emulation (the v0.7.22 ~50min savings).
+      # Only the two linux artifacts are needed; mac/windows skip this.
+      - name: Upload Linux binary as artifact (for docker job)
+        if: matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'aarch64-unknown-linux-gnu'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-binary-${{ matrix.target }}
+          path: rustyhand-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
 
   # ── Docker (linux/amd64 + linux/arm64) ────────────────────────────────────
+  #
+  # Pre-v0.7.22 this job ran `cargo build --release` from scratch inside
+  # the Dockerfile, with QEMU emulating arm64 on an x86 runner — a single
+  # arm64 release build took ~50 minutes. v0.7.22 switched to a runtime-
+  # only Dockerfile (`Dockerfile.release`) that just COPYs the prebuilt
+  # binaries produced by the `cli` matrix above. Multi-arch image build
+  # is now ~2-3 minutes total instead of ~60.
   docker:
     name: Docker Image
+    needs: cli
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Download linux/amd64 binary
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: linux-binary-x86_64-unknown-linux-gnu
+          path: dl-amd64
+      - name: Download linux/arm64 binary
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: linux-binary-aarch64-unknown-linux-gnu
+          path: dl-arm64
+      - name: Stage binaries for buildx (./bin/$TARGETARCH/rustyhand)
+        run: |
+          mkdir -p bin/amd64 bin/arm64
+          tar xzf dl-amd64/rustyhand-x86_64-unknown-linux-gnu.tar.gz -C bin/amd64
+          tar xzf dl-arm64/rustyhand-aarch64-unknown-linux-gnu.tar.gz -C bin/arm64
+          # Sanity: prove the binaries are the right arch (we're on x86,
+          # so the arm64 binary should report ELF aarch64 and NOT be
+          # executable on this runner — that's expected).
+          file bin/amd64/rustyhand
+          file bin/arm64/rustyhand
       - name: Log in to GHCR
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Set up QEMU (for arm64 emulation)
+      - name: Set up QEMU (for arm64 base image apt + COPY)
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
       - name: Extract version
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
-      - name: Build and push (multi-arch)
+      - name: Build and push (multi-arch, prebuilt binaries — no cargo)
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7
         with:
           context: .
+          file: Dockerfile.release
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |

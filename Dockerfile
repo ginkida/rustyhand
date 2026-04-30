@@ -1,4 +1,12 @@
 # syntax=docker/dockerfile:1
+#
+# Local-development Dockerfile. Compiles RustyHand from source inside
+# the build stage, so a single `docker build .` works on any host
+# without needing prebuilt binaries staged in `./bin/`. Slow on multi-
+# arch (cargo build inside QEMU is 5-10x slower than native), so the
+# CI release flow uses `Dockerfile.release` instead, which COPYs in
+# the binaries already produced by the `cli` matrix in
+# `.github/workflows/release.yml`. See that file for context.
 
 # ── Stage 1: Build ──────────────────────────────────────────────────
 FROM rust:1-slim-bookworm AS builder

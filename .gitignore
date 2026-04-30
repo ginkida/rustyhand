@@ -3,6 +3,11 @@
 **/*.rs.bk
 *.pdb
 
+# Docker release context — populated by `release.yml` from CI artifacts
+# (the prebuilt linux/amd64 + linux/arm64 binaries). Local
+# `docker build -f Dockerfile.release` would also stage binaries here.
+/bin
+
 # Environment & secrets
 .env
 .env.*

@@ -1,0 +1,67 @@
+# syntax=docker/dockerfile:1
+#
+# Release runtime image — assumes the rustyhand binary has already been
+# built by the CI matrix in `.github/workflows/release.yml` and is being
+# COPY'd in via build context. No cargo, no compiler, no QEMU compile.
+#
+# Pre-v0.7.22 the release flow used the top-level `Dockerfile` which
+# ran `cargo build --release` from scratch inside QEMU emulation for
+# linux/arm64 — that single step alone took ~50 minutes per release.
+# This image just COPIES the prebuilt binary, so a multi-arch release
+# build now finishes in ~2-3 minutes instead of ~60 minutes.
+#
+# Build context layout (set by the workflow):
+#   ./bin/amd64/rustyhand    — prebuilt linux/amd64 binary
+#   ./bin/arm64/rustyhand    — prebuilt linux/arm64 binary
+#   ./agents/                — bundled agent manifests
+#   ./docker-entrypoint.sh   — entrypoint script
+#
+# Build (in CI, multi-arch — buildx picks the right ./bin/$TARGETARCH/):
+#   docker buildx build \
+#     --platform linux/amd64,linux/arm64 \
+#     --file Dockerfile.release \
+#     --tag ghcr.io/ginkida/rustyhand:tag \
+#     --push .
+
+FROM debian:bookworm-slim
+
+# `TARGETARCH` is auto-populated by buildx (e.g. `amd64`, `arm64`).
+# Pre-v0.7.22 the release flow ran a full `cargo build --release`
+# inside QEMU emulation for linux/arm64 — that single step alone
+# took ~50 minutes per release. With the prebuilt binary copied in,
+# the multi-arch image runs apt + COPY only and finishes in ~2-3
+# minutes total, even keeping QEMU.
+ARG TARGETARCH
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pin uid/gid to 1000 so host volumes stay readable across image
+# rebuilds. A bare `useradd -r` assigns a dynamic system uid that
+# drifts between builds, which breaks a mounted /data from a prior
+# image version when the new user cannot write files owned by the
+# old one.
+RUN groupadd -r -g 1000 rustyhand \
+    && useradd -r -u 1000 -g 1000 -s /usr/sbin/nologin -d /data rustyhand
+
+COPY bin/${TARGETARCH}/rustyhand /usr/local/bin/rustyhand
+COPY agents /opt/rustyhand/agents
+COPY docker-entrypoint.sh /usr/local/bin/
+
+RUN chmod +x /usr/local/bin/rustyhand /usr/local/bin/docker-entrypoint.sh \
+    && mkdir -p /data \
+    && chown rustyhand:rustyhand /data
+
+USER rustyhand
+EXPOSE 4200
+VOLUME /data
+ENV RUSTY_HAND_HOME=/data
+ENV RUSTY_HAND_AGENTS_DIR=/opt/rustyhand/agents
+ENV RUSTYHAND_CONTAINER=1
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -sf http://127.0.0.1:4200/api/health || exit 1
+
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["start"]
