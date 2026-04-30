@@ -187,6 +187,10 @@ pub struct ApprovalPolicy {
 impl Default for ApprovalPolicy {
     fn default() -> Self {
         Self {
+            // Tools that prompt the operator if interactive approval is
+            // re-enabled (auto_approve_autonomous = false). The default
+            // singleton list is the highest-risk tool; expand or shrink
+            // in config.toml to match your trust posture.
             require_approval: vec!["shell_exec".to_string()],
             // 5 minutes — gives the user time to open Telegram, read the
             // request, and decide. Pre-v0.7.20 this was 60s, which often
@@ -195,7 +199,25 @@ impl Default for ApprovalPolicy {
             // tapped Approve. 300s is the policy's hard upper bound, so
             // we use the full window by default.
             timeout_secs: 300,
-            auto_approve_autonomous: false,
+            // RustyHand's design assumption is single-operator deployment
+            // (the kernel runs on YOUR machine, you're the only operator
+            // talking to it via Telegram/Discord/Slack/dashboard, and the
+            // channel adapters already gate access via `allowed_users`).
+            // Under that assumption, interactive approval prompts are pure
+            // friction: every shell_exec or write op interrupts the
+            // operator who already authorized the action by sending the
+            // message. Pre-v0.7.21 the default was `false`, which made
+            // sense as defense-in-depth but produced complaints across
+            // every long-running session because every approval was a
+            // 5-minute pause for a Telegram round-trip.
+            //
+            // Default: TRUE. Each auto-approval is WARN-logged so the
+            // audit trail is intact. Boot emits a one-line notice about
+            // trust mode being on. To re-enable interactive prompts (e.g.
+            // for shared deployments or stricter setups) set this to
+            // `false` in config.toml or via the
+            // `RUSTYHAND_INTERACTIVE_APPROVAL=1` env var.
+            auto_approve_autonomous: true,
         }
     }
 }
@@ -500,7 +522,9 @@ mod tests {
         assert!(policy.validate().is_ok());
         assert_eq!(policy.require_approval, vec!["shell_exec".to_string()]);
         assert_eq!(policy.timeout_secs, 300);
-        assert!(!policy.auto_approve_autonomous);
+        // v0.7.21: trust mode is the default for single-operator deployments.
+        // Operators who want interactive prompts must opt in via config.
+        assert!(policy.auto_approve_autonomous);
     }
 
     #[test]
@@ -509,7 +533,7 @@ mod tests {
         let policy: ApprovalPolicy = serde_json::from_str("{}").unwrap();
         assert_eq!(policy.timeout_secs, 300);
         assert_eq!(policy.require_approval, vec!["shell_exec".to_string()]);
-        assert!(!policy.auto_approve_autonomous);
+        assert!(policy.auto_approve_autonomous);
     }
 
     // -----------------------------------------------------------------------

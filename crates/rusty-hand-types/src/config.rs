@@ -1933,17 +1933,19 @@ impl KernelConfig {
             );
         }
 
-        // --- Approval trust mode warning ---
+        // --- Approval trust mode notice ---
         //
-        // `auto_approve_autonomous = true` makes the kernel skip all
-        // approval prompts. We surface this loudly at boot so a stale
-        // dev-time setting doesn't get carried into production unnoticed.
+        // Trust mode (`approval.auto_approve_autonomous = true`) is the
+        // RustyHand v0.7.21+ default — single-operator deployments don't
+        // benefit from interactive prompts, since the operator already
+        // authorized the action by sending the message. We still surface
+        // a one-line notice at boot so operators know which mode they're
+        // in (every auto-approval is also WARN-logged for audit).
         if self.approval.auto_approve_autonomous {
             warnings.push(
-                "approval.auto_approve_autonomous = true \u{2014} ALL approval \
-                 requests will be auto-approved without prompting. Only safe in \
-                 trusted single-operator setups or CI/CD. Set to false to \
-                 restore interactive approval."
+                "approval.auto_approve_autonomous = true (default) \u{2014} \
+                 every approval request is auto-approved without prompting. \
+                 Set to false in config.toml to restore interactive prompts."
                     .to_string(),
             );
         }
@@ -2039,15 +2041,18 @@ mod tests {
     fn test_validate_no_channels() {
         // Clear default_model.api_key_env so the LLM-key validation
         // (added in v0.7.19) doesn't trip on whatever the test host's
-        // env happens to contain. The intent of this test is to prove
-        // an unconfigured-channels config emits no warnings.
+        // env happens to contain. Also clear approval.auto_approve_autonomous
+        // so the trust-mode notice (default-on since v0.7.21) doesn't
+        // count toward the warning total — this test focuses on the
+        // unconfigured-channels assertion only.
         let mut config = KernelConfig::default();
         config.default_model.api_key_env = String::new();
+        config.approval.auto_approve_autonomous = false;
         let warnings = config.validate();
         assert!(
             warnings.is_empty(),
-            "default config with no channels and no LLM key should emit no warnings, \
-             got: {warnings:?}"
+            "default config with no channels, no LLM key, and trust-mode off should emit \
+             no warnings, got: {warnings:?}"
         );
     }
 
@@ -2129,9 +2134,9 @@ mod tests {
         );
     }
 
-    /// Trust mode (`approval.auto_approve_autonomous = true`) must
-    /// surface a loud boot warning — silent auto-approval would be a
-    /// security footgun if a stale dev-time setting carried into prod.
+    /// Trust mode (`approval.auto_approve_autonomous = true`) — the
+    /// v0.7.21+ default — must still surface a one-line boot notice so
+    /// operators know which mode they're in and how to opt out.
     #[test]
     fn test_validate_warns_on_approval_trust_mode() {
         let mut config = KernelConfig::default();
@@ -2146,11 +2151,16 @@ mod tests {
         assert_eq!(
             trust_warnings.len(),
             1,
-            "trust mode must produce exactly one warning, got: {warnings:?}"
+            "trust mode must produce exactly one notice, got: {warnings:?}"
         );
         assert!(
             trust_warnings[0].contains("auto-approved"),
-            "warning must explain consequence, got: {}",
+            "notice must explain consequence, got: {}",
+            trust_warnings[0]
+        );
+        assert!(
+            trust_warnings[0].contains("Set to false"),
+            "notice must show how to opt out, got: {}",
             trust_warnings[0]
         );
     }
@@ -2221,9 +2231,10 @@ mod tests {
     #[test]
     fn test_validate_missing_env_vars() {
         let mut config = KernelConfig::default();
-        // Clear default LLM key check so this test stays focused on
-        // channel validation regardless of host env.
+        // Clear LLM key + trust-mode notice so this test stays focused
+        // on channel validation regardless of host env or v0.7.21 defaults.
         config.default_model.api_key_env = String::new();
+        config.approval.auto_approve_autonomous = false;
         config.channels.discord = Some(DiscordConfig {
             bot_token_env: "RUSTY_HAND_TEST_NONEXISTENT_VAR_DC".to_string(),
             ..Default::default()

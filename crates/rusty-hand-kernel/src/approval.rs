@@ -208,6 +208,18 @@ mod tests {
         ApprovalManager::new(ApprovalPolicy::default())
     }
 
+    /// Manager with the historical interactive-prompt policy (trust mode
+    /// off). Tests that exercise the queue / oneshot / pending / timeout
+    /// paths need this — under the v0.7.21 default, every request is
+    /// auto-approved instantly so those code paths are unreachable.
+    fn interactive_manager() -> ApprovalManager {
+        ApprovalManager::new(ApprovalPolicy {
+            require_approval: vec!["shell_exec".to_string()],
+            timeout_secs: 60,
+            auto_approve_autonomous: false,
+        })
+    }
+
     fn make_request(agent_id: &str, tool_name: &str, timeout_secs: u64) -> ApprovalRequest {
         ApprovalRequest {
             id: Uuid::new_v4(),
@@ -342,7 +354,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_request_approval_timeout() {
-        let mgr = Arc::new(default_manager());
+        let mgr = Arc::new(interactive_manager());
         let req = make_request("agent-1", "shell_exec", 10);
         let decision = mgr.request_approval(req).await;
         assert_eq!(decision, ApprovalDecision::TimedOut);
@@ -356,7 +368,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_request_approval_approve() {
-        let mgr = Arc::new(default_manager());
+        let mgr = Arc::new(interactive_manager());
         let req = make_request("agent-1", "shell_exec", 60);
         let request_id = req.id;
 
@@ -385,7 +397,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_request_approval_deny() {
-        let mgr = Arc::new(default_manager());
+        let mgr = Arc::new(interactive_manager());
         let req = make_request("agent-1", "shell_exec", 60);
         let request_id = req.id;
 
@@ -406,7 +418,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_max_pending_per_agent() {
-        let mgr = Arc::new(default_manager());
+        let mgr = Arc::new(interactive_manager());
 
         // Fill up 5 pending requests for agent-1 (they will all be waiting)
         let mut ids = Vec::new();
@@ -455,7 +467,8 @@ mod tests {
         let policy = mgr.policy();
         assert_eq!(policy.require_approval, vec!["shell_exec".to_string()]);
         assert_eq!(policy.timeout_secs, 300);
-        assert!(!policy.auto_approve_autonomous);
+        // v0.7.21: trust mode is the default; see ApprovalPolicy doc.
+        assert!(policy.auto_approve_autonomous);
     }
 
     /// Regression: pre-v0.7.20 `auto_approve_autonomous` was a defined
@@ -501,13 +514,13 @@ mod tests {
         );
     }
 
-    /// Trust mode must respect a hot-update: toggling it back to false
-    /// must restore the human-in-the-loop flow.
+    /// Trust mode must respect a hot-update: toggling between
+    /// interactive and trust modes must take effect immediately.
     #[tokio::test]
     async fn auto_approve_autonomous_respects_hot_update() {
-        let mgr = Arc::new(default_manager());
+        let mgr = Arc::new(interactive_manager());
 
-        // First request: default policy — no auto-approve. Resolve manually.
+        // First request: interactive policy — no auto-approve. Resolve manually.
         let req1 = make_request("agent-1", "shell_exec", 60);
         let id1 = req1.id;
         let mgr2 = Arc::clone(&mgr);
