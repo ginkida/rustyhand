@@ -222,18 +222,6 @@ impl LlmDriver for NullDriver {
 /// order (Anthropic + Kimi are the two first-class coding providers, then the
 /// rest). Returns `None` if no keys are found.
 pub fn detect_available_provider() -> Option<(&'static str, &'static str, &'static str)> {
-    const PROBE_ORDER: &[(&str, &str, &str)] = &[
-        ("anthropic", "ANTHROPIC_API_KEY", "claude-sonnet-4-20250514"),
-        ("kimi", "KIMI_API_KEY", "kimi-for-coding"),
-        ("deepseek", "DEEPSEEK_API_KEY", "deepseek-v4-flash"),
-        ("zhipu", "ZHIPU_API_KEY", "glm-4-plus"),
-        ("minimax", "MINIMAX_API_KEY", "MiniMax-M2.7"),
-        (
-            "openrouter",
-            "OPENROUTER_API_KEY",
-            "anthropic/claude-sonnet-4",
-        ),
-    ];
     for &(provider, env_var, model) in PROBE_ORDER {
         if std::env::var(env_var)
             .ok()
@@ -246,6 +234,25 @@ pub fn detect_available_provider() -> Option<(&'static str, &'static str, &'stat
     None
 }
 
+/// Provider auto-detection probe order. Lifted out of
+/// `detect_available_provider` so a regression test can prove every
+/// entry has a corresponding `provider_defaults` row — without that
+/// guarantee, env-driven detection could pick a provider name that
+/// `create_driver` doesn't know how to instantiate (the v0.7.0 → v0.7.15
+/// "Unknown provider 'gemini'" bug class).
+const PROBE_ORDER: &[(&str, &str, &str)] = &[
+    ("anthropic", "ANTHROPIC_API_KEY", "claude-sonnet-4-20250514"),
+    ("kimi", "KIMI_API_KEY", "kimi-for-coding"),
+    ("deepseek", "DEEPSEEK_API_KEY", "deepseek-v4-flash"),
+    ("zhipu", "ZHIPU_API_KEY", "glm-4-plus"),
+    ("minimax", "MINIMAX_API_KEY", "MiniMax-M2.7"),
+    (
+        "openrouter",
+        "OPENROUTER_API_KEY",
+        "anthropic/claude-sonnet-4",
+    ),
+];
+
 /// List all known provider names.
 pub fn known_providers() -> &'static [&'static str] {
     &[
@@ -254,9 +261,25 @@ pub fn known_providers() -> &'static [&'static str] {
         "deepseek",
         "minimax",
         "zhipu",
+        "glm", // alias for zhipu
         "openrouter",
         "ollama",
     ]
+}
+
+/// Whether a provider name has a built-in driver path.
+///
+/// Manifests carrying a fallback_models entry with a removed provider
+/// (e.g. `gemini`, `groq`, `openai` — dropped in v0.7.0) used to produce
+/// noisy `Fallback driver 'gemini' failed to init` warnings on every
+/// agent spawn. Callers that want to gracefully skip such entries
+/// instead of warning can gate on this predicate first.
+///
+/// A custom OpenAI-compatible endpoint (provider name not in the list,
+/// but `base_url` set) still works via `create_driver`'s fallthrough,
+/// so this is only an early-exit hint, not a hard rejection.
+pub fn is_known_provider(name: &str) -> bool {
+    known_providers().contains(&name)
 }
 
 #[cfg(test)]
@@ -446,13 +469,15 @@ mod tests {
     #[test]
     fn test_known_providers_list() {
         let providers = known_providers();
-        assert_eq!(providers.len(), 7);
+        // 7 canonical providers + "glm" alias for zhipu.
+        assert_eq!(providers.len(), 8);
         for expected in [
             "anthropic",
             "kimi",
             "deepseek",
             "minimax",
             "zhipu",
+            "glm",
             "openrouter",
             "ollama",
         ] {
@@ -489,6 +514,88 @@ mod tests {
                 "deleted provider still present: {removed}"
             );
         }
+    }
+
+    /// Regression: every entry in `PROBE_ORDER` must round-trip through
+    /// `provider_defaults` and `is_known_provider`. Prior to v0.7.0 this
+    /// list and `provider_defaults` drifted — the auto-detect logic
+    /// returned provider names that `create_driver` then rejected as
+    /// unknown. This test guarantees the two lists stay in lockstep.
+    #[test]
+    fn probe_order_is_consistent_with_provider_defaults() {
+        for &(provider, env_var, model) in PROBE_ORDER {
+            assert!(
+                provider_defaults(provider).is_some(),
+                "PROBE_ORDER entry '{provider}' has no provider_defaults row"
+            );
+            assert!(
+                is_known_provider(provider),
+                "PROBE_ORDER entry '{provider}' missing from known_providers()"
+            );
+            let defaults = provider_defaults(provider).unwrap();
+            assert_eq!(
+                defaults.api_key_env, env_var,
+                "PROBE_ORDER env var '{env_var}' for '{provider}' \
+                 disagrees with provider_defaults '{}'",
+                defaults.api_key_env
+            );
+            assert!(
+                !model.is_empty(),
+                "PROBE_ORDER entry '{provider}' has empty recommended model"
+            );
+        }
+    }
+
+    /// Regression: pre-fix, kernel fallback init paths warned noisily on
+    /// every legacy provider name (gemini/groq/openai). The new
+    /// `is_known_provider` predicate lets callers gracefully skip those
+    /// without warnings. Pin the predicate's contract so callers can
+    /// rely on it.
+    #[test]
+    fn is_known_provider_predicate() {
+        for canonical in [
+            "anthropic",
+            "kimi",
+            "deepseek",
+            "minimax",
+            "openrouter",
+            "ollama",
+        ] {
+            assert!(
+                is_known_provider(canonical),
+                "canonical provider '{canonical}' must be known"
+            );
+        }
+        // zhipu alias: both names are accepted by create_driver, both
+        // must be recognized by the predicate.
+        assert!(is_known_provider("zhipu"));
+        assert!(is_known_provider("glm"));
+
+        // Every removed legacy provider must be rejected — that's the
+        // whole point of the predicate (fallback paths skip on these).
+        for legacy in [
+            "gemini",
+            "groq",
+            "openai",
+            "xai",
+            "mistral",
+            "together",
+            "fireworks",
+            "perplexity",
+            "cohere",
+            "github-copilot",
+            "moonshot",
+            "qwen",
+        ] {
+            assert!(
+                !is_known_provider(legacy),
+                "legacy provider '{legacy}' must NOT be known (caller must skip its fallback)"
+            );
+        }
+
+        // Empty / nonsense names must not match.
+        assert!(!is_known_provider(""));
+        assert!(!is_known_provider("not_a_real_provider"));
     }
 
     // ─── Live integration tests (DeepSeek) ────────────────────────────

@@ -663,6 +663,18 @@ impl RustyHandKernel {
         let driver: Arc<dyn LlmDriver> = if !config.fallback_providers.is_empty() {
             let mut chain: Vec<Arc<dyn LlmDriver>> = vec![primary_driver.clone()];
             for fb in &config.fallback_providers {
+                // Skip removed legacy providers (groq/gemini/openai/etc. dropped
+                // in v0.7.0) silently — they're commonly carried over from
+                // pre-v0.7 configs and don't represent a real configuration
+                // problem worth a startup warning. Custom OpenAI-compat
+                // endpoints (`base_url` set) still go through normally.
+                if !drivers::is_known_provider(&fb.provider) && fb.base_url.is_none() {
+                    debug!(
+                        provider = %fb.provider,
+                        "Skipping fallback for unsupported provider (legacy config)"
+                    );
+                    continue;
+                }
                 let fb_config = DriverConfig {
                     provider: fb.provider.clone(),
                     api_key: if fb.api_key_env.is_empty() {
@@ -3717,6 +3729,18 @@ impl RustyHandKernel {
         if !manifest.fallback_models.is_empty() {
             let mut chain = vec![primary.clone()];
             for fb in &manifest.fallback_models {
+                // Same legacy-provider skip as the kernel-config fallback path:
+                // user manifests persisted before v0.7.0 commonly carry a
+                // gemini/groq/openai fallback that the current build cannot
+                // resolve. Don't warn on those — only warn on real init
+                // failures (missing keys, malformed config, etc).
+                if !drivers::is_known_provider(&fb.provider) && fb.base_url.is_none() {
+                    debug!(
+                        provider = %fb.provider,
+                        "Skipping fallback model for unsupported provider (legacy manifest)"
+                    );
+                    continue;
+                }
                 let config = DriverConfig {
                     provider: fb.provider.clone(),
                     api_key: fb
