@@ -177,10 +177,16 @@ pub struct ApprovalPolicy {
     pub timeout_secs: u64,
     /// **Trust mode**: when `true`, the kernel auto-approves every
     /// approval request without prompting the operator. Every
-    /// auto-approval is still logged at WARN level for audit. Use this
-    /// only for trusted single-operator setups, CI/CD pipelines, or
-    /// fully autonomous deployments where there's no human in the loop
-    /// to respond to prompts. Default: `false`.
+    /// auto-approval is still logged at WARN level for audit. Set to
+    /// `false` to restore interactive Telegram/Discord/Slack prompts
+    /// for tools listed in [`ApprovalPolicy::require_approval`].
+    ///
+    /// Default: `true` (since v0.7.21). RustyHand's design assumption
+    /// is a single-operator deployment where the operator already
+    /// authorized the action by sending the message, so interactive
+    /// prompts add friction without changing the security boundary
+    /// (`allowed_users` on the channel adapter is the real gate).
+    /// Override to `false` for shared deployments or stricter setups.
     pub auto_approve_autonomous: bool,
 }
 
