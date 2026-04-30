@@ -17,6 +17,7 @@ use rusty_hand_channels::types::{
 use rusty_hand_types::agent::AgentId;
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, watch};
 
@@ -32,6 +33,11 @@ struct MockAdapter {
     /// Captures all messages sent via send().
     sent: Arc<Mutex<Vec<(String, String)>>>,
     shutdown_tx: watch::Sender<bool>,
+    /// Counts how many times `stop()` was called. Lets regression tests
+    /// prove `BridgeManager::stop()` reaches every adapter — pre-fix it
+    /// only signaled its own dispatch shutdown and left adapter long-poll
+    /// tasks running until their next read happened to fail.
+    stop_count: AtomicUsize,
 }
 
 impl MockAdapter {
@@ -47,6 +53,7 @@ impl MockAdapter {
             rx: Mutex::new(Some(rx)),
             sent: Arc::new(Mutex::new(Vec::new())),
             shutdown_tx,
+            stop_count: AtomicUsize::new(0),
         });
         (adapter, tx)
     }
@@ -54,6 +61,11 @@ impl MockAdapter {
     /// Get a copy of all sent responses as (platform_id, text) pairs.
     fn get_sent(&self) -> Vec<(String, String)> {
         self.sent.lock().unwrap().clone()
+    }
+
+    /// How many times has `stop()` been called?
+    fn stop_count(&self) -> usize {
+        self.stop_count.load(Ordering::SeqCst)
     }
 }
 
@@ -96,6 +108,7 @@ impl ChannelAdapter for MockAdapter {
     }
 
     async fn stop(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.stop_count.fetch_add(1, Ordering::SeqCst);
         let _ = self.shutdown_tx.send(true);
         Ok(())
     }
@@ -582,4 +595,88 @@ async fn test_bridge_multiple_adapters() {
     assert_eq!(dc_sent[0].1, "Echo: from discord");
 
     manager.stop().await;
+}
+
+/// Regression: pre-fix `BridgeManager::stop()` only signaled its own
+/// dispatch shutdown and never called `adapter.stop()`. The adapter's
+/// internal long-poll/websocket task survived past the function return
+/// until its next read happened to hit the closed mpsc channel — up to
+/// 30 seconds on Telegram. This test pins the new contract: every
+/// adapter's `stop()` is called exactly once during `BridgeManager::stop()`.
+#[tokio::test]
+async fn test_bridge_stop_signals_every_adapter() {
+    let agent_id = AgentId::new();
+    let handle = Arc::new(MockHandle::new(vec![(agent_id, "shutdown".to_string())]));
+    let router = Arc::new(AgentRouter::new());
+
+    let (tg_adapter, _tg_tx) = MockAdapter::new("telegram", ChannelType::Telegram);
+    let (dc_adapter, _dc_tx) = MockAdapter::new("discord", ChannelType::Discord);
+    let (sl_adapter, _sl_tx) = MockAdapter::new("slack", ChannelType::Slack);
+    let tg_ref = tg_adapter.clone();
+    let dc_ref = dc_adapter.clone();
+    let sl_ref = sl_adapter.clone();
+
+    let mut manager = BridgeManager::new(handle, router);
+    manager.start_adapter(tg_adapter).await.unwrap();
+    manager.start_adapter(dc_adapter).await.unwrap();
+    manager.start_adapter(sl_adapter).await.unwrap();
+
+    // Pre-stop: nobody has been signaled.
+    assert_eq!(tg_ref.stop_count(), 0);
+    assert_eq!(dc_ref.stop_count(), 0);
+    assert_eq!(sl_ref.stop_count(), 0);
+
+    manager.stop().await;
+
+    // Post-stop: every adapter's stop() got called exactly once.
+    assert_eq!(
+        tg_ref.stop_count(),
+        1,
+        "telegram adapter.stop() must be called exactly once"
+    );
+    assert_eq!(
+        dc_ref.stop_count(),
+        1,
+        "discord adapter.stop() must be called exactly once"
+    );
+    assert_eq!(
+        sl_ref.stop_count(),
+        1,
+        "slack adapter.stop() must be called exactly once"
+    );
+}
+
+/// Regression: pre-fix `BridgeManager::stop()` awaited dispatch tasks
+/// sequentially with a 10s budget *per task*, so three configured
+/// adapters could spend up to 30 seconds shutting down. The new
+/// implementation runs them concurrently with one shared 5s budget.
+/// This test starts three adapters and asserts the entire stop()
+/// completes in well under that budget when adapters are well-behaved.
+#[tokio::test]
+async fn test_bridge_stop_completes_within_budget() {
+    let agent_id = AgentId::new();
+    let handle = Arc::new(MockHandle::new(vec![(agent_id, "budget".to_string())]));
+    let router = Arc::new(AgentRouter::new());
+
+    let (a, _) = MockAdapter::new("a", ChannelType::Telegram);
+    let (b, _) = MockAdapter::new("b", ChannelType::Discord);
+    let (c, _) = MockAdapter::new("c", ChannelType::Slack);
+
+    let mut manager = BridgeManager::new(handle, router);
+    manager.start_adapter(a).await.unwrap();
+    manager.start_adapter(b).await.unwrap();
+    manager.start_adapter(c).await.unwrap();
+
+    let start = std::time::Instant::now();
+    manager.stop().await;
+    let elapsed = start.elapsed();
+
+    // Three well-behaved adapters should stop in well under the 5s
+    // total budget. Pre-fix this would have taken ~0s because tasks
+    // were idle, but with stuck tasks it would have been 10s × 3 = 30s.
+    // We assert "well under 2s" which leaves plenty of room for slow CI.
+    assert!(
+        elapsed < std::time::Duration::from_secs(2),
+        "BridgeManager::stop() took {elapsed:?}, expected well under 2s for 3 idle adapters"
+    );
 }

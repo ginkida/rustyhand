@@ -303,6 +303,13 @@ pub struct BridgeManager {
     shutdown_tx: watch::Sender<bool>,
     shutdown_rx: watch::Receiver<bool>,
     tasks: Vec<tokio::task::JoinHandle<()>>,
+    /// Adapter handles kept alive so `stop()` can call each adapter's
+    /// own `stop()` and break it out of any in-flight long-poll /
+    /// websocket read. Without this, adapter long-poll tasks survive
+    /// past `BridgeManager::stop()` until the next inbound message
+    /// happens to fail the closed mpsc channel — leaking a task per
+    /// adapter for up to a full long-poll cycle (30s+ on Telegram).
+    adapters: Vec<Arc<dyn ChannelAdapter>>,
     /// Names of adapters whose `start()` returned Ok. Used by
     /// `/api/channels` to differentiate "configured + token + bridge
     /// running" from "configured + token + bridge rejected the token at
@@ -321,6 +328,7 @@ impl BridgeManager {
             shutdown_tx,
             shutdown_rx,
             tasks: Vec::new(),
+            adapters: Vec::new(),
             started: std::sync::Mutex::new(std::collections::HashSet::new()),
         }
     }
@@ -344,6 +352,9 @@ impl BridgeManager {
         if let Ok(mut guard) = self.started.lock() {
             guard.insert(adapter.name().to_string());
         }
+        // Keep the adapter alive so stop() can signal its internal
+        // long-poll/websocket loop directly.
+        self.adapters.push(adapter.clone());
         let handle = self.handle.clone();
         let router = self.router.clone();
         let rate_limiter = self.rate_limiter.clone();
@@ -457,21 +468,60 @@ impl BridgeManager {
 
     /// Stop all adapters and wait for dispatch tasks to finish.
     ///
-    /// Each task is awaited with a 10s timeout. If a task is stuck in a
-    /// blocking network call (e.g. Telegram long-poll), it is aborted so
-    /// shutdown cannot hang indefinitely.
+    /// Two-phase graceful shutdown with a single 5-second total budget:
+    ///
+    /// 1. Signal both shutdown paths in parallel:
+    ///    - The `BridgeManager`'s own `shutdown_tx` (wakes dispatch tasks).
+    ///    - Each adapter's `stop()` (wakes its internal long-poll /
+    ///      websocket task, which would otherwise survive past this
+    ///      function until its next read happens to fail the closed
+    ///      mpsc channel — up to 30s on Telegram long-polling).
+    ///
+    /// 2. Await all dispatch tasks concurrently with `join_all`. If any
+    ///    are still running when the budget expires, abort them all.
+    ///
+    /// Pre-fix this awaited tasks sequentially with a 10s budget per
+    /// task, so three configured adapters could take up to 30s — and
+    /// the adapter long-poll tasks were leaked entirely because no one
+    /// called `adapter.stop()`.
     pub async fn stop(&mut self) {
+        const TOTAL_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
+
+        // Phase 1: signal both shutdown paths in parallel.
         let _ = self.shutdown_tx.send(true);
-        for task in self.tasks.drain(..) {
-            let abort_handle = task.abort_handle();
-            match tokio::time::timeout(std::time::Duration::from_secs(10), task).await {
-                Ok(_) => {}
-                Err(_) => {
-                    warn!("Channel adapter task did not stop within 10s — aborting");
-                    abort_handle.abort();
+        let stop_futures: Vec<_> = self
+            .adapters
+            .drain(..)
+            .map(|adapter| async move {
+                let name = adapter.name().to_string();
+                if let Err(e) = adapter.stop().await {
+                    warn!(adapter = %name, error = %e, "adapter.stop() returned error");
+                }
+            })
+            .collect();
+        // Adapter stops are fire-and-forget at this layer — they only
+        // toggle a watch flag, so they complete instantly. The actual
+        // wait happens on the dispatch tasks below.
+        let _ = futures::future::join_all(stop_futures).await;
+
+        // Phase 2: await dispatch tasks concurrently with one shared budget.
+        let abort_handles: Vec<_> = self.tasks.iter().map(|t| t.abort_handle()).collect();
+        let join_all = futures::future::join_all(self.tasks.drain(..));
+        match tokio::time::timeout(TOTAL_BUDGET, join_all).await {
+            Ok(_) => {
+                debug!("All channel dispatch tasks stopped cleanly");
+            }
+            Err(_) => {
+                warn!(
+                    budget_secs = TOTAL_BUDGET.as_secs(),
+                    "Channel dispatch tasks did not stop within budget — aborting remaining"
+                );
+                for h in abort_handles {
+                    h.abort();
                 }
             }
         }
+
         if let Ok(mut guard) = self.started.lock() {
             guard.clear();
         }
