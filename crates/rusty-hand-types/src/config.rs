@@ -1890,6 +1890,49 @@ impl KernelConfig {
             SearchProvider::DuckDuckGo | SearchProvider::Auto => {}
         }
 
+        // --- LLM provider key validation ---
+        //
+        // Surface missing API keys at boot, not at first message. Without
+        // this, a misconfigured provider (key env var missing or empty) is
+        // only noticed when the agent first tries to call the LLM — too
+        // late: the user has already sent a message, sees nothing happen,
+        // and has to dig into the daemon logs to find the cause.
+        //
+        // De-duplicate by env var name: if `default_model.api_key_env` and
+        // a fallback both reference `ANTHROPIC_API_KEY`, warn once.
+        let mut checked_envs = std::collections::HashSet::new();
+        let mut check_provider_key = |env_var: &str, referenced_by: &str, out: &mut Vec<String>| {
+            if env_var.is_empty() || !checked_envs.insert(env_var.to_string()) {
+                return;
+            }
+            if std::env::var(env_var).unwrap_or_default().is_empty() {
+                out.push(format!(
+                    "{referenced_by} configured but {env_var} is not set — \
+                     export it in your environment (e.g. .env) before sending messages, \
+                     or change `default_model.provider` in config.toml"
+                ));
+            }
+        };
+
+        check_provider_key(
+            &self.default_model.api_key_env,
+            &format!("default_model provider '{}'", self.default_model.provider),
+            &mut warnings,
+        );
+        for fb in &self.fallback_providers {
+            // Skip fallbacks with empty api_key_env (e.g. local Ollama which
+            // doesn't need a key) and removed legacy providers (kernel
+            // already filters those silently in resolve_driver).
+            if fb.api_key_env.is_empty() {
+                continue;
+            }
+            check_provider_key(
+                &fb.api_key_env,
+                &format!("fallback_providers entry '{}'", fb.provider),
+                &mut warnings,
+            );
+        }
+
         // --- Core config validation ---
 
         // Validate api_listen is a parseable socket address
@@ -1979,9 +2022,114 @@ mod tests {
 
     #[test]
     fn test_validate_no_channels() {
-        let config = KernelConfig::default();
+        // Clear default_model.api_key_env so the LLM-key validation
+        // (added in v0.7.19) doesn't trip on whatever the test host's
+        // env happens to contain. The intent of this test is to prove
+        // an unconfigured-channels config emits no warnings.
+        let mut config = KernelConfig::default();
+        config.default_model.api_key_env = String::new();
         let warnings = config.validate();
-        assert!(warnings.is_empty());
+        assert!(
+            warnings.is_empty(),
+            "default config with no channels and no LLM key should emit no warnings, \
+             got: {warnings:?}"
+        );
+    }
+
+    /// Regression: pre-v0.7.19 a missing `ANTHROPIC_API_KEY` (or the
+    /// equivalent for whatever provider was configured) produced no
+    /// warning at boot. Users only discovered the misconfiguration
+    /// when they sent the first message and saw nothing happen. This
+    /// test pins the new behavior: validate() must surface a clear
+    /// warning naming both the env var and the provider it backs.
+    #[test]
+    fn test_validate_warns_on_missing_default_model_key() {
+        let mut config = KernelConfig::default();
+        // Use a deterministically-unset env var name so the test is
+        // race-free under cargo's parallel runner (no env mutation).
+        config.default_model.provider = "anthropic".to_string();
+        config.default_model.api_key_env = "RUSTY_HAND_TEST_NONEXISTENT_LLM_KEY_DM".to_string();
+
+        let warnings = config.validate();
+
+        let llm_warnings: Vec<&String> = warnings
+            .iter()
+            .filter(|w| w.contains("RUSTY_HAND_TEST_NONEXISTENT_LLM_KEY_DM"))
+            .collect();
+        assert_eq!(
+            llm_warnings.len(),
+            1,
+            "missing LLM key must produce exactly one warning, got: {warnings:?}"
+        );
+        let warning = llm_warnings[0];
+        assert!(
+            warning.contains("anthropic"),
+            "warning must name the provider, got: {warning}"
+        );
+        assert!(
+            warning.contains("not set"),
+            "warning must say 'not set', got: {warning}"
+        );
+    }
+
+    /// De-duplicate by env var: if `default_model` and a fallback both
+    /// reference the same env var (e.g. both ANTHROPIC_API_KEY), we
+    /// must warn once, not twice.
+    #[test]
+    fn test_validate_dedupes_provider_key_warnings() {
+        let mut config = KernelConfig::default();
+        config.default_model.api_key_env = "RUSTY_HAND_TEST_NONEXISTENT_LLM_KEY_DEDUP".to_string();
+        config.fallback_providers = vec![
+            FallbackProviderConfig {
+                provider: "anthropic-backup".to_string(),
+                model: "claude-haiku-4-5".to_string(),
+                api_key_env: "RUSTY_HAND_TEST_NONEXISTENT_LLM_KEY_DEDUP".to_string(),
+                base_url: None,
+            },
+            FallbackProviderConfig {
+                provider: "deepseek".to_string(),
+                model: "deepseek-v4-flash".to_string(),
+                api_key_env: "RUSTY_HAND_TEST_NONEXISTENT_LLM_KEY_DS".to_string(),
+                base_url: None,
+            },
+        ];
+
+        let warnings = config.validate();
+        let dedup_count = warnings
+            .iter()
+            .filter(|w| w.contains("RUSTY_HAND_TEST_NONEXISTENT_LLM_KEY_DEDUP"))
+            .count();
+        let ds_count = warnings
+            .iter()
+            .filter(|w| w.contains("RUSTY_HAND_TEST_NONEXISTENT_LLM_KEY_DS"))
+            .count();
+
+        assert_eq!(
+            dedup_count, 1,
+            "duplicated env var must warn exactly once, got: {warnings:?}"
+        );
+        assert_eq!(
+            ds_count, 1,
+            "distinct env var must warn separately, got: {warnings:?}"
+        );
+    }
+
+    /// Empty `api_key_env` (e.g. local Ollama needs no key) must not
+    /// produce a warning — that's not a misconfiguration, it's the
+    /// "no key required" signal.
+    #[test]
+    fn test_validate_skips_empty_api_key_env() {
+        let mut config = KernelConfig::default();
+        config.default_model.provider = "ollama".to_string();
+        config.default_model.api_key_env = String::new();
+
+        let warnings = config.validate();
+        let llm_warnings: Vec<&String> =
+            warnings.iter().filter(|w| w.contains("not set")).collect();
+        assert!(
+            llm_warnings.is_empty(),
+            "empty api_key_env must not produce 'not set' warnings, got: {llm_warnings:?}"
+        );
     }
 
     #[test]
@@ -2032,12 +2180,19 @@ mod tests {
     #[test]
     fn test_validate_missing_env_vars() {
         let mut config = KernelConfig::default();
+        // Clear default LLM key check so this test stays focused on
+        // channel validation regardless of host env.
+        config.default_model.api_key_env = String::new();
         config.channels.discord = Some(DiscordConfig {
             bot_token_env: "RUSTY_HAND_TEST_NONEXISTENT_VAR_DC".to_string(),
             ..Default::default()
         });
         let warnings = config.validate();
-        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected one Discord warning, got: {warnings:?}"
+        );
         assert!(warnings[0].contains("Discord"));
     }
 
