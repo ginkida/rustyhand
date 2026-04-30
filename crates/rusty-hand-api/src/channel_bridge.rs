@@ -663,7 +663,11 @@ impl ChannelBridgeHandle for KernelBridgeAdapter {
             .filter(|r| r.id.to_string().starts_with(id_prefix))
             .collect();
         match matched.len() {
-            0 => format!("No pending approval matching '{id_prefix}'."),
+            0 => format!(
+                "\u{23f1}\u{fe0f} Approval [{id_prefix}] already expired or was \
+                 resolved by someone else. The agent has moved on \u{2014} if you \
+                 still want this action, ask the agent to retry."
+            ),
             1 => {
                 let req = matched[0];
                 let decision = if approve {

@@ -237,23 +237,73 @@ impl TelegramAdapter {
                     .collect()
             })
             .collect();
-        let body = serde_json::json!({
+
+        // Try Markdown first (so **bold** and `code` in approval prompts render).
+        // Pre-v0.7.20 we sent without parse_mode, leaving users to read literal
+        // `**Agent**` and backticks in chat — the prompt looked broken.
+        let body_markdown = serde_json::json!({
             "chat_id": chat_id,
             "text": text,
+            "parse_mode": "Markdown",
             "reply_markup": { "inline_keyboard": inline_keyboard },
         });
-        let resp: serde_json::Value = self
-            .client
-            .post(&url)
-            .json(&body)
-            .send()
-            .await?
-            .json()
-            .await?;
-        let msg_id = resp["result"]["message_id"]
-            .as_i64()
-            .ok_or("Missing message_id in sendMessage response")?;
-        Ok(msg_id)
+
+        let send_once = |body: serde_json::Value| {
+            let url = url.clone();
+            let client = self.client.clone();
+            async move { client.post(&url).json(&body).send().await }
+        };
+
+        let resp = send_once(body_markdown).await?;
+        let status = resp.status();
+        let body_text = resp
+            .text()
+            .await
+            .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
+
+        // Telegram returns 200 + ok=false on parse errors. Parse the JSON to
+        // see ok/description before deciding whether to retry without Markdown.
+        let parsed: serde_json::Value =
+            serde_json::from_str(&body_text).unwrap_or(serde_json::Value::Null);
+
+        if status.is_success() && parsed["ok"].as_bool() == Some(true) {
+            return parsed["result"]["message_id"]
+                .as_i64()
+                .ok_or_else(|| "Missing message_id in sendMessage response".into());
+        }
+
+        // Markdown failed. If it was a parse-entities error, retry as plain
+        // text so the approval prompt still reaches the user. Other errors
+        // (chat not found, bot blocked, rate limit) get surfaced verbatim.
+        let description = parsed["description"].as_str().unwrap_or(body_text.as_str());
+
+        if description.contains("can't parse entities") {
+            let body_plain = serde_json::json!({
+                "chat_id": chat_id,
+                "text": text,
+                "reply_markup": { "inline_keyboard": inline_keyboard },
+            });
+            let resp2 = send_once(body_plain).await?;
+            let status2 = resp2.status();
+            let body2 = resp2
+                .text()
+                .await
+                .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
+            let parsed2: serde_json::Value =
+                serde_json::from_str(&body2).unwrap_or(serde_json::Value::Null);
+            if status2.is_success() && parsed2["ok"].as_bool() == Some(true) {
+                return parsed2["result"]["message_id"]
+                    .as_i64()
+                    .ok_or_else(|| "Missing message_id in sendMessage response".into());
+            }
+            let desc2 = parsed2["description"].as_str().unwrap_or(body2.as_str());
+            return Err(format!(
+                "Telegram sendMessage (plain fallback) failed ({status2}): {desc2}"
+            )
+            .into());
+        }
+
+        Err(format!("Telegram sendMessage failed ({status}): {description}").into())
     }
 
     /// Call `answerCallbackQuery` to dismiss the button spinner.

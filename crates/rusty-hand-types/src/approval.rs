@@ -167,10 +167,20 @@ pub struct ApprovalResponse {
 #[serde(default)]
 pub struct ApprovalPolicy {
     /// Tools that always require approval. Default: `["shell_exec"]`.
+    /// To stop being prompted for a specific tool, remove it from this
+    /// list. To disable approval prompts entirely, set this to `[]`
+    /// (only safe in trusted single-operator setups).
     pub require_approval: Vec<String>,
-    /// Timeout in seconds. Default: 60, range: 10..=300.
+    /// Timeout in seconds. Default: 300 (5 minutes), range: 10..=300.
+    /// Pre-v0.7.20 this defaulted to 60s, which often expired before the
+    /// user opened Telegram and read the prompt.
     pub timeout_secs: u64,
-    /// Auto-approve in autonomous mode. Default: `false`.
+    /// **Trust mode**: when `true`, the kernel auto-approves every
+    /// approval request without prompting the operator. Every
+    /// auto-approval is still logged at WARN level for audit. Use this
+    /// only for trusted single-operator setups, CI/CD pipelines, or
+    /// fully autonomous deployments where there's no human in the loop
+    /// to respond to prompts. Default: `false`.
     pub auto_approve_autonomous: bool,
 }
 
@@ -178,7 +188,13 @@ impl Default for ApprovalPolicy {
     fn default() -> Self {
         Self {
             require_approval: vec!["shell_exec".to_string()],
-            timeout_secs: 60,
+            // 5 minutes — gives the user time to open Telegram, read the
+            // request, and decide. Pre-v0.7.20 this was 60s, which often
+            // expired before the user even saw the notification, leaving
+            // them with a "request already expired" message after they
+            // tapped Approve. 300s is the policy's hard upper bound, so
+            // we use the full window by default.
+            timeout_secs: 300,
             auto_approve_autonomous: false,
         }
     }
@@ -483,7 +499,7 @@ mod tests {
         let policy = ApprovalPolicy::default();
         assert!(policy.validate().is_ok());
         assert_eq!(policy.require_approval, vec!["shell_exec".to_string()]);
-        assert_eq!(policy.timeout_secs, 60);
+        assert_eq!(policy.timeout_secs, 300);
         assert!(!policy.auto_approve_autonomous);
     }
 
@@ -491,7 +507,7 @@ mod tests {
     fn policy_serde_default() {
         // An empty JSON object should deserialize to defaults via #[serde(default)].
         let policy: ApprovalPolicy = serde_json::from_str("{}").unwrap();
-        assert_eq!(policy.timeout_secs, 60);
+        assert_eq!(policy.timeout_secs, 300);
         assert_eq!(policy.require_approval, vec!["shell_exec".to_string()]);
         assert!(!policy.auto_approve_autonomous);
     }

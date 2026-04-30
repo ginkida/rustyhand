@@ -1933,6 +1933,21 @@ impl KernelConfig {
             );
         }
 
+        // --- Approval trust mode warning ---
+        //
+        // `auto_approve_autonomous = true` makes the kernel skip all
+        // approval prompts. We surface this loudly at boot so a stale
+        // dev-time setting doesn't get carried into production unnoticed.
+        if self.approval.auto_approve_autonomous {
+            warnings.push(
+                "approval.auto_approve_autonomous = true \u{2014} ALL approval \
+                 requests will be auto-approved without prompting. Only safe in \
+                 trusted single-operator setups or CI/CD. Set to false to \
+                 restore interactive approval."
+                    .to_string(),
+            );
+        }
+
         // --- Core config validation ---
 
         // Validate api_listen is a parseable socket address
@@ -2111,6 +2126,32 @@ mod tests {
         assert_eq!(
             ds_count, 1,
             "distinct env var must warn separately, got: {warnings:?}"
+        );
+    }
+
+    /// Trust mode (`approval.auto_approve_autonomous = true`) must
+    /// surface a loud boot warning — silent auto-approval would be a
+    /// security footgun if a stale dev-time setting carried into prod.
+    #[test]
+    fn test_validate_warns_on_approval_trust_mode() {
+        let mut config = KernelConfig::default();
+        config.default_model.api_key_env = String::new(); // suppress LLM-key check
+        config.approval.auto_approve_autonomous = true;
+
+        let warnings = config.validate();
+        let trust_warnings: Vec<&String> = warnings
+            .iter()
+            .filter(|w| w.contains("auto_approve_autonomous"))
+            .collect();
+        assert_eq!(
+            trust_warnings.len(),
+            1,
+            "trust mode must produce exactly one warning, got: {warnings:?}"
+        );
+        assert!(
+            trust_warnings[0].contains("auto-approved"),
+            "warning must explain consequence, got: {}",
+            trust_warnings[0]
         );
     }
 

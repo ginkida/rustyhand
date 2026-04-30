@@ -57,6 +57,29 @@ impl ApprovalManager {
 
     /// Submit an approval request. Returns a future that resolves when approved/denied/timed out.
     pub async fn request_approval(&self, req: ApprovalRequest) -> ApprovalDecision {
+        // Trust mode: when `policy.auto_approve_autonomous = true` the
+        // operator has explicitly opted into auto-approving every request
+        // (single-operator setups, trusted local agents, CI/CD pipelines).
+        // We log every auto-approval at WARN level so it's visible in
+        // operations logs — silent auto-approval would be a security
+        // footgun. Pre-v0.7.20 this field was dead code: the policy
+        // surface accepted it but no call site consulted it.
+        {
+            let policy = self.policy.read().unwrap_or_else(|e| e.into_inner());
+            if policy.auto_approve_autonomous {
+                warn!(
+                    request_id = %req.id,
+                    agent_id = %req.agent_id,
+                    tool = %req.tool_name,
+                    risk = ?req.risk_level,
+                    summary = %req.action_summary,
+                    "AUTO-APPROVING request (auto_approve_autonomous=true) \u{2014} \
+                     review trust mode in your config if this was unintended"
+                );
+                return ApprovalDecision::Approved;
+            }
+        }
+
         // Check per-agent pending limit
         let agent_pending = self
             .pending
@@ -431,7 +454,80 @@ mod tests {
         let mgr = default_manager();
         let policy = mgr.policy();
         assert_eq!(policy.require_approval, vec!["shell_exec".to_string()]);
-        assert_eq!(policy.timeout_secs, 60);
+        assert_eq!(policy.timeout_secs, 300);
         assert!(!policy.auto_approve_autonomous);
+    }
+
+    /// Regression: pre-v0.7.20 `auto_approve_autonomous` was a defined
+    /// field on `ApprovalPolicy` but no call site consulted it — setting
+    /// it to `true` in config did nothing. This test pins the new
+    /// behavior: when trust mode is enabled, every request is approved
+    /// instantly without prompting. The Telegram/Discord notification
+    /// callback is bypassed, the per-agent pending limit is bypassed,
+    /// and no oneshot wait happens.
+    #[tokio::test]
+    async fn auto_approve_autonomous_skips_prompt() {
+        let trust_policy = ApprovalPolicy {
+            require_approval: vec!["shell_exec".to_string()],
+            timeout_secs: 300,
+            auto_approve_autonomous: true,
+        };
+        let mgr = ApprovalManager::new(trust_policy);
+
+        // Notification callback must NOT fire in trust mode — the whole
+        // point is to skip the human-in-the-loop hop.
+        let cb_fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cb_flag = cb_fired.clone();
+        mgr.set_notification_callback(Arc::new(move |_| {
+            cb_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        }));
+
+        let req = make_request("agent-trust", "shell_exec", 300);
+        let decision = mgr.request_approval(req).await;
+
+        assert_eq!(
+            decision,
+            ApprovalDecision::Approved,
+            "trust mode must auto-approve"
+        );
+        assert!(
+            !cb_fired.load(std::sync::atomic::Ordering::SeqCst),
+            "trust mode must not fire the notification callback (no Telegram prompt)"
+        );
+        assert_eq!(
+            mgr.pending_count(),
+            0,
+            "trust mode must not leave a pending entry behind"
+        );
+    }
+
+    /// Trust mode must respect a hot-update: toggling it back to false
+    /// must restore the human-in-the-loop flow.
+    #[tokio::test]
+    async fn auto_approve_autonomous_respects_hot_update() {
+        let mgr = Arc::new(default_manager());
+
+        // First request: default policy — no auto-approve. Resolve manually.
+        let req1 = make_request("agent-1", "shell_exec", 60);
+        let id1 = req1.id;
+        let mgr2 = Arc::clone(&mgr);
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            let _ = mgr2.resolve(id1, ApprovalDecision::Approved, None);
+        });
+        assert_eq!(mgr.request_approval(req1).await, ApprovalDecision::Approved);
+
+        // Hot-toggle to trust mode.
+        mgr.update_policy(ApprovalPolicy {
+            require_approval: vec!["shell_exec".to_string()],
+            timeout_secs: 300,
+            auto_approve_autonomous: true,
+        });
+
+        // Second request: must be auto-approved instantly without anyone
+        // calling resolve() — proves the toggle took effect.
+        let req2 = make_request("agent-1", "shell_exec", 300);
+        assert_eq!(mgr.request_approval(req2).await, ApprovalDecision::Approved);
+        assert_eq!(mgr.pending_count(), 0);
     }
 }
