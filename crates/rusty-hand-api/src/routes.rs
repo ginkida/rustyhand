@@ -3633,6 +3633,164 @@ pub async fn list_sessions(
     }
 }
 
+/// GET /api/sessions/:id — Retrieve a single session with all messages as JSON.
+pub async fn get_session(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let session_id = match id.parse::<uuid::Uuid>() {
+        Ok(u) => rusty_hand_types::agent::SessionId(u),
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Invalid session ID"})),
+            )
+                .into_response();
+        }
+    };
+
+    match state.kernel.memory.get_session(session_id) {
+        Ok(Some(session)) => {
+            let messages: Vec<serde_json::Value> = session
+                .messages
+                .iter()
+                .map(|m| serde_json::to_value(m).unwrap_or_default())
+                .collect();
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "id": session.id.0.to_string(),
+                    "agent_id": session.agent_id.to_string(),
+                    "label": session.label,
+                    "message_count": session.messages.len(),
+                    "context_window_tokens": session.context_window_tokens,
+                    "messages": messages,
+                })),
+            )
+                .into_response()
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Session not found"})),
+        )
+            .into_response(),
+        Err(e) => {
+            safe_error(StatusCode::INTERNAL_SERVER_ERROR, "Session fetch", &e).into_response()
+        }
+    }
+}
+
+/// GET /api/sessions/:id/export.md — Export a session as Markdown.
+pub async fn export_session_markdown(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse as _;
+
+    let session_id = match id.parse::<uuid::Uuid>() {
+        Ok(u) => rusty_hand_types::agent::SessionId(u),
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                axum::response::Html("Invalid session ID"),
+            )
+                .into_response();
+        }
+    };
+
+    let session = match state.kernel.memory.get_session(session_id) {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                axum::response::Html("Session not found"),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                axum::response::Html(format!("Error: {e}")),
+            )
+                .into_response();
+        }
+    };
+
+    let mut md = String::new();
+    let label = session.label.as_deref().unwrap_or("Untitled Session");
+    md.push_str(&format!("# {label}\n\n"));
+    md.push_str(&format!("_Session ID: {}_\n\n", session.id.0));
+    md.push_str("---\n\n");
+
+    for msg in &session.messages {
+        use rusty_hand_types::message::{ContentBlock, MessageContent, Role};
+        let role_label = match msg.role {
+            Role::System => "**System**",
+            Role::User => "**You**",
+            Role::Assistant => "**Assistant**",
+        };
+        md.push_str(&format!("### {role_label}\n\n"));
+        match &msg.content {
+            MessageContent::Text(t) => {
+                md.push_str(t);
+                md.push_str("\n\n");
+            }
+            MessageContent::Blocks(blocks) => {
+                for block in blocks {
+                    match block {
+                        ContentBlock::Text { text } => {
+                            md.push_str(text);
+                            md.push_str("\n\n");
+                        }
+                        ContentBlock::Thinking { thinking } => {
+                            md.push_str("<details><summary>Thinking</summary>\n\n");
+                            md.push_str(thinking);
+                            md.push_str("\n\n</details>\n\n");
+                        }
+                        ContentBlock::ToolUse { name, input, .. } => {
+                            md.push_str(&format!(
+                                "```tool-call\n{name}({})\n```\n\n",
+                                serde_json::to_string_pretty(input).unwrap_or_default()
+                            ));
+                        }
+                        ContentBlock::ToolResult {
+                            content, is_error, ..
+                        } => {
+                            let label = if *is_error { "error" } else { "result" };
+                            md.push_str(&format!("```tool-{label}\n{content}\n```\n\n"));
+                        }
+                        ContentBlock::Image { media_type, .. } => {
+                            md.push_str(&format!("_[Image: {media_type}]_\n\n"));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        md.push_str("---\n\n");
+    }
+
+    let filename = format!(
+        "{}.md",
+        label
+            .to_lowercase()
+            .replace(|c: char| !c.is_alphanumeric(), "-")
+            .trim_matches('-')
+    );
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "text/markdown; charset=utf-8"),
+            (
+                "Content-Disposition",
+                &format!("attachment; filename=\"{filename}\""),
+            ),
+        ],
+        md,
+    )
+        .into_response()
+}
+
 /// DELETE /api/sessions/:id — Delete a session.
 pub async fn delete_session(
     State(state): State<Arc<AppState>>,
