@@ -264,10 +264,12 @@ async fn test_status_endpoint() {
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], "running");
     assert_eq!(body["agent_count"], 0);
+    assert_eq!(body["running_count"], 0);
     assert!(body["uptime_seconds"].is_number());
     assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(body["default_provider"], "ollama");
-    assert!(body.get("agents").is_none());
+    assert!(body["agents"].as_array().is_some());
+    assert!(body["data_dir"].is_string());
 }
 
 #[tokio::test]

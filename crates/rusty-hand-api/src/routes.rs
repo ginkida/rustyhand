@@ -859,15 +859,35 @@ pub async fn kill_agent(
 /// GET /api/status — Kernel status.
 pub async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let uptime = state.started_at.elapsed().as_secs();
-    let agent_count = state.kernel.registry.count();
+    let entries = state.kernel.registry.list();
+    let agents: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "id": e.id.to_string(),
+                "name": e.name,
+                "state": format!("{:?}", e.state).to_lowercase(),
+                "model_provider": e.manifest.model.provider,
+                "model_name": e.manifest.model.model,
+                "group": e.manifest.group,
+            })
+        })
+        .collect();
+    let running_count = entries
+        .iter()
+        .filter(|e| e.state == rusty_hand_types::agent::AgentState::Running)
+        .count();
 
     Json(serde_json::json!({
         "status": "running",
         "version": env!("CARGO_PKG_VERSION"),
-        "agent_count": agent_count,
+        "agent_count": agents.len(),
+        "running_count": running_count,
         "default_provider": state.kernel.config.default_model.provider,
         "default_model": state.kernel.config.default_model.model,
         "uptime_seconds": uptime,
+        "data_dir": state.kernel.config.data_dir.display().to_string(),
+        "agents": agents,
     }))
 }
 
