@@ -284,7 +284,7 @@ function chatPage() {
         }
       });
 
-      // Watch for slash commands
+      // Watch for slash commands and auto-save draft
       this.$watch('inputText', function(val) {
         if (val.startsWith('/')) {
           self.slashFilter = val.slice(1).toLowerCase();
@@ -292,6 +292,13 @@ function chatPage() {
           self.slashIdx = 0;
         } else {
           self.showSlashMenu = false;
+        }
+        // Persist draft per agent so it survives navigation
+        if (self.currentAgent) {
+          try {
+            if (val.trim()) { localStorage.setItem('rh-draft-' + self.currentAgent.id, val); }
+            else { localStorage.removeItem('rh-draft-' + self.currentAgent.id); }
+          } catch(_) {}
         }
       });
     },
@@ -574,11 +581,20 @@ function chatPage() {
         });
         localStorage.setItem('rh-chat-tips-seen', 'true');
       }
+      // Restore draft for this agent
+      try {
+        var draft = localStorage.getItem('rh-draft-' + agent.id) || '';
+        if (draft && !this.inputText) this.inputText = draft;
+      } catch(_) {}
       // Focus input after agent selection
       var self = this;
       this.$nextTick(function() {
         var el = document.getElementById('msg-input');
-        if (el) el.focus();
+        if (el) {
+          el.focus();
+          el.style.height = 'auto';
+          el.style.height = Math.min(el.scrollHeight, 150) + 'px';
+        }
       });
     },
 
@@ -1111,6 +1127,8 @@ function chatPage() {
       }
 
       this.inputText = '';
+      // Clear draft on send
+      if (this.currentAgent) { try { localStorage.removeItem('rh-draft-' + this.currentAgent.id); } catch(_) {} }
 
       // Reset textarea height to single line
       var ta = document.getElementById('msg-input');
