@@ -205,7 +205,8 @@ pub async fn run_agent_loop(
 
     // Build the system prompt — base prompt comes from kernel (prompt_builder),
     // we append recalled memories here since they are resolved at loop time.
-    let mut system_prompt = manifest.model.system_prompt.clone();
+    let mut system_prompt =
+        substitute_prompt_vars(&manifest.model.system_prompt, manifest, &agent_id_str);
     if !memories.is_empty() {
         let mem_pairs: Vec<(String, String)> = memories
             .iter()
@@ -799,6 +800,26 @@ fn derive_session_label(text: &str) -> Option<String> {
     }
 }
 
+/// Substitute `{{variable}}` placeholders in a system prompt.
+///
+/// Supported: `{{date}}`, `{{time}}`, `{{datetime}}`, `{{weekday}}`, `{{year}}`,
+/// `{{agent_name}}`, `{{agent_id}}`.
+fn substitute_prompt_vars(prompt: &str, manifest: &AgentManifest, agent_id: &str) -> String {
+    if !prompt.contains("{{") {
+        return prompt.to_string();
+    }
+    use chrono::Datelike;
+    let now = chrono::Local::now();
+    prompt
+        .replace("{{date}}", &now.format("%Y-%m-%d").to_string())
+        .replace("{{time}}", &now.format("%H:%M").to_string())
+        .replace("{{datetime}}", &now.format("%Y-%m-%d %H:%M").to_string())
+        .replace("{{weekday}}", &now.weekday().to_string())
+        .replace("{{year}}", &now.year().to_string())
+        .replace("{{agent_name}}", &manifest.name)
+        .replace("{{agent_id}}", agent_id)
+}
+
 /// Call an LLM driver with automatic retry on rate-limit and overload errors.
 ///
 /// Uses the `llm_errors` classifier for smart error handling and the
@@ -1143,7 +1164,8 @@ pub async fn run_agent_loop_streaming(
 
     // Build the system prompt — base prompt comes from kernel (prompt_builder),
     // we append recalled memories here since they are resolved at loop time.
-    let mut system_prompt = manifest.model.system_prompt.clone();
+    let mut system_prompt =
+        substitute_prompt_vars(&manifest.model.system_prompt, manifest, &agent_id_str);
     if !memories.is_empty() {
         let mem_pairs: Vec<(String, String)> = memories
             .iter()

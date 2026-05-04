@@ -970,7 +970,10 @@
               <div x-show="detailTab === 'config'">
                 <div class="form-group"><label>Name</label><input class="form-input" x-model="configForm.name"></div>
                 <div class="form-group"><label>Group</label><input class="form-input" x-model="configForm.group" placeholder="Ops / Research / Clients"></div>
-                <div class="form-group"><label>System Prompt</label><textarea class="form-textarea" x-model="configForm.system_prompt" style="height:80px"></textarea></div>
+                <div class="form-group">
+                  <label>System Prompt <span style="font-weight:400;opacity:0.55;font-size:11px" title="{{date}}, {{time}}, {{datetime}}, {{weekday}}, {{year}}, {{agent_name}}, {{agent_id}}">supports {{variables}}</span></label>
+                  <textarea class="form-textarea" x-model="configForm.system_prompt" style="height:80px" placeholder="You are a helpful assistant. Today is {{date}}."></textarea>
+                </div>
                 <div class="form-group">
                   <label>Temperature <span style="font-weight:400;opacity:0.6;font-size:11px">(0.0 – 2.0)</span></label>
                   <input class="form-input" type="number" step="0.05" min="0" max="2" x-model.number="configForm.temperature" style="width:120px">
@@ -1144,8 +1147,8 @@
                       </div>
                     </div>
                     <div class="form-group">
-                      <label>System Prompt</label>
-                      <textarea class="form-textarea" x-model="spawnForm.systemPrompt" placeholder="You are a helpful assistant."></textarea>
+                      <label>System Prompt <span style="font-weight:400;opacity:0.55;font-size:11px" title="{{date}}, {{time}}, {{datetime}}, {{weekday}}, {{year}}, {{agent_name}}, {{agent_id}}">supports {{variables}}</span></label>
+                      <textarea class="form-textarea" x-model="spawnForm.systemPrompt" placeholder="You are a helpful assistant. Today is {{date}}."></textarea>
                     </div>
                     <div class="form-group">
                       <label class="mb-2" style="display:block;font-size:13px;font-weight:600">Personality</label>
