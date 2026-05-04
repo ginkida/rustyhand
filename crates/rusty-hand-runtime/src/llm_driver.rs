@@ -124,6 +124,8 @@ pub enum StreamEvent {
         result_preview: String,
         is_error: bool,
     },
+    /// Session was automatically labeled after the first turn.
+    SessionLabeled { session_id: String, label: String },
 }
 
 /// Trait for LLM drivers.

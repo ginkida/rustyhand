@@ -409,6 +409,20 @@ pub async fn run_agent_loop(
                     .save_session(session)
                     .map_err(|e| RustyHandError::Memory(e.to_string()))?;
 
+                // Auto-label on first turn if session has no label yet
+                if session.label.is_none() {
+                    if let Some(label_str) = derive_session_label(user_message) {
+                        if rusty_hand_types::agent::SessionLabel::new(&label_str).is_ok()
+                            && memory
+                                .set_session_label(session.id, Some(&label_str))
+                                .is_ok()
+                        {
+                            session.label = Some(label_str.clone());
+                            debug!(session_id = %session.id, label = %label_str, "Auto-labeled session");
+                        }
+                    }
+                }
+
                 // Remember this interaction (with embedding if available)
                 let interaction_text = format!(
                     "User asked: {}\nI responded: {}",
@@ -756,6 +770,33 @@ pub async fn run_agent_loop(
     }
 
     Err(RustyHandError::MaxIterationsExceeded(max_iterations))
+}
+
+/// Derive a short session label from user input text.
+/// Takes the first 6 words (max 40 chars), keeping only valid label characters.
+fn derive_session_label(text: &str) -> Option<String> {
+    let clean: String = text
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' {
+                c.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
+        .collect();
+    let words: Vec<&str> = clean.split_whitespace().collect();
+    let candidate = words.iter().take(6).cloned().collect::<Vec<_>>().join(" ");
+    let truncated = if candidate.len() > 40 {
+        candidate[..40].trim_end().to_string()
+    } else {
+        candidate
+    };
+    if truncated.len() < 2 {
+        None
+    } else {
+        Some(truncated)
+    }
 }
 
 /// Call an LLM driver with automatic retry on rate-limit and overload errors.
@@ -1318,6 +1359,26 @@ pub async fn run_agent_loop_streaming(
                 memory
                     .save_session(session)
                     .map_err(|e| RustyHandError::Memory(e.to_string()))?;
+
+                // Auto-label on first turn if session has no label yet
+                if session.label.is_none() {
+                    if let Some(label_str) = derive_session_label(user_message) {
+                        if rusty_hand_types::agent::SessionLabel::new(&label_str).is_ok()
+                            && memory
+                                .set_session_label(session.id, Some(&label_str))
+                                .is_ok()
+                        {
+                            session.label = Some(label_str.clone());
+                            debug!(session_id = %session.id, label = %label_str, "Auto-labeled session (streaming)");
+                            let _ = stream_tx
+                                .send(StreamEvent::SessionLabeled {
+                                    session_id: session.id.to_string(),
+                                    label: label_str,
+                                })
+                                .await;
+                        }
+                    }
+                }
 
                 // Remember this interaction (with embedding if available)
                 let interaction_text = format!(

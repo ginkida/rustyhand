@@ -1029,6 +1029,18 @@ function chatPage() {
           this.scrollToBottom();
           break;
 
+        case 'session_labeled':
+          // Auto-label: update the sessions list so the dropdown reflects the new title
+          if (data.session_id && data.label) {
+            for (var si = 0; si < this.sessions.length; si++) {
+              if (this.sessions[si].session_id === data.session_id) {
+                this.sessions[si].label = data.label;
+                break;
+              }
+            }
+          }
+          break;
+
         case 'pong': break;
       }
     },
