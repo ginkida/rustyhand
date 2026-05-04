@@ -91,6 +91,26 @@ function chatPage() {
       return this.tips[this.tipIndex % this.tips.length];
     },
     dismissTips: function() { localStorage.setItem('rh-tips-off', 'true'); },
+
+    // ── Desktop Notifications ──
+    _notifPermission: 'default',
+    _ensureNotifPermission: function() {
+      if (!('Notification' in window)) return;
+      if (Notification.permission !== 'default') return;
+      Notification.requestPermission();
+    },
+    _sendDesktopNotif: function(agentName, text) {
+      if (!('Notification' in window)) return;
+      if (Notification.permission !== 'granted') return;
+      if (!document.hidden) return;
+      var title = (agentName || 'Agent') + ' replied';
+      var body = (text || '').replace(/[*_`#>~]/g, '').trim().slice(0, 120);
+      try {
+        var n = new Notification(title, { body: body, icon: '/favicon.ico', tag: 'rh-agent-reply' });
+        n.onclick = function() { window.focus(); n.close(); };
+      } catch(_) {}
+    },
+
     startTipCycle: function() {
       var self = this;
       if (this.tipTimer) clearInterval(this.tipTimer);
@@ -958,6 +978,7 @@ function chatPage() {
             finalText = '';
           }
           this.messages.push({ id: ++msgId, role: 'agent', text: finalText, meta: meta, tools: streamedTools, ts: Date.now() });
+          this._sendDesktopNotif(this.currentAgent && this.currentAgent.name, finalText);
           this.sending = false;
           this.tokenCount = 0;
           this.tokensPerSec = 0;
@@ -1134,6 +1155,7 @@ function chatPage() {
     async sendMessage() {
       if (!this.currentAgent || (!this.inputText.trim() && !this.attachments.length)) return;
       var text = this.inputText.trim();
+      this._ensureNotifPermission();
 
       // Handle slash commands
       if (text.startsWith('/') && !this.attachments.length) {
