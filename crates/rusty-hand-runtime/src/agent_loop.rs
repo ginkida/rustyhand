@@ -1902,6 +1902,79 @@ mod tests {
         assert_eq!(BASE_RETRY_DELAY_MS, 1000);
     }
 
+    // ----- derive_session_label tests -----
+
+    #[test]
+    fn test_label_basic() {
+        let l = derive_session_label("Hello world this is a test message").unwrap();
+        assert_eq!(l, "hello world this is a test");
+    }
+
+    #[test]
+    fn test_label_strips_special_chars() {
+        let l = derive_session_label("What's the best way?!").unwrap();
+        assert_eq!(l, "what s the best way");
+    }
+
+    #[test]
+    fn test_label_truncates_at_40() {
+        let l = derive_session_label("one two three four five six seven eight nine ten").unwrap();
+        // max 6 words, should not exceed 40 chars
+        assert!(l.len() <= 40, "label too long: {l}");
+        assert_eq!(l, "one two three four five six");
+    }
+
+    #[test]
+    fn test_label_none_for_empty() {
+        assert!(derive_session_label("").is_none());
+        assert!(derive_session_label("   ").is_none());
+    }
+
+    #[test]
+    fn test_label_none_for_only_specials() {
+        assert!(derive_session_label("!!!???@@@").is_none());
+    }
+
+    // ----- substitute_prompt_vars tests -----
+
+    #[test]
+    fn test_prompt_vars_no_placeholders() {
+        let manifest = AgentManifest {
+            name: "Alice".to_string(),
+            ..Default::default()
+        };
+        let result = substitute_prompt_vars("You are a helpful assistant.", &manifest, "test-id");
+        assert_eq!(result, "You are a helpful assistant.");
+    }
+
+    #[test]
+    fn test_prompt_vars_agent_name() {
+        let manifest = AgentManifest {
+            name: "BobBot".to_string(),
+            ..Default::default()
+        };
+        let result = substitute_prompt_vars("My name is {{agent_name}}.", &manifest, "abc-123");
+        assert_eq!(result, "My name is BobBot.");
+    }
+
+    #[test]
+    fn test_prompt_vars_agent_id() {
+        let manifest = AgentManifest::default();
+        let result = substitute_prompt_vars("ID: {{agent_id}}", &manifest, "uuid-xyz");
+        assert_eq!(result, "ID: uuid-xyz");
+    }
+
+    #[test]
+    fn test_prompt_vars_date_is_populated() {
+        let manifest = AgentManifest::default();
+        let result = substitute_prompt_vars("Date: {{date}}", &manifest, "id");
+        assert!(
+            !result.contains("{{date}}"),
+            "date placeholder was not replaced"
+        );
+        assert!(result.starts_with("Date: "), "result: {result}");
+    }
+
     #[test]
     fn test_dynamic_truncate_short_unchanged() {
         use crate::context_budget::{truncate_tool_result_dynamic, ContextBudget};
