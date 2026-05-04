@@ -774,11 +774,13 @@ impl ChannelBridgeHandle for KernelBridgeAdapter {
         Ok(msg)
     }
 
-    async fn set_thinking(&self, _agent_id: AgentId, on: bool) -> Result<String, String> {
-        // Future-ready: stores preference but doesn't affect model behavior yet
+    async fn set_thinking(&self, agent_id: AgentId, on: bool) -> Result<String, String> {
+        self.kernel
+            .set_agent_thinking(agent_id, on)
+            .map_err(|e| format!("{e}"))?;
         let state = if on { "enabled" } else { "disabled" };
         Ok(format!(
-            "Extended thinking {state}. (This will take effect when supported by the model.)"
+            "Extended thinking {state}. Reasoning tokens will be streamed and shown in a collapsible panel."
         ))
     }
 

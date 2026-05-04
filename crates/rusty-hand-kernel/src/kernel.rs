@@ -2524,6 +2524,31 @@ impl RustyHandKernel {
         Ok(())
     }
 
+    /// Toggle extended thinking for an agent.
+    ///
+    /// `budget_tokens = 0` or `on = false` disables thinking.
+    /// Changes take effect on the next message sent to the agent.
+    pub fn set_agent_thinking(&self, agent_id: AgentId, on: bool) -> KernelResult<()> {
+        let thinking = if on {
+            Some(rusty_hand_types::config::ThinkingConfig {
+                budget_tokens: 10_000,
+                stream_thinking: true,
+            })
+        } else {
+            None
+        };
+        self.registry
+            .update_thinking(agent_id, thinking)
+            .map_err(KernelError::RustyHand)?;
+
+        if let Some(entry) = self.registry.get(agent_id) {
+            if let Err(e) = self.memory.save_agent(&entry) {
+                warn!(agent_id = %agent_id, error = %e, "Failed to persist thinking change");
+            }
+        }
+        Ok(())
+    }
+
     /// Update an agent's skill allowlist. Empty = all skills (backward compat).
     pub fn set_agent_skills(&self, agent_id: AgentId, skills: Vec<String>) -> KernelResult<()> {
         // Validate skill names if allowlist is non-empty

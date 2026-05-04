@@ -891,6 +891,40 @@ async fn handle_command(
                 }
             }
         }
+        "think" => {
+            let on = matches!(args.to_lowercase().as_str(), "on" | "stream" | "1" | "true");
+            let off = matches!(args.to_lowercase().as_str(), "off" | "0" | "false");
+            if !on && !off {
+                // No valid arg — just report current state
+                let currently_on = state
+                    .kernel
+                    .registry
+                    .get(agent_id)
+                    .map(|e| e.manifest.model.thinking.is_some())
+                    .unwrap_or(false);
+                let status = if currently_on { "on" } else { "off" };
+                serde_json::json!({
+                    "type": "command_result",
+                    "command": cmd,
+                    "message": format!("Extended thinking is currently **{status}**. Use `/think on` or `/think off`."),
+                })
+            } else {
+                match state.kernel.set_agent_thinking(agent_id, on) {
+                    Ok(()) => {
+                        let state_str = if on { "enabled" } else { "disabled" };
+                        serde_json::json!({
+                            "type": "command_result",
+                            "command": cmd,
+                            "thinking": on,
+                            "message": format!("Extended thinking **{state_str}**. Reasoning tokens will be streamed in a collapsible panel."),
+                        })
+                    }
+                    Err(e) => {
+                        serde_json::json!({"type": "error", "content": format!("Failed to toggle thinking: {e}")})
+                    }
+                }
+            }
+        }
         "usage" => match state.kernel.session_usage_cost(agent_id) {
             Ok((input, output, cost)) => {
                 let mut msg = format!(

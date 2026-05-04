@@ -177,6 +177,21 @@ impl AgentRegistry {
         Ok(())
     }
 
+    /// Toggle extended thinking for an agent.
+    pub fn update_thinking(
+        &self,
+        id: AgentId,
+        thinking: Option<rusty_hand_types::config::ThinkingConfig>,
+    ) -> RustyHandResult<()> {
+        let mut entry = self
+            .agents
+            .get_mut(&id)
+            .ok_or_else(|| RustyHandError::AgentNotFound(id.to_string()))?;
+        entry.manifest.model.thinking = thinking;
+        entry.last_active = chrono::Utc::now();
+        Ok(())
+    }
+
     /// Update an agent's skill allowlist.
     pub fn update_skills(&self, id: AgentId, skills: Vec<String>) -> RustyHandResult<()> {
         let mut entry = self

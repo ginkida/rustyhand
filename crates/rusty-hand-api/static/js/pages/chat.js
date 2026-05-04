@@ -375,23 +375,21 @@ function chatPage() {
           }
           break;
         case '/think':
-          if (cmdArgs === 'on') {
-            self.thinkingMode = 'on';
+          if (cmdArgs === 'on' || cmdArgs === 'stream') {
+            self.thinkingMode = cmdArgs === 'stream' ? 'stream' : 'on';
           } else if (cmdArgs === 'off') {
             self.thinkingMode = 'off';
-          } else if (cmdArgs === 'stream') {
-            self.thinkingMode = 'stream';
           } else {
-            // Cycle: off -> on -> stream -> off
-            if (self.thinkingMode === 'off') self.thinkingMode = 'on';
-            else if (self.thinkingMode === 'on') self.thinkingMode = 'stream';
-            else self.thinkingMode = 'off';
+            // Cycle: off -> stream -> off
+            self.thinkingMode = self.thinkingMode === 'off' ? 'stream' : 'off';
           }
-          var modeLabel = self.thinkingMode === 'stream' ? 'enabled (streaming reasoning)' : (self.thinkingMode === 'on' ? 'enabled' : 'disabled');
-          self.messages.push({ id: ++msgId, role: 'system', text: 'Extended thinking **' + modeLabel + '**. ' +
-            (self.thinkingMode === 'stream' ? 'Reasoning tokens will appear in a collapsible panel.' :
-             self.thinkingMode === 'on' ? 'The agent will show its reasoning when supported by the model.' :
-             'Normal response mode.'), meta: '', tools: [] });
+          // Sync the server-side thinking flag for the agent
+          if (self.currentAgent && RustyHandAPI.isWsConnected()) {
+            RustyHandAPI.wsSend({ type: 'command', command: 'think', args: self.thinkingMode === 'off' ? 'off' : 'on' });
+          }
+          var modeLabel2 = self.thinkingMode !== 'off' ? 'enabled — reasoning tokens will appear in a collapsible panel' : 'disabled';
+          self.messages.push({ id: ++msgId, role: 'system', text: 'Extended thinking **' + modeLabel2 + '**.',
+            meta: '', tools: [] });
           self.scrollToBottom();
           break;
         case '/context':

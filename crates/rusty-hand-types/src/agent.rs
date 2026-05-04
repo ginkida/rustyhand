@@ -392,6 +392,12 @@ pub struct ModelConfig {
     /// Response format: `text` (default) or `json` for structured output.
     #[serde(default)]
     pub response_format: ResponseFormat,
+    /// Extended thinking / reasoning configuration.
+    /// Set `budget_tokens` to enable; leave `None` to disable.
+    /// Only Anthropic claude-3-7-sonnet+ and DeepSeek R1 (reasoning_content)
+    /// support this natively — other providers ignore it.
+    #[serde(default)]
+    pub thinking: Option<crate::config::ThinkingConfig>,
 }
 
 impl Default for ModelConfig {
@@ -405,6 +411,7 @@ impl Default for ModelConfig {
             api_key_env: None,
             base_url: None,
             response_format: ResponseFormat::default(),
+            thinking: None,
         }
     }
 }

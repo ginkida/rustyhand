@@ -288,7 +288,7 @@ pub async fn run_agent_loop(
             max_tokens: manifest.model.max_tokens,
             temperature: manifest.model.temperature,
             system: Some(system_prompt.clone()),
-            thinking: None,
+            thinking: manifest.model.thinking.clone(),
             response_format: manifest.model.response_format.clone(),
         };
 
@@ -1197,7 +1197,7 @@ pub async fn run_agent_loop_streaming(
             max_tokens: manifest.model.max_tokens,
             temperature: manifest.model.temperature,
             system: Some(system_prompt.clone()),
-            thinking: None,
+            thinking: manifest.model.thinking.clone(),
             response_format: manifest.model.response_format.clone(),
         };
 
