@@ -450,6 +450,15 @@
             </div>
 
             <!-- Messages area -->
+            <!-- Context pressure warning banner -->
+            <div x-show="contextPressure === 'high' || contextPressure === 'critical'" x-transition
+                 style="display:flex;align-items:center;gap:10px;padding:7px 16px;font-size:12px;border-bottom:1px solid var(--border)"
+                 :style="contextPressure === 'critical' ? 'background:rgba(239,68,68,0.1);color:var(--error)' : 'background:rgba(245,158,11,0.1);color:var(--warning)'">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+              <span x-text="contextPressure === 'critical' ? 'Context is full — compact or start a new chat to continue.' : 'Context is getting full. Consider compacting.'"></span>
+              <button class="btn btn-sm" style="padding:2px 8px;font-size:11px;margin-left:auto" @click="sendWsCommand('compact', '')">Compact</button>
+              <button class="btn btn-sm" style="padding:2px 8px;font-size:11px" @click="sendWsCommand('new', '')">New chat</button>
+            </div>
             <div class="messages" id="messages" :class="{ 'drag-over': isDragging }" @dragover.prevent="isDragging = true" @dragleave="isDragging = false" @drop.prevent="handleDrop($event); isDragging = false" @scroll="checkScroll()" style="position:relative">
               <!-- Message list -->
               <template x-if="currentAgent">

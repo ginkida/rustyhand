@@ -739,6 +739,30 @@ pub async fn get_agent_session(
                     Some(msg)
                 })
                 .collect();
+            // Compute context pressure so the UI can initialise correctly on load
+            let context_pressure = if let Some(entry) = state.kernel.registry.get(agent_id) {
+                use rusty_hand_runtime::compactor::{generate_context_report, ContextPressure};
+                let tools = rusty_hand_runtime::tool_runner::builtin_tool_definitions();
+                let cw = if session.context_window_tokens > 0 {
+                    session.context_window_tokens as usize
+                } else {
+                    200_000
+                };
+                let report = generate_context_report(
+                    &session.messages,
+                    Some(&entry.manifest.model.system_prompt),
+                    Some(&tools),
+                    cw,
+                );
+                match report.pressure {
+                    ContextPressure::Low => "low",
+                    ContextPressure::Medium => "medium",
+                    ContextPressure::High => "high",
+                    ContextPressure::Critical => "critical",
+                }
+            } else {
+                "low"
+            };
             (
                 StatusCode::OK,
                 Json(serde_json::json!({
@@ -746,6 +770,7 @@ pub async fn get_agent_session(
                     "agent_id": session.agent_id.0.to_string(),
                     "message_count": session.messages.len(),
                     "context_window_tokens": session.context_window_tokens,
+                    "context_pressure": context_pressure,
                     "label": session.label,
                     "messages": messages,
                 })),

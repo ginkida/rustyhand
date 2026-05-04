@@ -602,6 +602,8 @@ function chatPage() {
             });
             return { id: ++msgId, role: role, text: text, meta: '', tools: tools };
           });
+          // Initialise context pressure from session data (survives page reload)
+          if (data.context_pressure) self.contextPressure = data.context_pressure;
           // Restore star state from localStorage
           var starredIds = new Set(self.starredMessages.map(function(m) { return m.id; }));
           if (starredIds.size) {
