@@ -381,14 +381,40 @@ impl SessionStore {
                 let messages_blob: Vec<u8> = row.get(1)?;
                 let created_at: String = row.get(2)?;
                 let label: Option<String> = row.get(3)?;
-                let msg_count = rmp_serde::from_slice::<Vec<Message>>(&messages_blob)
-                    .map(|m| m.len())
-                    .unwrap_or(0);
+                let msgs =
+                    rmp_serde::from_slice::<Vec<Message>>(&messages_blob).unwrap_or_default();
+                let msg_count = msgs.len();
+                // Extract the first user message as a preview for the session picker.
+                let first_preview: Option<String> = msgs.iter().find_map(|m| {
+                    if m.role != rusty_hand_types::message::Role::User {
+                        return None;
+                    }
+                    let text = match &m.content {
+                        rusty_hand_types::message::MessageContent::Text(t) => t.as_str(),
+                        rusty_hand_types::message::MessageContent::Blocks(b) => {
+                            b.iter().find_map(|blk| {
+                                if let rusty_hand_types::message::ContentBlock::Text { text } = blk
+                                {
+                                    Some(text.as_str())
+                                } else {
+                                    None
+                                }
+                            })?
+                        }
+                    };
+                    let preview: String = text.trim().chars().take(60).collect();
+                    if preview.is_empty() {
+                        None
+                    } else {
+                        Some(preview)
+                    }
+                });
                 Ok(serde_json::json!({
                     "session_id": session_id,
                     "message_count": msg_count,
                     "created_at": created_at,
                     "label": label,
+                    "first_preview": first_preview,
                 }))
             })
             .map_err(|e| RustyHandError::Memory(e.to_string()))?;

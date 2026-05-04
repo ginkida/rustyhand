@@ -334,8 +334,8 @@
                       <div class="session-item" :class="{ active: s.active }" @click="if (!s.active) { switchSession(s.session_id); sessionsOpen = false; }">
                         <span class="session-dot" :class="s.active ? 'active' : ''"></span>
                         <div style="flex:1;min-width:0">
-                          <div class="text-xs font-bold truncate" x-text="s.label || 'Session ' + s.session_id.substring(0, 8)"></div>
-                          <div class="text-xs text-dim" x-text="s.message_count + ' messages'"></div>
+                          <div class="text-xs font-bold truncate" x-text="s.label || s.first_preview || 'Session ' + s.session_id.substring(0, 8)"></div>
+                          <div class="text-xs text-dim" x-text="s.message_count + ' messages · ' + (s.created_at ? new Date(s.created_at).toLocaleDateString() : '')"></div>
                         </div>
                       </div>
                     </template>
