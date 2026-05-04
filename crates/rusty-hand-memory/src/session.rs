@@ -313,6 +313,86 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Search message content across all sessions.
+    ///
+    /// Returns up to `limit` matches (session_id, agent_id, label, role, excerpt).
+    /// Performs an in-process full scan — adequate for typical installations.
+    pub fn search_sessions(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> RustyHandResult<Vec<serde_json::Value>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| RustyHandError::Internal(e.to_string()))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, agent_id, messages, label FROM sessions ORDER BY updated_at DESC LIMIT 200",
+            )
+            .map_err(|e| RustyHandError::Memory(e.to_string()))?;
+
+        let q = query.to_lowercase();
+        let mut results: Vec<serde_json::Value> = Vec::new();
+
+        let rows = stmt
+            .query_map([], |row| {
+                let session_id: String = row.get(0)?;
+                let agent_id: String = row.get(1)?;
+                let messages_blob: Vec<u8> = row.get(2)?;
+                let label: Option<String> = row.get(3)?;
+                Ok((session_id, agent_id, messages_blob, label))
+            })
+            .map_err(|e| RustyHandError::Memory(e.to_string()))?;
+
+        for row in rows {
+            if results.len() >= limit {
+                break;
+            }
+            let Ok((session_id, agent_id, blob, label)) = row else {
+                continue;
+            };
+            let Ok(messages) = rmp_serde::from_slice::<Vec<Message>>(&blob) else {
+                continue;
+            };
+            for msg in &messages {
+                if results.len() >= limit {
+                    break;
+                }
+                let text = match &msg.content {
+                    MessageContent::Text(t) => t.clone(),
+                    MessageContent::Blocks(blocks) => blocks
+                        .iter()
+                        .filter_map(|b| {
+                            if let ContentBlock::Text { text } = b {
+                                Some(text.as_str())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                };
+                if text.to_lowercase().contains(&q) {
+                    // Extract a snippet around the match
+                    let pos = text.to_lowercase().find(&q).unwrap_or(0);
+                    let start = pos.saturating_sub(60);
+                    let end = (pos + q.len() + 60).min(text.len());
+                    let excerpt = text[start..end].to_string();
+                    results.push(serde_json::json!({
+                        "session_id": session_id,
+                        "agent_id": agent_id,
+                        "label": label,
+                        "role": format!("{:?}", msg.role).to_lowercase(),
+                        "excerpt": excerpt,
+                    }));
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
     /// Find a session by label for a given agent.
     pub fn find_session_by_label(
         &self,

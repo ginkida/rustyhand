@@ -147,6 +147,7 @@ document.addEventListener('alpine:init', function() {
     agentsOffset: 0,
     agentsLimit: 100,
     pendingAgent: null,
+    pendingSession: null,
     pendingApprovals: 0,
     filterState: 'all',
     agentQuery: '',
@@ -576,6 +577,8 @@ function app() {
     showPalette: false,
     paletteQuery: '',
     paletteIdx: 0,
+    paletteHistoryResults: [],
+    _paletteHistoryFor: '',
     pageMeta: {
       agents: { title: 'Chat', section: 'Operations', description: 'Talk to running agents, inspect live context, and launch new conversations.', hotkey: '1', keywords: 'chat agents messages templates conversations' },
       approvals: { title: 'Approvals', section: 'Safety', description: 'Review sensitive actions waiting for a human decision.', hotkey: '2', keywords: 'approvals permissions review queue' },
@@ -825,7 +828,12 @@ function app() {
 
     // Command palette
     get paletteItems() {
-      var q = (this.paletteQuery || '').toLowerCase();
+      var raw = (this.paletteQuery || '').trim();
+      // History search mode: prefix ">" triggers /api/search
+      if (raw.startsWith('>')) {
+        return this.paletteHistoryResults;
+      }
+      var q = raw.toLowerCase();
       var pages = Object.keys(this.pageMeta).map(function(pageKey) {
         var meta = this.pageMeta[pageKey];
         return {
@@ -879,13 +887,43 @@ function app() {
     closePalette() {
       this.showPalette = false;
       this.paletteQuery = '';
+      this.paletteHistoryResults = [];
+      this._paletteHistoryFor = '';
+    },
+
+    async _paletteHistorySearch(q) {
+      if (q.length < 2) { this.paletteHistoryResults = []; return; }
+      if (this._paletteHistoryFor === q) return;
+      this._paletteHistoryFor = q;
+      try {
+        var data = await RustyHandAPI.get('/api/search?q=' + encodeURIComponent(q) + '&limit=12');
+        if (this._paletteHistoryFor !== q) return; // stale
+        this.paletteHistoryResults = (data.results || []).map(function(r, i) {
+          return {
+            type: 'history',
+            label: r.excerpt || '(no preview)',
+            sublabel: (r.label || r.session_id.substring(0, 8)) + ' · ' + r.role,
+            hint: 'Chat',
+            agentId: r.agent_id,
+            sessionId: r.session_id,
+            keywords: r.excerpt,
+          };
+        });
+      } catch (e) { this.paletteHistoryResults = []; }
     },
 
     executePaletteItem(item) {
       this.closePalette();
       if (item.type === 'page') { this.navigate(item.page); }
       else if (item.type === 'agent') {
-        Alpine.store('app').pendingAgent = item.agentId;
+        var agentObj = (Alpine.store('app').agents || []).find(function(a) { return a.id === item.agentId; });
+        Alpine.store('app').chatWithAgent(agentObj || { id: item.agentId, name: item.label });
+        this.navigate('agents');
+      }
+      else if (item.type === 'history') {
+        var agentObj = (Alpine.store('app').agents || []).find(function(a) { return a.id === item.agentId; });
+        Alpine.store('app').chatWithAgent(agentObj || { id: item.agentId, name: item.label });
+        Alpine.store('app').pendingSession = item.sessionId;
         this.navigate('agents');
       }
       else if (item.type === 'action') {

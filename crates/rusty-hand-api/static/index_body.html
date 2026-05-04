@@ -3477,7 +3477,7 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
     <div class="palette" @keydown.stop="paletteKeydown($event)">
       <div class="palette-input-row">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-        <input class="palette-input" type="text" placeholder="Search pages, agents, actions..." x-model="paletteQuery" @input="paletteIdx = 0" autofocus>
+        <input class="palette-input" type="text" placeholder="Search pages, agents, actions... (> for history)" x-model="paletteQuery" @input="paletteIdx = 0; if (paletteQuery.startsWith('>')) _paletteHistorySearch(paletteQuery.slice(1).trim())" autofocus>
         <kbd class="shortcut-kbd" style="font-size:10px">Esc</kbd>
       </div>
       <div class="palette-results" x-show="paletteItems.length">

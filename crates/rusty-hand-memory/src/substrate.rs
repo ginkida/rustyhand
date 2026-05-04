@@ -237,6 +237,15 @@ impl MemorySubstrate {
         self.sessions.find_session_by_label(agent_id, label)
     }
 
+    /// Full-text search across all sessions (up to `limit` matches).
+    pub fn search_sessions(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> RustyHandResult<Vec<serde_json::Value>> {
+        self.sessions.search_sessions(query, limit)
+    }
+
     /// List all sessions for a specific agent.
     pub fn list_agent_sessions(
         &self,

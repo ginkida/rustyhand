@@ -163,6 +163,7 @@ pub async fn build_router(
             "/api/agents/search",
             axum::routing::get(routes::search_agents),
         )
+        .route("/api/search", axum::routing::get(routes::search_sessions))
         .route(
             "/api/agents/{id}",
             axum::routing::get(routes::get_agent).delete(routes::kill_agent),

@@ -479,6 +479,41 @@ pub async fn search_agents(
     }))
 }
 
+/// GET /api/search?q=<query>&limit=20 — Full-text search across all sessions.
+pub async fn search_sessions(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let q = params
+        .get("q")
+        .map(|s| s.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if q.len() < 2 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Query must be at least 2 characters"})),
+        );
+    }
+    let limit: usize = params
+        .get("limit")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20)
+        .min(50);
+
+    match state.kernel.memory.search_sessions(&q, limit) {
+        Ok(results) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"results": results, "query": q})),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Search failed: {e}")})),
+        ),
+    }
+}
+
 /// Resolve uploaded file attachments into ContentBlock::Image blocks.
 ///
 /// Reads each file from the upload directory, base64-encodes it, and

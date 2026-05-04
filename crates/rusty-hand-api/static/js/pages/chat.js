@@ -284,6 +284,14 @@ function chatPage() {
         }
       });
 
+      // Switch to a specific session when navigated from command palette history search
+      this.$watch('$store.app.pendingSession', function(sessionId) {
+        if (sessionId && self.currentAgent) {
+          Alpine.store('app').pendingSession = null;
+          self.switchSession(sessionId);
+        }
+      });
+
       // Watch for slash commands and auto-save draft
       this.$watch('inputText', function(val) {
         if (val.startsWith('/')) {
