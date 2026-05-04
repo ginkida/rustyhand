@@ -81,6 +81,8 @@ function chatPage() {
     tokensPerSec: 0,
     starredOpen: false,
     starredMessages: [],
+    _historyIdx: -1,
+    _savedInput: '',
 
     // ── Tip Bar ──
     tipIndex: 0,
@@ -1169,6 +1171,8 @@ function chatPage() {
       }
 
       this.inputText = '';
+      this._historyIdx = -1;
+      this._savedInput = '';
       // Clear draft on send
       if (this.currentAgent) { try { localStorage.removeItem('rh-draft-' + this.currentAgent.id); } catch(_) {} }
 
@@ -1573,12 +1577,36 @@ function chatPage() {
 
     // ↑ in empty input recalls the last user message for editing
     recallLastMessage: function() {
-      var last = null;
-      for (var i = this.messages.length - 1; i >= 0; i--) {
-        if (this.messages[i].role === 'user') { last = this.messages[i]; break; }
+      var history = this.messages.filter(function(m) { return m.role === 'user'; });
+      if (!history.length) return;
+      if (this._historyIdx === -1) {
+        this._savedInput = this.inputText;
+        this._historyIdx = 0;
+      } else {
+        this._historyIdx = Math.min(this._historyIdx + 1, history.length - 1);
       }
-      if (!last) return;
-      this.inputText = last.text || '';
+      var msg = history[history.length - 1 - this._historyIdx];
+      this.inputText = (msg && msg.text) || '';
+      var self = this;
+      this.$nextTick(function() {
+        var el = document.getElementById('msg-input');
+        if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 150) + 'px'; el.setSelectionRange(el.value.length, el.value.length); }
+      });
+    },
+
+    recallNextMessage: function() {
+      if (this._historyIdx === -1) return;
+      if (this._historyIdx === 0) {
+        this._historyIdx = -1;
+        this.inputText = this._savedInput;
+        this._savedInput = '';
+      } else {
+        var history = this.messages.filter(function(m) { return m.role === 'user'; });
+        this._historyIdx = Math.max(0, this._historyIdx - 1);
+        var msg = history[history.length - 1 - this._historyIdx];
+        this.inputText = (msg && msg.text) || '';
+      }
+      var self = this;
       this.$nextTick(function() {
         var el = document.getElementById('msg-input');
         if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 150) + 'px'; el.setSelectionRange(el.value.length, el.value.length); }
