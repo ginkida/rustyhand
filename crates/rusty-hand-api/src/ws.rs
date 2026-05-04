@@ -1135,6 +1135,94 @@ async fn handle_command(
             };
             serde_json::json!({"type": "command_result", "command": cmd, "message": msg})
         }
+        "remember" => {
+            // /remember <key> <value> — store a KV note in this agent's structured memory
+            let mut parts = args.splitn(2, ' ');
+            let key = parts.next().unwrap_or("").trim();
+            let val = parts.next().unwrap_or("").trim();
+            if key.is_empty() {
+                return serde_json::json!({"type": "error", "content": "Usage: /remember <key> <value>"});
+            }
+            if val.is_empty() {
+                // Delete the key
+                match state.kernel.memory.structured_delete(agent_id, key) {
+                    Ok(()) => serde_json::json!({
+                        "type": "command_result", "command": cmd,
+                        "message": format!("Forgotten: `{key}`")
+                    }),
+                    Err(e) => {
+                        serde_json::json!({"type": "error", "content": format!("Forget failed: {e}")})
+                    }
+                }
+            } else {
+                match state
+                    .kernel
+                    .memory
+                    .structured_set(agent_id, key, serde_json::json!(val))
+                {
+                    Ok(()) => serde_json::json!({
+                        "type": "command_result", "command": cmd,
+                        "message": format!("Remembered: `{key}` = `{val}`")
+                    }),
+                    Err(e) => {
+                        serde_json::json!({"type": "error", "content": format!("Remember failed: {e}")})
+                    }
+                }
+            }
+        }
+        "recall" => {
+            // /recall [key] — retrieve a key or list all notes for this agent
+            let key = args.trim();
+            if key.is_empty() {
+                // List all
+                match state.kernel.memory.list_kv(agent_id) {
+                    Ok(pairs) if pairs.is_empty() => serde_json::json!({
+                        "type": "command_result", "command": cmd,
+                        "message": "No memories stored for this agent. Use `/remember key value` to add one."
+                    }),
+                    Ok(pairs) => {
+                        let lines = pairs
+                            .iter()
+                            .map(|(k, v)| {
+                                let v_str = match v {
+                                    serde_json::Value::String(s) => s.clone(),
+                                    other => other.to_string(),
+                                };
+                                format!("  `{k}` → {v_str}")
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        serde_json::json!({
+                            "type": "command_result", "command": cmd,
+                            "message": format!("**Agent memories ({}):**\n{lines}", pairs.len())
+                        })
+                    }
+                    Err(e) => {
+                        serde_json::json!({"type": "error", "content": format!("Recall failed: {e}")})
+                    }
+                }
+            } else {
+                match state.kernel.memory.structured_get(agent_id, key) {
+                    Ok(Some(v)) => {
+                        let v_str = match &v {
+                            serde_json::Value::String(s) => s.clone(),
+                            other => other.to_string(),
+                        };
+                        serde_json::json!({
+                            "type": "command_result", "command": cmd,
+                            "message": format!("`{key}` = `{v_str}`")
+                        })
+                    }
+                    Ok(None) => serde_json::json!({
+                        "type": "command_result", "command": cmd,
+                        "message": format!("No memory found for key `{key}`")
+                    }),
+                    Err(e) => {
+                        serde_json::json!({"type": "error", "content": format!("Recall failed: {e}")})
+                    }
+                }
+            }
+        }
         "workflows" => {
             let workflows = state.kernel.workflows.list_workflows().await;
             let msg = if workflows.is_empty() {
