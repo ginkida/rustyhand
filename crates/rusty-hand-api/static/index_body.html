@@ -77,6 +77,29 @@
       </div>
 
       <!-- Agent list (scrollable) -->
+      <!-- Pinned agents (only shown when at least one agent is pinned and no search active) -->
+      <template x-if="$store.app.pinnedAgents.length && !$store.app.agentQuery && !sidebarCollapsed">
+        <div class="sidebar-pinned-section">
+          <span class="sidebar-pinned-label sidebar-label">Pinned</span>
+          <template x-for="agent in $store.app.pinnedAgents" :key="'pin-' + agent.id">
+            <div class="agent-list-item" :class="{ active: $store.app.activeChatAgent && $store.app.activeChatAgent.id === agent.id }" @click="sidebarChatWithAgent(agent)">
+              <div class="agent-list-avatar" :style="'background:hsl('+$store.app.agentHue(agent.name)+',45%,55%);color:#fff;border-color:transparent'">
+                <span x-show="agent.identity && agent.identity.emoji" x-text="agent.identity && agent.identity.emoji"></span>
+                <span x-show="!agent.identity || !agent.identity.emoji" x-text="(agent.name||'A').charAt(0).toUpperCase()" style="font-size:15px;font-weight:700"></span>
+              </div>
+              <div class="agent-list-info sidebar-label">
+                <div class="agent-list-name" x-text="agent.name"></div>
+                <div class="agent-list-preview" x-text="agent.last_message_preview || agent.model_name" x-show="agent.last_message_preview || agent.model_name"></div>
+              </div>
+              <div class="agent-list-meta sidebar-label">
+                <button class="agent-pin-btn pinned" @click.stop="$store.app.togglePin(agent.id)" title="Unpin agent">★</button>
+                <span class="agent-list-status" :class="agent.state === 'Running' ? 'running' : 'stopped'"></span>
+              </div>
+            </div>
+          </template>
+        </div>
+      </template>
+
       <div class="sidebar-agent-list">
         <template x-if="!$store.app.agents.length">
           <div class="text-center text-dim sidebar-label" style="padding:24px 8px;font-size:12px">No agents yet</div>
@@ -130,6 +153,9 @@
                         <div class="agent-list-preview" x-text="agent.last_message_preview || agent.model_name" x-show="agent.last_message_preview || agent.model_name"></div>
                       </div>
                       <div class="agent-list-meta sidebar-label">
+                        <button class="agent-pin-btn" :class="{ pinned: $store.app.isPinned(agent.id) }" @click.stop="$store.app.togglePin(agent.id)" :title="$store.app.isPinned(agent.id) ? 'Unpin' : 'Pin to top'">
+                          <span x-text="$store.app.isPinned(agent.id) ? '★' : '☆'"></span>
+                        </button>
                         <span class="agent-list-time" x-text="timeAgo(agent.last_activity || agent.created_at)"></span>
                         <span class="agent-list-status" :class="agent.state === 'Running' ? 'running' : 'stopped'"></span>
                       </div>

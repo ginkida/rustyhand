@@ -156,6 +156,9 @@ document.addEventListener('alpine:init', function() {
     searchResults: [],       // last response from /api/agents/search
     _searchTimer: null,      // debounce handle
     templatesExpanded: false,
+    pinnedAgentIds: (function() {
+      try { return JSON.parse(localStorage.getItem('rh-pinned-agents') || '[]'); } catch(e) { return []; }
+    })(),
     agentGroupsCollapsed: (function() {
       try {
         return JSON.parse(localStorage.getItem('rusty-hand-agent-groups') || '{}') || {};
@@ -210,6 +213,25 @@ document.addEventListener('alpine:init', function() {
       else nextState[groupKey] = true;
       this.agentGroupsCollapsed = nextState;
       localStorage.setItem('rusty-hand-agent-groups', JSON.stringify(nextState));
+    },
+
+    isPinned(agentId) {
+      return this.pinnedAgentIds.indexOf(agentId) !== -1;
+    },
+
+    togglePin(agentId) {
+      var ids = this.pinnedAgentIds.slice();
+      var idx = ids.indexOf(agentId);
+      if (idx === -1) ids.push(agentId);
+      else ids.splice(idx, 1);
+      this.pinnedAgentIds = ids;
+      localStorage.setItem('rh-pinned-agents', JSON.stringify(ids));
+    },
+
+    get pinnedAgents() {
+      var ids = this.pinnedAgentIds;
+      if (!ids.length) return [];
+      return this.agents.filter(function(a) { return ids.indexOf(a.id) !== -1; });
     },
 
     get filteredAgents() {
