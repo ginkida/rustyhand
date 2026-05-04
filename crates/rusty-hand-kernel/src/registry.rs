@@ -177,6 +177,17 @@ impl AgentRegistry {
         Ok(())
     }
 
+    /// Update an agent's max output tokens.
+    pub fn update_max_tokens(&self, id: AgentId, max_tokens: u32) -> RustyHandResult<()> {
+        let mut entry = self
+            .agents
+            .get_mut(&id)
+            .ok_or_else(|| RustyHandError::AgentNotFound(id.to_string()))?;
+        entry.manifest.model.max_tokens = max_tokens;
+        entry.last_active = chrono::Utc::now();
+        Ok(())
+    }
+
     /// Update an agent's temperature (0.0–2.0).
     pub fn update_temperature(&self, id: AgentId, temperature: f32) -> RustyHandResult<()> {
         let mut entry = self

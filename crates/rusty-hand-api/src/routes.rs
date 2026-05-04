@@ -1287,6 +1287,13 @@ pub async fn get_agent(
             "model": {
                 "provider": entry.manifest.model.provider,
                 "model": entry.manifest.model.model,
+                "temperature": entry.manifest.model.temperature,
+                "max_tokens": entry.manifest.model.max_tokens,
+                "thinking_enabled": entry.manifest.model.thinking.is_some(),
+                "response_format": match entry.manifest.model.response_format {
+                    rusty_hand_types::agent::ResponseFormat::Json => "json",
+                    _ => "text",
+                },
             },
             "capabilities": {
                 "tools": entry.manifest.capabilities.tools,
@@ -5653,7 +5660,7 @@ pub async fn update_agent_identity(
 // Agent Config Hot-Update
 // ---------------------------------------------------------------------------
 
-/// Request body for patching agent config (name, description, prompt, identity).
+/// Request body for patching agent config (name, description, prompt, identity, model).
 #[derive(serde::Deserialize)]
 pub struct PatchAgentConfigRequest {
     pub name: Option<String>,
@@ -5666,6 +5673,12 @@ pub struct PatchAgentConfigRequest {
     pub archetype: Option<String>,
     pub vibe: Option<String>,
     pub greeting_style: Option<String>,
+    /// Sampling temperature (0.0–2.0).
+    pub temperature: Option<f32>,
+    /// Max output tokens.
+    pub max_tokens: Option<u32>,
+    /// Enable or disable extended thinking.
+    pub thinking_enabled: Option<bool>,
 }
 
 /// PATCH /api/agents/{id}/config — Hot-update agent name, description, system prompt, and identity.
@@ -5814,6 +5827,61 @@ pub async fn patch_agent_config(
             .update_identity(agent_id, merged)
             .is_err()
         {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Agent not found"})),
+            );
+        }
+        did_update = true;
+    }
+
+    // Temperature
+    if let Some(temp) = req.temperature {
+        if !(0.0..=2.0).contains(&temp) {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "temperature must be 0.0–2.0"})),
+            );
+        }
+        if state
+            .kernel
+            .registry
+            .update_temperature(agent_id, temp)
+            .is_err()
+        {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Agent not found"})),
+            );
+        }
+        did_update = true;
+    }
+
+    // Max tokens
+    if let Some(max_tok) = req.max_tokens {
+        if max_tok == 0 {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "max_tokens must be > 0"})),
+            );
+        }
+        if state
+            .kernel
+            .registry
+            .update_max_tokens(agent_id, max_tok)
+            .is_err()
+        {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Agent not found"})),
+            );
+        }
+        did_update = true;
+    }
+
+    // Thinking on/off
+    if let Some(on) = req.thinking_enabled {
+        if state.kernel.set_agent_thinking(agent_id, on).is_err() {
             return (
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "Agent not found"})),

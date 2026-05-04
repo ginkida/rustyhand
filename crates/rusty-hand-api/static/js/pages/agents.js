@@ -478,6 +478,7 @@ function agentsPage() {
       this.agentFiles = [];
       this.editingFile = null;
       this.fileContent = '';
+      var modelInfo = agent.model || {};
       this.configForm = {
         name: agent.name || '',
         group: agent.group || '',
@@ -485,7 +486,10 @@ function agentsPage() {
         emoji: (agent.identity && agent.identity.emoji) || '',
         color: (agent.identity && agent.identity.color) || '#FF5C00',
         archetype: (agent.identity && agent.identity.archetype) || '',
-        vibe: (agent.identity && agent.identity.vibe) || ''
+        vibe: (agent.identity && agent.identity.vibe) || '',
+        temperature: modelInfo.temperature != null ? modelInfo.temperature : 0.7,
+        max_tokens: modelInfo.max_tokens || 4096,
+        thinking_enabled: !!modelInfo.thinking_enabled
       };
       this.showDetailModal = true;
     },
