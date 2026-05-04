@@ -849,14 +849,41 @@ async fn handle_command(
         "model" => {
             if args.is_empty() {
                 if let Some(entry) = state.kernel.registry.get(agent_id) {
-                    serde_json::json!({"type": "command_result", "command": cmd, "message": format!("Current model: {} (provider: {})", entry.manifest.model.model, entry.manifest.model.provider)})
+                    let current = &entry.manifest.model.model;
+                    let provider = &entry.manifest.model.provider;
+                    // Build a curated suggestion list from the model catalog.
+                    let catalog: Vec<_> = state
+                        .kernel
+                        .model_catalog
+                        .read()
+                        .ok()
+                        .map(|c| c.available_models().into_iter().cloned().collect())
+                        .unwrap_or_default();
+                    let mut suggestions = String::new();
+                    if !catalog.is_empty() {
+                        suggestions.push_str("\n\nAvailable models:\n");
+                        for m in catalog.iter().take(12) {
+                            let tier_icon = match m.tier {
+                                rusty_hand_types::model_catalog::ModelTier::Smart => "✦",
+                                rusty_hand_types::model_catalog::ModelTier::Fast => "⚡",
+                                rusty_hand_types::model_catalog::ModelTier::Local => "🏠",
+                                _ => "·",
+                            };
+                            suggestions.push_str(&format!(
+                                "  {} `{}` ({})\n",
+                                tier_icon, m.id, m.provider
+                            ));
+                        }
+                        suggestions.push_str("\nUse `/model <id>` to switch.");
+                    }
+                    serde_json::json!({"type": "command_result", "command": cmd, "message": format!("Current model: **{}** (provider: {}){suggestions}", current, provider)})
                 } else {
                     serde_json::json!({"type": "error", "content": "Agent not found"})
                 }
             } else {
                 match state.kernel.set_agent_model(agent_id, args) {
                     Ok(()) => {
-                        serde_json::json!({"type": "command_result", "command": cmd, "message": format!("Model switched to: {args}")})
+                        serde_json::json!({"type": "command_result", "command": cmd, "message": format!("Model switched to: **{args}**")})
                     }
                     Err(e) => {
                         serde_json::json!({"type": "error", "content": format!("Model switch failed: {e}")})

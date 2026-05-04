@@ -1206,6 +1206,9 @@ function chatPage() {
         var role = m.role === 'user' ? 'You' : m.role === 'agent' ? name : 'System';
         var time = m.ts ? new Date(m.ts).toLocaleString() : '';
         md += '### ' + role + (time ? ' (' + time + ')' : '') + '\n\n';
+        if (m._reasoning) {
+          md += '<details><summary>Reasoning</summary>\n\n' + m._reasoning + '\n\n</details>\n\n';
+        }
         md += (m.text || '') + '\n\n';
         if (m.tools && m.tools.length) {
           for (var j = 0; j < m.tools.length; j++) {

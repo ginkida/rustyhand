@@ -713,15 +713,34 @@ impl ChannelBridgeHandle for KernelBridgeAdapter {
 
     async fn set_model(&self, agent_id: AgentId, model: &str) -> Result<String, String> {
         if model.is_empty() {
-            // Show current model
             let entry = self
                 .kernel
                 .registry
                 .get(agent_id)
                 .ok_or_else(|| "Agent not found".to_string())?;
+            let current = &entry.manifest.model.model;
+            let provider = &entry.manifest.model.provider;
+            // Append a short list of available models from the catalog.
+            let available = self
+                .kernel
+                .model_catalog
+                .read()
+                .ok()
+                .map(|c| {
+                    let models = c.available_models();
+                    if models.is_empty() {
+                        return String::new();
+                    }
+                    let mut s = "\n\nAvailable:\n".to_string();
+                    for m in models.iter().take(10) {
+                        s.push_str(&format!("  - {} ({})\n", m.id, m.provider));
+                    }
+                    s.push_str("\nUse /model <id> to switch.");
+                    s
+                })
+                .unwrap_or_default();
             return Ok(format!(
-                "Current model: {} (provider: {})",
-                entry.manifest.model.model, entry.manifest.model.provider
+                "Current model: {current} (provider: {provider}){available}"
             ));
         }
         self.kernel
