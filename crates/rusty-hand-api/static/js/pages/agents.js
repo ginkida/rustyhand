@@ -72,6 +72,7 @@ function agentsPage() {
     activitySessions: [],
     activityCronJobs: [],
     activityBudget: null,
+    agentMetrics: null,
 
     // -- Model change in detail modal --
     editingModel: false,
@@ -689,8 +690,12 @@ function agentsPage() {
           RustyHandAPI.get('/api/audit/recent?n=1000'),
           RustyHandAPI.get('/api/agents/' + agentId + '/sessions?limit=50'),
           RustyHandAPI.get('/api/cron/jobs?agent_id=' + encodeURIComponent(agentId)),
-          RustyHandAPI.get('/api/budget/agents/' + encodeURIComponent(agentId))
+          RustyHandAPI.get('/api/budget/agents/' + encodeURIComponent(agentId)),
+          RustyHandAPI.get('/api/agents/' + agentId + '/metrics')
         ]);
+        if (results[4] && results[4].status === 'fulfilled') {
+          this.agentMetrics = results[4].value;
+        }
 
         var events = [];
 

@@ -4676,6 +4676,29 @@ pub async fn compact_session(
 }
 
 /// POST /api/agents/{id}/stop — Cancel an agent's current LLM run.
+/// GET /api/agents/:id/metrics — Per-agent usage and performance metrics.
+pub async fn get_agent_metrics(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    use rusty_hand_runtime::kernel_handle::KernelHandle;
+    let agent_id = match parse_agent_id(&id) {
+        Ok(id) => id,
+        Err(e) => return e.into_response(),
+    };
+    if state.kernel.registry.get(agent_id).is_none() {
+        return agent_not_found(&id).into_response();
+    }
+    match state.kernel.agent_metrics(&agent_id.to_string()) {
+        Ok(metrics) => (StatusCode::OK, Json(metrics)).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Metrics query failed: {e}")})),
+        )
+            .into_response(),
+    }
+}
+
 pub async fn stop_agent(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,

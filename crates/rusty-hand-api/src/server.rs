@@ -201,6 +201,10 @@ pub async fn build_router(
             axum::routing::post(routes::compact_session),
         )
         .route(
+            "/api/agents/{id}/metrics",
+            axum::routing::get(routes::get_agent_metrics),
+        )
+        .route(
             "/api/agents/{id}/stop",
             axum::routing::post(routes::stop_agent),
         )

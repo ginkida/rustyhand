@@ -863,6 +863,26 @@
                   </button>
                 </div>
 
+                <!-- Lifetime metrics summary -->
+                <template x-if="agentMetrics">
+                  <div class="flex gap-2" style="margin-bottom:12px">
+                    <div class="card" style="flex:1;padding:10px 12px">
+                      <div class="text-xs text-dim">Total API Calls</div>
+                      <div class="font-bold" style="font-size:14px" x-text="(agentMetrics.total_calls || 0).toLocaleString()"></div>
+                    </div>
+                    <div class="card" style="flex:1;padding:10px 12px">
+                      <div class="text-xs text-dim">Total Tokens</div>
+                      <div class="font-bold" style="font-size:14px" x-text="((agentMetrics.total_input_tokens || 0) + (agentMetrics.total_output_tokens || 0)).toLocaleString()"></div>
+                      <div class="text-xs text-dim" x-text="'in: ' + (agentMetrics.total_input_tokens || 0).toLocaleString() + ' / out: ' + (agentMetrics.total_output_tokens || 0).toLocaleString()"></div>
+                    </div>
+                    <div class="card" style="flex:1;padding:10px 12px">
+                      <div class="text-xs text-dim">Total Cost</div>
+                      <div class="font-bold" style="font-size:14px" x-text="'$' + (agentMetrics.total_cost_usd || 0).toFixed(4)"></div>
+                      <div class="text-xs text-dim" x-text="(agentMetrics.total_tool_calls || 0) + ' tool calls'"></div>
+                    </div>
+                  </div>
+                </template>
+
                 <!-- Per-agent budget / spend -->
                 <div x-show="activityBudget" class="flex gap-2" style="margin-bottom:12px">
                   <div class="card" style="flex:1;padding:10px 12px">
