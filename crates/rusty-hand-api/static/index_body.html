@@ -627,6 +627,7 @@
                           @keydown.arrow-up.prevent="if(showSlashMenu){slashIdx = Math.max(0, slashIdx - 1)}else if(!inputText.trim()){recallLastMessage()}"
                           @keydown.arrow-down.prevent="if(showSlashMenu){slashIdx = Math.min(filteredSlashCommands.length - 1, slashIdx + 1)}"
                           @input="$el.style.height='auto';$el.style.height=Math.min($el.scrollHeight,150)+'px'"
+                          @paste="handlePaste($event)"
                           x-model="inputText"
                           :class="{ 'streaming-active': sending }"></textarea>
                 <!-- Send button (normal) or Stop button (during streaming) -->

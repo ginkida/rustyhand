@@ -1406,6 +1406,25 @@ function chatPage() {
       }
     },
 
+    handlePaste(e) {
+      var items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      var imageItems = [];
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) imageItems.push(items[i]);
+      }
+      if (!imageItems.length) return;
+      e.preventDefault();
+      var files = imageItems.map(function(it) {
+        var file = it.getAsFile();
+        if (!file.name || file.name === 'image.png') {
+          file = new File([file], 'pasted-image-' + Date.now() + '.png', { type: file.type });
+        }
+        return file;
+      });
+      this.addFiles(files);
+    },
+
     isGrouped(idx) {
       if (idx === 0) return false;
       var prev = this.messages[idx - 1];
