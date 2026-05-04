@@ -72,6 +72,8 @@ function chatPage() {
     isScrolledUp: false,
     isDragging: false,
     tokenCount: 0,
+    streamStartTime: 0,
+    tokensPerSec: 0,
 
     // ── Tip Bar ──
     tipIndex: 0,
@@ -775,7 +777,11 @@ function chatPage() {
               }
             }
             this.tokenCount = Math.round(last.text.length / 4);
+            var elapsed = (Date.now() - this.streamStartTime) / 1000;
+            if (elapsed > 0.5) this.tokensPerSec = Math.round(this.tokenCount / elapsed);
           } else {
+            this.streamStartTime = Date.now();
+            this.tokensPerSec = 0;
             this.messages.push({ id: ++msgId, role: 'agent', text: data.content, meta: '', streaming: true, tools: [] });
           }
           this.scrollToBottom();
@@ -900,6 +906,7 @@ function chatPage() {
           this.messages.push({ id: ++msgId, role: 'agent', text: finalText, meta: meta, tools: streamedTools, ts: Date.now() });
           this.sending = false;
           this.tokenCount = 0;
+          this.tokensPerSec = 0;
           this._needsCopyButtonInject = true;
           this.scrollToBottom();
           var self3 = this;
@@ -1421,6 +1428,20 @@ function chatPage() {
     },
 
     // Search: toggle open/close
+    // ↑ in empty input recalls the last user message for editing
+    recallLastMessage: function() {
+      var last = null;
+      for (var i = this.messages.length - 1; i >= 0; i--) {
+        if (this.messages[i].role === 'user') { last = this.messages[i]; break; }
+      }
+      if (!last) return;
+      this.inputText = last.text || '';
+      this.$nextTick(function() {
+        var el = document.getElementById('msg-input');
+        if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 150) + 'px'; el.setSelectionRange(el.value.length, el.value.length); }
+      });
+    },
+
     toggleSearch: function() {
       this.searchOpen = !this.searchOpen;
       if (this.searchOpen) {
