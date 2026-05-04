@@ -528,6 +528,15 @@ tr:hover td { background: var(--surface2); }
   color: var(--success);
   border-color: var(--success);
 }
+.message-action-btn.starred {
+  color: #f59e0b;
+  border-color: #f59e0b;
+}
+.msg-highlight {
+  outline: 2px solid var(--accent);
+  border-radius: 8px;
+  transition: outline 0.4s;
+}
 
 /* Show actions on focus-within and touch devices */
 .message:focus-within .message-actions { opacity: 1; pointer-events: auto; }

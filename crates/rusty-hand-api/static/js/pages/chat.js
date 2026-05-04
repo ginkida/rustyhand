@@ -78,6 +78,8 @@ function chatPage() {
     tokenCount: 0,
     streamStartTime: 0,
     tokensPerSec: 0,
+    starredOpen: false,
+    starredMessages: [],
 
     // ── Tip Bar ──
     tipIndex: 0,
@@ -262,6 +264,7 @@ function chatPage() {
         if (agent) {
           self.loadSession(agent.id);
           self.loadSessions(agent.id);
+          self.loadStars();
         }
       });
 
@@ -599,6 +602,11 @@ function chatPage() {
             });
             return { id: ++msgId, role: role, text: text, meta: '', tools: tools };
           });
+          // Restore star state from localStorage
+          var starredIds = new Set(self.starredMessages.map(function(m) { return m.id; }));
+          if (starredIds.size) {
+            self.messages.forEach(function(m) { if (starredIds.has(m.id)) m._starred = true; });
+          }
           self._needsCopyButtonInject = true;
           self.$nextTick(function() { self.scrollToBottom(); });
         }
@@ -1444,6 +1452,40 @@ function chatPage() {
     },
 
     // Search: toggle open/close
+    // ── Starred messages (localStorage, per agent) ──
+    _starsKey: function() {
+      return 'rh-stars-' + (this.currentAgent ? this.currentAgent.id : 'global');
+    },
+    loadStars: function() {
+      try { this.starredMessages = JSON.parse(localStorage.getItem(this._starsKey()) || '[]'); }
+      catch(_) { this.starredMessages = []; }
+    },
+    toggleStar: function(msg) {
+      var idx = this.starredMessages.findIndex(function(m) { return m.id === msg.id; });
+      if (idx >= 0) {
+        this.starredMessages.splice(idx, 1);
+        msg._starred = false;
+      } else {
+        this.starredMessages.push(Object.assign({}, msg));
+        msg._starred = true;
+      }
+      try { localStorage.setItem(this._starsKey(), JSON.stringify(this.starredMessages)); } catch(_) {}
+    },
+    clearStars: function() {
+      var self = this;
+      this.messages.forEach(function(m) { m._starred = false; });
+      this.starredMessages = [];
+      try { localStorage.removeItem(self._starsKey()); } catch(_) {}
+    },
+    scrollToStarred: function(starred) {
+      var msg = this.messages.find(function(m) { return m.id === starred.id; });
+      if (!msg) return;
+      this.$nextTick(function() {
+        var el = document.querySelector('[data-msg-id="' + starred.id + '"]');
+        if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.classList.add('msg-highlight'); setTimeout(function() { el.classList.remove('msg-highlight'); }, 1500); }
+      });
+    },
+
     // ↑ in empty input recalls the last user message for editing
     recallLastMessage: function() {
       var last = null;

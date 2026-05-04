@@ -346,6 +346,10 @@
                 <button class="btn btn-ghost btn-sm" @click="toggleSearch()" title="Search messages (Ctrl+F)">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
                 </button>
+                <button class="btn btn-ghost btn-sm" @click="starredOpen = !starredOpen" :class="{ active: starredOpen }" title="Starred messages" style="position:relative">
+                  <svg width="14" height="14" viewBox="0 0 24 24" :fill="starredMessages.length ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <span class="session-count-badge" x-show="starredMessages.length" x-text="starredMessages.length" x-transition.opacity.duration.200ms></span>
+                </button>
                 <button class="btn btn-ghost btn-sm" @click="logOpen = !logOpen" :class="{ active: logOpen }" title="Activity Log" style="position:relative">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
                   <span class="session-count-badge" x-show="actionLog.length" x-text="actionLog.length" x-transition.opacity.duration.200ms></span>
@@ -360,6 +364,30 @@
               <input type="text" id="chat-search-input" x-model="searchQuery" x-ref="searchInput" placeholder="Search messages..." class="chat-search-input" @keydown.escape="toggleSearch()">
               <span class="text-xs text-dim" x-show="searchQuery.trim()" x-text="filteredMessages.length + ' of ' + messages.length"></span>
               <button class="btn btn-ghost btn-sm" @click="toggleSearch()" style="padding:2px 6px">&times;</button>
+            </div>
+
+            <!-- Starred messages panel -->
+            <div class="activity-log-panel" x-show="starredOpen"
+                 x-transition:enter="transition ease-out duration-150"
+                 x-transition:enter-start="opacity-0 transform -translate-y-2"
+                 x-transition:enter-end="opacity-100 transform translate-y-0">
+              <div class="activity-log-header">
+                <span class="text-xs font-bold">Starred Messages</span>
+                <span class="text-xs text-dim" x-text="starredMessages.length + ' starred'"></span>
+                <button class="btn btn-ghost btn-sm" @click="clearStars()" x-show="starredMessages.length" style="margin-left:auto;padding:2px 6px">Clear all</button>
+              </div>
+              <div style="max-height:260px;overflow-y:auto">
+                <template x-if="!starredMessages.length">
+                  <div class="text-xs text-dim" style="padding:16px;text-align:center">No starred messages yet.<br>Click ★ on any message to star it.</div>
+                </template>
+                <template x-for="(msg, i) in starredMessages" :key="i">
+                  <div style="padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer" @click="scrollToStarred(msg)">
+                    <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px" x-text="(msg.role === 'agent' ? 'Agent' : 'You') + ' · ' + formatTime(msg.ts)"></div>
+                    <div style="font-size:12px;line-height:1.4;color:var(--text);overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical" x-text="(msg.text || '').replace(/[#*`>]/g,'').substring(0,200)"></div>
+                    <button class="btn btn-ghost btn-sm" style="margin-top:4px;padding:1px 6px;font-size:10px" @click.stop="toggleStar(msg)">Unstar</button>
+                  </div>
+                </template>
+              </div>
             </div>
 
             <!-- Activity Log panel -->
@@ -427,7 +455,7 @@
               <template x-if="currentAgent">
                 <div>
                   <template x-for="(msg, $index) in filteredMessages" :key="msg.id">
-                    <div class="message" :class="msg.role + (msg.thinking ? ' thinking' : '') + (msg.streaming ? ' streaming' : '') + (isGrouped($index) ? ' grouped' : '')">
+                    <div class="message" :data-msg-id="msg.id" :class="msg.role + (msg.thinking ? ' thinking' : '') + (msg.streaming ? ' streaming' : '') + (isGrouped($index) ? ' grouped' : '')">
                       <div class="message-avatar" x-show="msg.role === 'agent'">
                         <img src="/logo.svg" alt="Rusty Hand">
                       </div>
@@ -439,6 +467,10 @@
                             <svg x-show="!msg._copied" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
                             <svg x-show="msg._copied" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
                             <span class="copied-tooltip" x-show="msg._copied" x-transition>Copied!</span>
+                          </button>
+                          <!-- Star / bookmark button -->
+                          <button class="message-action-btn" :class="{ starred: msg._starred }" @click="toggleStar(msg)" :title="msg._starred ? 'Unstar message' : 'Star message'" style="position:relative">
+                            <svg width="13" height="13" viewBox="0 0 24 24" :fill="msg._starred ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                           </button>
                           <!-- Regenerate button (last agent message only) -->
                           <button class="message-action-btn" x-show="msg.role === 'agent' && $index === filteredMessages.length - 1 && !sending" @click="sendWsCommand('retry', '')" title="Regenerate response" style="opacity:0.7">
