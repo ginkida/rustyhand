@@ -2330,6 +2330,57 @@ impl RustyHandKernel {
         Ok(())
     }
 
+    /// Truncate the current session to remove the last assistant turn, returning
+    /// the last user message text so the caller can re-run it. Returns `None`
+    /// when the session has no user message to retry.
+    pub fn retry_last_turn(&self, agent_id: AgentId) -> KernelResult<Option<String>> {
+        let entry = self.registry.get(agent_id).ok_or_else(|| {
+            KernelError::RustyHand(RustyHandError::AgentNotFound(agent_id.to_string()))
+        })?;
+        let session = self
+            .memory
+            .get_session(entry.session_id)
+            .map_err(KernelError::RustyHand)?;
+        let Some(mut session) = session else {
+            return Ok(None);
+        };
+
+        // Find the last user message and truncate everything after it
+        let last_user_idx = session
+            .messages
+            .iter()
+            .rposition(|m| m.role == rusty_hand_types::message::Role::User);
+        let Some(idx) = last_user_idx else {
+            return Ok(None);
+        };
+
+        // Extract the user message text before truncating
+        let last_user_text = match &session.messages[idx].content {
+            rusty_hand_types::message::MessageContent::Text(t) => t.clone(),
+            rusty_hand_types::message::MessageContent::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|b| {
+                    if let rusty_hand_types::message::ContentBlock::Text { text } = b {
+                        Some(text.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
+        };
+
+        // Keep only messages up to and including the last user message
+        session.messages.truncate(idx);
+
+        self.memory
+            .save_session(&session)
+            .map_err(KernelError::RustyHand)?;
+
+        info!(agent_id = %agent_id, idx = idx, "Retry: session truncated to last user message");
+        Ok(Some(last_user_text))
+    }
+
     /// List all sessions for a specific agent.
     pub fn list_agent_sessions(&self, agent_id: AgentId) -> KernelResult<Vec<serde_json::Value>> {
         // Verify agent exists

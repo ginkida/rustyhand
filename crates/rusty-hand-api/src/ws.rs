@@ -837,6 +837,19 @@ async fn handle_command(
                 serde_json::json!({"type": "error", "content": format!("Compaction failed: {e}")})
             }
         },
+        "retry" => match state.kernel.retry_last_turn(agent_id) {
+            Ok(Some(last_msg)) => {
+                serde_json::json!({
+                    "type": "command_result",
+                    "command": "retry",
+                    "retry_message": last_msg
+                })
+            }
+            Ok(None) => {
+                serde_json::json!({"type": "command_result", "command": "retry", "message": "No previous user message to retry."})
+            }
+            Err(e) => serde_json::json!({"type": "error", "content": format!("Retry failed: {e}")}),
+        },
         "stop" => match state.kernel.stop_agent_run(agent_id) {
             Ok(true) => {
                 serde_json::json!({"type": "command_result", "command": cmd, "message": "Run cancelled."})

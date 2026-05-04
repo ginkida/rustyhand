@@ -52,6 +52,7 @@ function chatPage() {
       { cmd: '/new', desc: 'Reset session (clear history)' },
       { cmd: '/compact', desc: 'Trigger LLM session compaction' },
       { cmd: '/model', desc: 'Show or switch model', args: 'name' },
+      { cmd: '/retry', desc: 'Regenerate the last response' },
       { cmd: '/stop', desc: 'Cancel current agent run' },
       { cmd: '/usage', desc: 'Show session token usage & cost' },
       { cmd: '/think', desc: 'Toggle extended thinking', args: 'on | off | stream' },
@@ -360,6 +361,9 @@ function chatPage() {
               self.scrollToBottom();
             }).catch(function(e) { RustyHandToast.error('Compaction failed: ' + e.message); });
           }
+          break;
+        case '/retry':
+          if (self.currentAgent) self.sendWsCommand('retry', '');
           break;
         case '/stop':
           if (self.currentAgent) {
@@ -941,6 +945,20 @@ function chatPage() {
           // Update context pressure if included in command result
           if (data.context_pressure) {
             this.contextPressure = data.context_pressure;
+          }
+          // Retry: pop last agent message from local state, re-run with returned message
+          if (data.command === 'retry' && data.retry_message != null) {
+            // Remove trailing assistant messages from view
+            while (this.messages.length && this.messages[this.messages.length - 1].role !== 'user') {
+              this.messages.pop();
+            }
+            // Also pop the last user message since it'll be re-added by _sendPayload
+            if (this.messages.length && this.messages[this.messages.length - 1].role === 'user') {
+              this.messages.pop();
+            }
+            // Re-send via normal path (adds user bubble + re-runs agent)
+            this._sendPayload(data.retry_message, [], []);
+            break;
           }
           this.messages.push({ id: ++msgId, role: 'system', text: data.message || 'Command executed.', meta: '', tools: [] });
           this.scrollToBottom();
