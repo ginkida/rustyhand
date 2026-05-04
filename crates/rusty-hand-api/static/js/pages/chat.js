@@ -67,6 +67,8 @@ function chatPage() {
       { cmd: '/budget', desc: 'Show spending limits and current costs' },
       { cmd: '/peers', desc: 'Show RHP peer network status' },
       { cmd: '/a2a', desc: 'List discovered external A2A agents' },
+      { cmd: '/workflows', desc: 'List available workflows' },
+      { cmd: '/workflow', desc: 'Run a workflow', args: 'run <name> [input]' },
       { cmd: '/export', desc: 'Export chat as Markdown file', args: '' }
     ],
     isScrolledUp: false,
@@ -504,6 +506,12 @@ function chatPage() {
           }).catch(function(e) {
             self.appendSystemMessage('Peer status request failed: ' + self.normalizeError(e));
           });
+          break;
+        case '/workflows':
+          if (self.currentAgent) self.sendWsCommand('workflows', '');
+          break;
+        case '/workflow':
+          if (self.currentAgent) self.sendWsCommand('workflow', (cmdArgs || '').trim());
           break;
         case '/a2a':
           RustyHandAPI.get('/api/a2a/agents').then(function(res) {

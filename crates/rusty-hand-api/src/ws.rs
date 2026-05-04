@@ -1135,6 +1135,69 @@ async fn handle_command(
             };
             serde_json::json!({"type": "command_result", "command": cmd, "message": msg})
         }
+        "workflows" => {
+            let workflows = state.kernel.workflows.list_workflows().await;
+            let msg = if workflows.is_empty() {
+                "No workflows defined. Create one from the Workflows page.".to_string()
+            } else {
+                let mut lines = format!("Workflows ({}):\n", workflows.len());
+                for w in &workflows {
+                    lines.push_str(&format!(
+                        "  {} — {} ({} steps)\n",
+                        w.name,
+                        if w.description.is_empty() {
+                            "no description"
+                        } else {
+                            &w.description
+                        },
+                        w.steps.len()
+                    ));
+                }
+                lines.push_str("\nRun with: /workflow run <name> [input]");
+                lines
+            };
+            serde_json::json!({"type": "command_result", "command": cmd, "message": msg})
+        }
+        "workflow" => {
+            let parts: Vec<&str> = args.splitn(3, ' ').collect();
+            match parts.first().copied() {
+                Some("run") => {
+                    let wf_name = parts.get(1).copied().unwrap_or("").trim();
+                    let input = parts.get(2).copied().unwrap_or("").trim().to_string();
+                    if wf_name.is_empty() {
+                        return serde_json::json!({"type": "error", "content": "Usage: /workflow run <name> [input]"});
+                    }
+                    let workflows = state.kernel.workflows.list_workflows().await;
+                    let wf = workflows
+                        .iter()
+                        .find(|w| w.name.eq_ignore_ascii_case(wf_name));
+                    match wf {
+                        None => serde_json::json!({
+                            "type": "error",
+                            "content": format!("Workflow '{wf_name}' not found. Use /workflows to list.")
+                        }),
+                        Some(w) => {
+                            let wf_id = w.id;
+                            match state.kernel.run_workflow(wf_id, input).await {
+                                Ok((_run_id, output)) => serde_json::json!({
+                                    "type": "command_result",
+                                    "command": cmd,
+                                    "message": format!("**Workflow: {}**\n\n{}", w.name, output)
+                                }),
+                                Err(e) => serde_json::json!({
+                                    "type": "error",
+                                    "content": format!("Workflow failed: {e}")
+                                }),
+                            }
+                        }
+                    }
+                }
+                _ => serde_json::json!({
+                    "type": "error",
+                    "content": "Usage: /workflow run <name> [input]"
+                }),
+            }
+        }
         _ => serde_json::json!({"type": "error", "content": format!("Unknown command: {cmd}")}),
     }
 }
