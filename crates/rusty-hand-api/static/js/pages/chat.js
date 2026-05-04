@@ -704,6 +704,21 @@ function chatPage() {
           this.scrollToBottom();
           break;
 
+        case 'thinking_delta':
+          // Reasoning tokens from extended thinking (Anthropic) or DeepSeek R1.
+          // Accumulate in _reasoning; keep the thinking indicator text up-to-date.
+          var tLast = this.messages.length ? this.messages[this.messages.length - 1] : null;
+          if (tLast && tLast.streaming) {
+            if (!tLast._reasoning) tLast._reasoning = '';
+            tLast._reasoning += data.content;
+            if (tLast.thinking) {
+              var rTokens = Math.round(tLast._reasoning.length / 4);
+              tLast.text = 'Reasoning… (~' + rTokens + ' tokens)';
+            }
+          }
+          this.scrollToBottom();
+          break;
+
         case 'text_delta':
           var last = this.messages.length ? this.messages[this.messages.length - 1] : null;
           if (last && last.streaming) {

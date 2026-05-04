@@ -434,6 +434,44 @@ tr:hover td { background: var(--surface2); }
   border-left: 2px solid var(--accent);
 }
 
+/* Reasoning panel (extended thinking / DeepSeek R1) */
+.reasoning-panel {
+  margin: 4px 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 12px;
+}
+.reasoning-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-weight: 500;
+  list-style: none;
+}
+.reasoning-summary::-webkit-details-marker { display: none; }
+.reasoning-summary:hover { color: var(--text-primary); }
+.reasoning-tokens {
+  margin-left: auto;
+  font-size: 10px;
+  opacity: 0.7;
+}
+.reasoning-content {
+  padding: 8px 12px;
+  max-height: 400px;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border);
+}
+
 /* Message timestamp + meta */
 .message-time {
   font-size: 10px;

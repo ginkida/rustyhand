@@ -447,6 +447,17 @@
                           <div class="thinking-pulse"></div>
                           <span class="thinking-label" x-text="msg.text || 'Processing...'"></span>
                         </div>
+                        <!-- Reasoning panel — shown after extended thinking / DeepSeek R1 -->
+                        <template x-if="msg._reasoning && !msg.thinking">
+                          <details class="reasoning-panel" x-bind:open="msg._reasoningOpen" @toggle="msg._reasoningOpen = $event.target.open">
+                            <summary class="reasoning-summary">
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+                              <span>Reasoning</span>
+                              <span class="reasoning-tokens" x-text="'~' + Math.round((msg._reasoning || '').length / 4) + ' tokens'"></span>
+                            </summary>
+                            <div class="reasoning-content markdown-body" x-html="renderMarkdown(msg._reasoning || '')"></div>
+                          </details>
+                        </template>
                         <!-- Normal message content -->
                         <div class="message-bubble" :class="{ 'markdown-body': (msg.role === 'agent' || msg.role === 'system') && !msg.thinking }" x-show="msg.text && msg.text.trim() && !msg.thinking" x-html="highlightSearch(msg.isHtml ? sanitizeHtml(msg.text) : ((msg.role === 'agent' || msg.role === 'system') && !msg.thinking ? renderMarkdown(msg.text) : escapeHtml(msg.text)))"></div>
                         <!-- Inline images from uploads (shown above tool cards) -->

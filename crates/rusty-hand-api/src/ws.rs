@@ -6,6 +6,7 @@
 //! Client → Server: `{"type":"message","content":"..."}`
 //! Server → Client: `{"type":"typing","state":"start|tool|stop"}`
 //! Server → Client: `{"type":"text_delta","content":"..."}`
+//! Server → Client: `{"type":"thinking_delta","content":"..."}` (extended thinking / DeepSeek R1 reasoning)
 //! Server → Client: `{"type":"response","content":"...","input_tokens":N,"output_tokens":N,"iterations":N}`
 //! Server → Client: `{"type":"error","content":"..."}`
 //! Server → Client: `{"type":"agents_updated","agents":[...]}`
@@ -39,10 +40,10 @@ const MAX_WS_PER_IP: usize = 5;
 /// Idle timeout: close WS after 30 minutes of no client messages.
 const WS_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
-/// Text delta debounce interval.
+/// Text and thinking-token delta debounce interval.
 const DEBOUNCE_MS: u64 = 100;
 
-/// Flush text buffer when it exceeds this many characters.
+/// Flush text/thinking buffer when it exceeds this many characters.
 const DEBOUNCE_CHARS: usize = 200;
 
 // ---------------------------------------------------------------------------
@@ -517,6 +518,7 @@ async fn handle_text_message(
                     let verbose_clone = Arc::clone(verbose);
                     let stream_task = tokio::spawn(async move {
                         let mut text_buffer = String::new();
+                        let mut thinking_buffer = String::new();
                         let far_future = tokio::time::Instant::now() + Duration::from_secs(86400);
                         let mut flush_deadline = far_future;
 
@@ -531,7 +533,12 @@ async fn handle_text_message(
                                     );
                                     match event {
                                         None => {
-                                            // Stream ended — flush remaining text
+                                            // Stream ended — flush remaining buffers
+                                            let _ = flush_thinking_buffer(
+                                                &sender_stream,
+                                                &mut thinking_buffer,
+                                            )
+                                            .await;
                                             let _ = flush_text_buffer(
                                                 &sender_stream,
                                                 &mut text_buffer,
@@ -541,6 +548,16 @@ async fn handle_text_message(
                                         }
                                         Some(ev) => {
                                             if let StreamEvent::TextDelta { ref text } = ev {
+                                                // Flush any preceding thinking tokens before
+                                                // the first text delta (thinking always precedes
+                                                // text in extended-thinking/DeepSeek R1 responses)
+                                                if !thinking_buffer.is_empty() {
+                                                    let _ = flush_thinking_buffer(
+                                                        &sender_stream,
+                                                        &mut thinking_buffer,
+                                                    )
+                                                    .await;
+                                                }
                                                 text_buffer.push_str(text);
                                                 if text_buffer.len() >= DEBOUNCE_CHARS {
                                                     let _ = flush_text_buffer(
@@ -554,8 +571,30 @@ async fn handle_text_message(
                                                         tokio::time::Instant::now()
                                                             + Duration::from_millis(DEBOUNCE_MS);
                                                 }
+                                            } else if let StreamEvent::ThinkingDelta {
+                                                ref text,
+                                            } = ev
+                                            {
+                                                thinking_buffer.push_str(text);
+                                                if thinking_buffer.len() >= DEBOUNCE_CHARS {
+                                                    let _ = flush_thinking_buffer(
+                                                        &sender_stream,
+                                                        &mut thinking_buffer,
+                                                    )
+                                                    .await;
+                                                    flush_deadline = far_future;
+                                                } else if flush_deadline >= far_future {
+                                                    flush_deadline =
+                                                        tokio::time::Instant::now()
+                                                            + Duration::from_millis(DEBOUNCE_MS);
+                                                }
                                             } else {
-                                                // Flush pending text before non-text events
+                                                // Flush both buffers before non-text events
+                                                let _ = flush_thinking_buffer(
+                                                    &sender_stream,
+                                                    &mut thinking_buffer,
+                                                )
+                                                .await;
                                                 let _ = flush_text_buffer(
                                                     &sender_stream,
                                                     &mut text_buffer,
@@ -595,7 +634,12 @@ async fn handle_text_message(
                                     }
                                 }
                                 _ = &mut sleep => {
-                                    // Timer fired — flush text buffer
+                                    // Timer fired — flush both buffers
+                                    let _ = flush_thinking_buffer(
+                                        &sender_stream,
+                                        &mut thinking_buffer,
+                                    )
+                                    .await;
                                     let _ = flush_text_buffer(
                                         &sender_stream,
                                         &mut text_buffer,
@@ -1043,6 +1087,27 @@ async fn flush_text_buffer(
         sender,
         &serde_json::json!({
             "type": "text_delta",
+            "content": buffer.as_str(),
+        }),
+    )
+    .await;
+    buffer.clear();
+    result
+}
+
+/// Flush accumulated thinking/reasoning tokens to the WebSocket as a
+/// `thinking_delta` message. Parallel to `flush_text_buffer`.
+async fn flush_thinking_buffer(
+    sender: &Arc<Mutex<SplitSink<WebSocket, Message>>>,
+    buffer: &mut String,
+) -> Result<(), axum::Error> {
+    if buffer.is_empty() {
+        return Ok(());
+    }
+    let result = send_json(
+        sender,
+        &serde_json::json!({
+            "type": "thinking_delta",
             "content": buffer.as_str(),
         }),
     )

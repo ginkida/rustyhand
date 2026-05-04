@@ -542,6 +542,11 @@ impl LlmDriver for AnthropicDriver {
                                         {
                                             t.push_str(thinking);
                                         }
+                                        let _ = tx
+                                            .send(StreamEvent::ThinkingDelta {
+                                                text: thinking.to_string(),
+                                            })
+                                            .await;
                                     }
                                 }
                                 _ => {}
