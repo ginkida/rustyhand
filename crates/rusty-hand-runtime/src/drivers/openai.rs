@@ -44,6 +44,11 @@ struct OaiRequest {
     tool_choice: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     stream: bool,
+    /// JSON mode. `{"type":"json_object"}` forces the model to output valid JSON.
+    /// Omitted when not needed (most calls) to avoid breaking providers that
+    /// don't support the field (e.g. older Ollama models).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -301,6 +306,7 @@ impl LlmDriver for OpenAIDriver {
             Some(serde_json::json!("auto"))
         };
 
+        let json_mode = request.response_format == rusty_hand_types::agent::ResponseFormat::Json;
         let mut oai_request = OaiRequest {
             model: request.model.clone(),
             messages: oai_messages,
@@ -309,6 +315,11 @@ impl LlmDriver for OpenAIDriver {
             tools: oai_tools,
             tool_choice,
             stream: false,
+            response_format: if json_mode {
+                Some(serde_json::json!({"type": "json_object"}))
+            } else {
+                None
+            },
         };
 
         let max_retries = 3;
@@ -613,6 +624,8 @@ impl LlmDriver for OpenAIDriver {
             Some(serde_json::json!("auto"))
         };
 
+        let json_mode_stream =
+            request.response_format == rusty_hand_types::agent::ResponseFormat::Json;
         let mut oai_request = OaiRequest {
             model: request.model.clone(),
             messages: oai_messages,
@@ -621,6 +634,11 @@ impl LlmDriver for OpenAIDriver {
             tools: oai_tools,
             tool_choice,
             stream: true,
+            response_format: if json_mode_stream {
+                Some(serde_json::json!({"type": "json_object"}))
+            } else {
+                None
+            },
         };
 
         // Retry loop for the initial HTTP request
