@@ -205,6 +205,10 @@ pub async fn build_router(
             axum::routing::get(routes::get_agent_metrics),
         )
         .route(
+            "/api/agents/{id}/memories",
+            axum::routing::get(routes::list_agent_memories),
+        )
+        .route(
             "/api/agents/{id}/stop",
             axum::routing::post(routes::stop_agent),
         )

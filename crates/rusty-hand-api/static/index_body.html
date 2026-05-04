@@ -789,6 +789,7 @@
                 <div class="tab" :class="{ active: detailTab === 'activity' }" @click="detailTab = 'activity'; loadActivity()">Activity</div>
                 <div class="tab" :class="{ active: detailTab === 'files' }" @click="detailTab = 'files'; loadAgentFiles()">Files</div>
                 <div class="tab" :class="{ active: detailTab === 'config' }" @click="detailTab = 'config'">Config</div>
+                <div class="tab" :class="{ active: detailTab === 'memories' }" @click="detailTab = 'memories'; loadMemories(detailAgent && detailAgent.id)">Memories</div>
               </div>
 
               <!-- Tab: Info -->
@@ -1011,6 +1012,33 @@
                 <button class="btn btn-primary mt-4" @click="saveConfig()" :disabled="configSaving">
                   <span x-show="!configSaving">Save Config</span><span x-show="configSaving">Saving...</span>
                 </button>
+              </div>
+
+              <!-- Tab: Memories -->
+              <div x-show="detailTab === 'memories'">
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+                  <input class="form-input" style="flex:1" x-model="memoriesQuery" placeholder="Search memories..." @keydown.enter="loadMemories(detailAgent && detailAgent.id)">
+                  <button class="btn btn-ghost btn-sm" @click="loadMemories(detailAgent && detailAgent.id)" :disabled="memoriesLoading">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                  </button>
+                </div>
+                <div x-show="memoriesLoading" class="text-dim text-xs" style="padding:16px 0">Loading memories...</div>
+                <div x-show="memoriesError" class="text-xs" style="color:var(--error);padding:8px 0" x-text="memoriesError"></div>
+                <div x-show="!memoriesLoading && !memoriesError && agentMemories.length === 0" class="text-dim text-xs" style="padding:16px 0;text-align:center">No memories stored yet. The agent records memories as it converses.</div>
+                <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px" x-show="memoriesTotal > 0" x-text="memoriesTotal + ' memories found'"></div>
+                <div style="display:flex;flex-direction:column;gap:6px;max-height:360px;overflow-y:auto">
+                  <template x-for="mem in agentMemories" :key="mem.id">
+                    <div style="background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:6px;padding:8px 10px">
+                      <div class="text-xs" style="line-height:1.5" x-text="mem.content"></div>
+                      <div style="display:flex;gap:8px;align-items:center;margin-top:4px;flex-wrap:wrap">
+                        <span class="badge badge-muted text-xs" x-text="mem.scope || 'episodic'"></span>
+                        <span class="text-xs text-dim" x-text="new Date(mem.created_at).toLocaleDateString()"></span>
+                        <span class="text-xs text-dim" x-show="mem.access_count > 0" x-text="mem.access_count + 'x accessed'"></span>
+                        <span class="text-xs" :style="'color:hsl(' + Math.round(mem.confidence * 120) + ',60%,45%)'">conf: <span x-text="mem.confidence.toFixed(2)"></span></span>
+                      </div>
+                    </div>
+                  </template>
+                </div>
               </div>
             </div>
           </div>

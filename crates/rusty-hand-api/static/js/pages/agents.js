@@ -74,6 +74,13 @@ function agentsPage() {
     activityBudget: null,
     agentMetrics: null,
 
+    // -- Memories tab --
+    agentMemories: [],
+    memoriesTotal: 0,
+    memoriesLoading: false,
+    memoriesError: '',
+    memoriesQuery: '',
+
     // -- Model change in detail modal --
     editingModel: false,
     modelChangeProvider: '',
@@ -766,6 +773,22 @@ function agentsPage() {
         this.activityError = e.message || 'Failed to load activity';
       }
       this.activityLoading = false;
+    },
+
+    async loadMemories(agentId) {
+      if (!agentId) return;
+      this.memoriesLoading = true;
+      this.memoriesError = '';
+      try {
+        var q = this.memoriesQuery ? '?q=' + encodeURIComponent(this.memoriesQuery) : '';
+        var data = await RustyHandAPI.get('/api/agents/' + agentId + '/memories' + q);
+        this.agentMemories = data.memories || [];
+        this.memoriesTotal = data.total || 0;
+      } catch (e) {
+        this.memoriesError = e.message || 'Failed to load memories';
+        this.agentMemories = [];
+      }
+      this.memoriesLoading = false;
     },
 
     activityIcon(type) {

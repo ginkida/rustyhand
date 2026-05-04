@@ -4699,6 +4699,84 @@ pub async fn get_agent_metrics(
     }
 }
 
+/// GET /api/agents/:id/memories — list episodic memories for an agent.
+/// Query params: q (search), limit (default 50), offset (default 0).
+pub async fn list_agent_memories(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
+    let agent_id = match parse_agent_id(&id) {
+        Ok(id) => id,
+        Err(e) => return e.into_response(),
+    };
+    if state.kernel.registry.get(agent_id).is_none() {
+        return agent_not_found(&id).into_response();
+    }
+
+    let q = params
+        .get("q")
+        .map(|s| s.as_str())
+        .unwrap_or("")
+        .to_string();
+    let limit: usize = params
+        .get("limit")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(50)
+        .min(200);
+    let offset: usize = params
+        .get("offset")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+
+    let filter = rusty_hand_types::memory::MemoryFilter {
+        agent_id: Some(agent_id),
+        ..Default::default()
+    };
+
+    match state
+        .kernel
+        .memory
+        .recall_with_embedding(&q, limit + offset, Some(filter), None)
+    {
+        Ok(fragments) => {
+            let total = fragments.len();
+            let items: Vec<_> = fragments
+                .into_iter()
+                .skip(offset)
+                .take(limit)
+                .map(|f| {
+                    serde_json::json!({
+                        "id": f.id.0.to_string(),
+                        "content": f.content,
+                        "source": format!("{:?}", f.source),
+                        "scope": f.scope,
+                        "confidence": f.confidence,
+                        "access_count": f.access_count,
+                        "created_at": f.created_at.to_rfc3339(),
+                        "accessed_at": f.accessed_at.to_rfc3339(),
+                    })
+                })
+                .collect();
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "memories": items,
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                })),
+            )
+                .into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to load memories: {e}")})),
+        )
+            .into_response(),
+    }
+}
+
 pub async fn stop_agent(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
