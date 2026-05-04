@@ -18,6 +18,7 @@ function chatPage() {
     attachments: [],
     dragOver: false,
     contextPressure: 'low', // green/yellow/orange/red indicator
+    sessionCostUsd: 0,      // running total cost for the current session
     _typingTimeout: null,
     // Multi-session state
     sessions: [],
@@ -433,6 +434,9 @@ function chatPage() {
                 self.messages.push({ id: ++msgId, role: 'system', text: 'Model switched to: `' + cmdArgs + '`', meta: '', tools: [] });
                 self.scrollToBottom();
               }).catch(function(e) { RustyHandToast.error('Model switch failed: ' + e.message); });
+            } else if (RustyHandAPI.isWsConnected()) {
+              // WS handler returns current model + full catalog list with tier icons
+              RustyHandAPI.wsSend({ type: 'command', command: 'model', args: '' });
             } else {
               self.messages.push({ id: ++msgId, role: 'system', text: '**Current Model**\n- Provider: `' + (self.currentAgent.model_provider || '?') + '`\n- Model: `' + (self.currentAgent.model_name || '?') + '`', meta: '', tools: [] });
               self.scrollToBottom();
@@ -500,6 +504,8 @@ function chatPage() {
       this.groupDraft = '';
       this.messages = [];
       this.actionLog = [];
+      this.sessionCostUsd = 0;
+      this.contextPressure = 'low';
       sessionStorage.setItem('rh-active-agent', agent.id);
       this.connectWs(agent.id);
       // Show welcome tips on first use
@@ -856,6 +862,7 @@ function chatPage() {
             }
           });
           this.messages = this.messages.filter(function(m) { return !m.thinking && !m.streaming; });
+          if (data.cost_usd != null) this.sessionCostUsd += data.cost_usd;
           var meta = (data.input_tokens || 0) + ' in / ' + (data.output_tokens || 0) + ' out';
           if (data.cost_usd != null) meta += ' | $' + data.cost_usd.toFixed(4);
           if (data.iterations) meta += ' | ' + data.iterations + ' iter';

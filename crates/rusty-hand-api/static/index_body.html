@@ -301,8 +301,10 @@
                       x-transition:enter-end="opacity-100"
                       x-transition:leave="transition ease-in duration-150"
                       x-transition:leave-start="opacity-100"
-                      x-transition:leave-end="opacity-0">
-                  <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--success);margin-right:2px"></span> Ready
+                      x-transition:leave-end="opacity-0"
+                      :title="contextPressure !== 'low' ? 'Context: ' + contextPressure : 'Ready'">
+                  <span :style="'display:inline-block;width:6px;height:6px;border-radius:50%;background:'+contextDotColor+';margin-right:2px;transition:background 0.4s'"></span>
+                  <span x-text="contextPressure !== 'low' ? 'Context: ' + contextPressure : 'Ready'"></span>
                 </span>
                 <span class="badge badge-suspended" x-show="sending"
                       x-transition:enter="transition ease-out duration-200"
@@ -311,10 +313,12 @@
                       x-transition:leave="transition ease-in duration-150"
                       x-transition:leave-start="opacity-100"
                       x-transition:leave-end="opacity-0">
-                  <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);opacity:0.7"></span>
-                  Generating...
+                  <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);opacity:0.7;animation:pulse 1.2s ease-in-out infinite"></span>
+                  <span x-text="tokenCount > 0 ? '~' + tokenCount + ' tokens' : 'Generating...'"></span>
                 </span>
                 <span class="queue-badge" x-show="messageQueue.length > 0" x-text="'+' + messageQueue.length + ' queued'" x-transition.opacity.duration.200ms></span>
+                <!-- Session cost accumulator (shown when any cost has been incurred) -->
+                <span class="session-cost-badge" x-show="sessionCostUsd > 0" x-text="'$' + sessionCostUsd.toFixed(4)" :title="'Session cost: $' + sessionCostUsd.toFixed(6)" x-transition.opacity.duration.300ms></span>
                 <!-- Session switcher -->
                 <div style="position:relative">
                   <button class="btn btn-ghost btn-sm" @click="sessionsOpen = !sessionsOpen" title="Sessions" style="position:relative">

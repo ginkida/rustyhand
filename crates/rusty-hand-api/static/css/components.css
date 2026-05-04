@@ -715,6 +715,22 @@ tr:hover td { background: var(--surface2); }
   animation: fadeIn 0.2s;
 }
 
+/* Session cost accumulator badge (shown in chat header) */
+.session-cost-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  border: 1px solid var(--border);
+  opacity: 0.85;
+  cursor: default;
+}
+
 /* Session switcher */
 .session-count-badge {
   position: absolute;
