@@ -5,7 +5,7 @@
 use rusqlite::Connection;
 
 /// Current schema version.
-const SCHEMA_VERSION: u32 = 8;
+const SCHEMA_VERSION: u32 = 9;
 
 /// Run all migrations to bring the database up to date.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -41,6 +41,10 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     if current_version < 8 {
         migrate_v8(conn)?;
+    }
+
+    if current_version < 9 {
+        migrate_v9(conn)?;
     }
 
     set_schema_version(conn, SCHEMA_VERSION)?;
@@ -339,6 +343,24 @@ fn migrate_v8(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     conn.execute(
         "INSERT OR IGNORE INTO migrations (version, applied_at, description) VALUES (8, datetime('now'), 'Add sessions.agent_id index and message_count column')",
+        [],
+    )?;
+    Ok(())
+}
+
+/// Version 9: Add `content_text` column to `sessions` for fast SQL-based search.
+///
+/// `search_sessions` previously loaded up to 200 MessagePack blobs into Rust memory
+/// and did string matching there. This migration adds a plaintext index column so
+/// search becomes a single `WHERE content_text LIKE ?` query — no blob deserialization.
+/// The column is maintained by `save_session` on every write and capped at 64 KB so
+/// it doesn't balloon the DB for very long sessions.
+fn migrate_v9(conn: &Connection) -> Result<(), rusqlite::Error> {
+    if !column_exists(conn, "sessions", "content_text") {
+        conn.execute("ALTER TABLE sessions ADD COLUMN content_text TEXT", [])?;
+    }
+    conn.execute(
+        "INSERT OR IGNORE INTO migrations (version, applied_at, description) VALUES (9, datetime('now'), 'Add sessions.content_text for fast full-text search')",
         [],
     )?;
     Ok(())

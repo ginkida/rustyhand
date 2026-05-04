@@ -30,6 +30,38 @@ pub struct SessionStore {
     conn: Arc<Mutex<Connection>>,
 }
 
+/// Extract plaintext from a message list for the `content_text` search index.
+/// Caps at 64 KB to keep the column from bloating the DB for very long sessions.
+fn extract_content_text(messages: &[Message]) -> String {
+    const MAX_BYTES: usize = 64 * 1024;
+    let mut out = String::new();
+    for msg in messages {
+        let text = match &msg.content {
+            MessageContent::Text(t) => t.as_str().to_string(),
+            MessageContent::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|b| {
+                    if let ContentBlock::Text { text } = b {
+                        Some(text.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
+        };
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&text);
+        if out.len() >= MAX_BYTES {
+            out.truncate(MAX_BYTES);
+            break;
+        }
+    }
+    out
+}
+
 impl SessionStore {
     /// Create a new session store wrapping the given connection.
     pub fn new(conn: Arc<Mutex<Connection>>) -> Self {
@@ -84,10 +116,11 @@ impl SessionStore {
             .map_err(|e| RustyHandError::Serialization(e.to_string()))?;
         let now = Utc::now().to_rfc3339();
         let message_count = session.messages.len() as i64;
+        let content_text = extract_content_text(&session.messages);
         conn.execute(
-            "INSERT INTO sessions (id, agent_id, messages, context_window_tokens, label, message_count, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?7, ?6, ?6)
-             ON CONFLICT(id) DO UPDATE SET messages = ?3, context_window_tokens = ?4, label = ?5, message_count = ?7, updated_at = ?6",
+            "INSERT INTO sessions (id, agent_id, messages, context_window_tokens, label, message_count, content_text, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?7, ?8, ?6, ?6)
+             ON CONFLICT(id) DO UPDATE SET messages = ?3, context_window_tokens = ?4, label = ?5, message_count = ?7, content_text = ?8, updated_at = ?6",
             rusqlite::params![
                 session.id.0.to_string(),
                 session.agent_id.0.to_string(),
@@ -96,6 +129,7 @@ impl SessionStore {
                 session.label.as_deref(),
                 now,
                 message_count,
+                content_text,
             ],
         )
         .map_err(|e| RustyHandError::Memory(e.to_string()))?;
@@ -322,26 +356,38 @@ impl SessionStore {
         query: &str,
         limit: usize,
     ) -> RustyHandResult<Vec<serde_json::Value>> {
+        if query.len() < 2 {
+            return Ok(Vec::new());
+        }
         let conn = self
             .conn
             .lock()
             .map_err(|e| RustyHandError::Internal(e.to_string()))?;
+
+        let q_lower = query.to_lowercase();
+        let like_pat = format!("%{q_lower}%");
+        let cap = (limit * 5).clamp(50, 500) as i64;
+
+        // Fast path: query rows whose content_text index is already populated.
         let mut stmt = conn
             .prepare(
-                "SELECT id, agent_id, messages, label FROM sessions ORDER BY updated_at DESC LIMIT 200",
+                "SELECT id, agent_id, content_text, label \
+                 FROM sessions \
+                 WHERE content_text IS NOT NULL AND lower(content_text) LIKE ?1 \
+                 ORDER BY updated_at DESC \
+                 LIMIT ?2",
             )
             .map_err(|e| RustyHandError::Memory(e.to_string()))?;
 
-        let q = query.to_lowercase();
         let mut results: Vec<serde_json::Value> = Vec::new();
 
         let rows = stmt
-            .query_map([], |row| {
+            .query_map(rusqlite::params![like_pat, cap], |row| {
                 let session_id: String = row.get(0)?;
                 let agent_id: String = row.get(1)?;
-                let messages_blob: Vec<u8> = row.get(2)?;
+                let content_text: Option<String> = row.get(2)?;
                 let label: Option<String> = row.get(3)?;
-                Ok((session_id, agent_id, messages_blob, label))
+                Ok((session_id, agent_id, content_text, label))
             })
             .map_err(|e| RustyHandError::Memory(e.to_string()))?;
 
@@ -349,43 +395,72 @@ impl SessionStore {
             if results.len() >= limit {
                 break;
             }
-            let Ok((session_id, agent_id, blob, label)) = row else {
+            let Ok((session_id, agent_id, Some(text), label)) = row else {
                 continue;
             };
-            let Ok(messages) = rmp_serde::from_slice::<Vec<Message>>(&blob) else {
-                continue;
+            let t_lower = text.to_lowercase();
+            let pos = match t_lower.find(&q_lower) {
+                Some(p) => p,
+                None => continue,
             };
-            for msg in &messages {
-                if results.len() >= limit {
+            let start = pos.saturating_sub(60);
+            let end = (pos + query.len() + 60).min(text.len());
+            let excerpt = text[start..end].to_string();
+            results.push(serde_json::json!({
+                "session_id": session_id,
+                "agent_id": agent_id,
+                "label": label,
+                "excerpt": excerpt,
+            }));
+        }
+
+        // Fallback: for older rows without content_text, search blobs (up to 50).
+        if results.len() < limit {
+            let remaining = (limit - results.len()) as i64;
+            let mut stmt2 = conn
+                .prepare(
+                    "SELECT id, agent_id, messages, label \
+                     FROM sessions \
+                     WHERE content_text IS NULL \
+                     ORDER BY updated_at DESC \
+                     LIMIT 50",
+                )
+                .map_err(|e| RustyHandError::Memory(e.to_string()))?;
+
+            let blob_rows = stmt2
+                .query_map([], |row| {
+                    let session_id: String = row.get(0)?;
+                    let agent_id: String = row.get(1)?;
+                    let blob: Vec<u8> = row.get(2)?;
+                    let label: Option<String> = row.get(3)?;
+                    Ok((session_id, agent_id, blob, label))
+                })
+                .map_err(|e| RustyHandError::Memory(e.to_string()))?;
+
+            let mut blob_results = 0i64;
+            for row in blob_rows {
+                if blob_results >= remaining {
                     break;
                 }
-                let text = match &msg.content {
-                    MessageContent::Text(t) => t.clone(),
-                    MessageContent::Blocks(blocks) => blocks
-                        .iter()
-                        .filter_map(|b| {
-                            if let ContentBlock::Text { text } = b {
-                                Some(text.as_str())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .join(" "),
+                let Ok((session_id, agent_id, blob, label)) = row else {
+                    continue;
                 };
-                if text.to_lowercase().contains(&q) {
-                    // Extract a snippet around the match
-                    let pos = text.to_lowercase().find(&q).unwrap_or(0);
+                let Ok(messages) = rmp_serde::from_slice::<Vec<Message>>(&blob) else {
+                    continue;
+                };
+                let text = extract_content_text(&messages);
+                let t_lower = text.to_lowercase();
+                if let Some(pos) = t_lower.find(&q_lower) {
                     let start = pos.saturating_sub(60);
-                    let end = (pos + q.len() + 60).min(text.len());
+                    let end = (pos + query.len() + 60).min(text.len());
                     let excerpt = text[start..end].to_string();
                     results.push(serde_json::json!({
                         "session_id": session_id,
                         "agent_id": agent_id,
                         "label": label,
-                        "role": format!("{:?}", msg.role).to_lowercase(),
                         "excerpt": excerpt,
                     }));
+                    blob_results += 1;
                 }
             }
         }
