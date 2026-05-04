@@ -2549,6 +2549,20 @@ impl RustyHandKernel {
         Ok(())
     }
 
+    /// Set an agent's sampling temperature (0.0–2.0, clamped to [0.0, 2.0]).
+    pub fn set_agent_temperature(&self, agent_id: AgentId, temperature: f32) -> KernelResult<()> {
+        let clamped = temperature.clamp(0.0, 2.0);
+        self.registry
+            .update_temperature(agent_id, clamped)
+            .map_err(KernelError::RustyHand)?;
+        if let Some(entry) = self.registry.get(agent_id) {
+            if let Err(e) = self.memory.save_agent(&entry) {
+                warn!(agent_id = %agent_id, error = %e, "Failed to persist temperature change");
+            }
+        }
+        Ok(())
+    }
+
     /// Update an agent's skill allowlist. Empty = all skills (backward compat).
     pub fn set_agent_skills(&self, agent_id: AgentId, skills: Vec<String>) -> KernelResult<()> {
         // Validate skill names if allowlist is non-empty

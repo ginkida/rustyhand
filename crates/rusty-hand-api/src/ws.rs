@@ -925,6 +925,43 @@ async fn handle_command(
                 }
             }
         }
+        "temp" => {
+            if args.is_empty() {
+                // Query current temperature
+                let current = state
+                    .kernel
+                    .registry
+                    .get(agent_id)
+                    .map(|e| e.manifest.model.temperature)
+                    .unwrap_or(0.7);
+                serde_json::json!({
+                    "type": "command_result",
+                    "command": cmd,
+                    "message": format!("Temperature is **{current:.2}** (0.0 = deterministic, 1.0 = default, 2.0 = very creative). Use `/temp <value>` to change."),
+                })
+            } else {
+                match args.parse::<f32>() {
+                    Ok(t) if (0.0..=2.0).contains(&t) => {
+                        match state.kernel.set_agent_temperature(agent_id, t) {
+                            Ok(()) => serde_json::json!({
+                                "type": "command_result",
+                                "command": cmd,
+                                "message": format!("Temperature set to **{t:.2}**."),
+                            }),
+                            Err(e) => {
+                                serde_json::json!({"type": "error", "content": format!("Failed to set temperature: {e}")})
+                            }
+                        }
+                    }
+                    Ok(_) => {
+                        serde_json::json!({"type": "error", "content": "Temperature must be between 0.0 and 2.0."})
+                    }
+                    Err(_) => {
+                        serde_json::json!({"type": "error", "content": "Invalid temperature value. Use a number like 0.7 or 1.2."})
+                    }
+                }
+            }
+        }
         "usage" => match state.kernel.session_usage_cost(agent_id) {
             Ok((input, output, cost)) => {
                 let mut msg = format!(

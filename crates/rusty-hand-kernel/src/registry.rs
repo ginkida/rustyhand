@@ -177,6 +177,17 @@ impl AgentRegistry {
         Ok(())
     }
 
+    /// Update an agent's temperature (0.0–2.0).
+    pub fn update_temperature(&self, id: AgentId, temperature: f32) -> RustyHandResult<()> {
+        let mut entry = self
+            .agents
+            .get_mut(&id)
+            .ok_or_else(|| RustyHandError::AgentNotFound(id.to_string()))?;
+        entry.manifest.model.temperature = temperature;
+        entry.last_active = chrono::Utc::now();
+        Ok(())
+    }
+
     /// Toggle extended thinking for an agent.
     pub fn update_thinking(
         &self,
