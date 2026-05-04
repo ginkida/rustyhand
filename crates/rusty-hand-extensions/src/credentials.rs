@@ -175,6 +175,10 @@ fn prompt_secret(key: &str) -> Option<Zeroizing<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // Serialize env-var mutations so parallel test threads don't race.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn load_dotenv_basic() {
@@ -207,6 +211,7 @@ SINGLE_QUOTED='single'
 
     #[test]
     fn resolver_env_var() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("TEST_CRED_RESOLVE_123", "from_env");
         let resolver = CredentialResolver::new(None, None);
         let val = resolver.resolve("TEST_CRED_RESOLVE_123").unwrap();
@@ -217,6 +222,7 @@ SINGLE_QUOTED='single'
 
     #[test]
     fn resolver_dotenv_overrides_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let env_path = dir.path().join(".env");
         std::fs::write(&env_path, "TEST_CRED_DOT_456=from_dotenv\n").unwrap();
@@ -239,6 +245,7 @@ SINGLE_QUOTED='single'
 
     #[test]
     fn resolver_resolve_all() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("TEST_MULTI_A", "a_val");
         std::env::set_var("TEST_MULTI_B", "b_val");
 
