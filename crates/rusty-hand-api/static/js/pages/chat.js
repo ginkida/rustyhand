@@ -67,6 +67,7 @@ function chatPage() {
       { cmd: '/budget', desc: 'Show spending limits and current costs' },
       { cmd: '/peers', desc: 'Show RHP peer network status' },
       { cmd: '/a2a', desc: 'List discovered external A2A agents' },
+      { cmd: '/label', desc: 'Name the current session', args: 'title (empty to clear)' },
       { cmd: '/remember', desc: 'Store a key-value note in agent memory', args: '<key> <value>' },
       { cmd: '/recall', desc: 'Retrieve a memory note', args: '[key]' },
       { cmd: '/workflows', desc: 'List available workflows' },
@@ -511,6 +512,9 @@ function chatPage() {
           }).catch(function(e) {
             self.appendSystemMessage('Peer status request failed: ' + self.normalizeError(e));
           });
+          break;
+        case '/label':
+          if (self.currentAgent) self.sendWsCommand('label', (cmdArgs || '').trim());
           break;
         case '/remember':
           if (self.currentAgent) self.sendWsCommand('remember', (cmdArgs || '').trim());

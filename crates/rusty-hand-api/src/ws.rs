@@ -1135,6 +1135,32 @@ async fn handle_command(
             };
             serde_json::json!({"type": "command_result", "command": cmd, "message": msg})
         }
+        "label" => {
+            // /label [text] — set or clear the current session label
+            let entry = match state.kernel.registry.get(agent_id) {
+                Some(e) => e,
+                None => return serde_json::json!({"type": "error", "content": "Agent not found"}),
+            };
+            let label = args.trim();
+            let label_opt = if label.is_empty() { None } else { Some(label) };
+            match state
+                .kernel
+                .memory
+                .set_session_label(entry.session_id, label_opt)
+            {
+                Ok(()) => {
+                    let msg = if label.is_empty() {
+                        "Session label cleared.".to_string()
+                    } else {
+                        format!("Session labelled: **{label}**")
+                    };
+                    serde_json::json!({"type": "command_result", "command": cmd, "message": msg})
+                }
+                Err(e) => {
+                    serde_json::json!({"type": "error", "content": format!("Label failed: {e}")})
+                }
+            }
+        }
         "remember" => {
             // /remember <key> <value> — store a KV note in this agent's structured memory
             let mut parts = args.splitn(2, ' ');
