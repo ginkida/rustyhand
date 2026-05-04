@@ -962,6 +962,50 @@ async fn handle_command(
                 }
             }
         }
+        "system" => {
+            if args.is_empty() {
+                // Show current system prompt
+                let prompt = state
+                    .kernel
+                    .registry
+                    .get(agent_id)
+                    .map(|e| e.manifest.model.system_prompt.clone())
+                    .unwrap_or_default();
+                let preview: String = prompt.chars().take(600).collect();
+                let suffix = if prompt.len() > 600 { "…" } else { "" };
+                serde_json::json!({
+                    "type": "command_result",
+                    "command": cmd,
+                    "message": format!("**System prompt** ({} chars):\n\n```\n{preview}{suffix}\n```\n\nUse `/system <new prompt>` to replace it.", prompt.len()),
+                })
+            } else {
+                // Update system prompt immediately (takes effect on next message)
+                match state
+                    .kernel
+                    .registry
+                    .update_system_prompt(agent_id, args.to_string())
+                {
+                    Ok(()) => {
+                        // Persist
+                        if let Some(entry) = state.kernel.registry.get(agent_id) {
+                            if let Err(e) = state.kernel.memory.save_agent(&entry) {
+                                warn!(agent_id = %agent_id, error = %e, "Failed to persist system prompt change");
+                            }
+                        }
+                        let preview: String = args.chars().take(80).collect();
+                        let suffix = if args.len() > 80 { "…" } else { "" };
+                        serde_json::json!({
+                            "type": "command_result",
+                            "command": cmd,
+                            "message": format!("System prompt updated ({} chars): `{preview}{suffix}`\nTakes effect on the next message.", args.len()),
+                        })
+                    }
+                    Err(e) => {
+                        serde_json::json!({"type": "error", "content": format!("Failed to update system prompt: {e}")})
+                    }
+                }
+            }
+        }
         "usage" => match state.kernel.session_usage_cost(agent_id) {
             Ok((input, output, cost)) => {
                 let mut msg = format!(

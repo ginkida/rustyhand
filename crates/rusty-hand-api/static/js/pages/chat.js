@@ -56,6 +56,7 @@ function chatPage() {
       { cmd: '/usage', desc: 'Show session token usage & cost' },
       { cmd: '/think', desc: 'Toggle extended thinking', args: 'on | off | stream' },
       { cmd: '/temp', desc: 'Get or set sampling temperature', args: '0.0–2.0' },
+      { cmd: '/system', desc: 'View or replace the system prompt', args: 'new prompt text' },
       { cmd: '/context', desc: 'Show context window usage & pressure' },
       { cmd: '/verbose', desc: 'Cycle tool detail level', args: 'off | on | full' },
       { cmd: '/queue', desc: 'Check if agent is processing' },
@@ -397,6 +398,14 @@ function chatPage() {
         case '/temp':
           if (self.currentAgent && RustyHandAPI.isWsConnected()) {
             RustyHandAPI.wsSend({ type: 'command', command: 'temp', args: cmdArgs });
+          } else {
+            self.messages.push({ id: ++msgId, role: 'system', text: 'Not connected. Connect to an agent first.', meta: '', tools: [] });
+            self.scrollToBottom();
+          }
+          break;
+        case '/system':
+          if (self.currentAgent && RustyHandAPI.isWsConnected()) {
+            RustyHandAPI.wsSend({ type: 'command', command: 'system', args: cmdArgs });
           } else {
             self.messages.push({ id: ++msgId, role: 'system', text: 'Not connected. Connect to an agent first.', meta: '', tools: [] });
             self.scrollToBottom();
