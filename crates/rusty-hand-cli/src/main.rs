@@ -5562,7 +5562,7 @@ fn cmd_security_audit(limit: usize, json: bool) {
     let client = daemon_client();
     let body = daemon_json(
         client
-            .get(format!("{base}/api/audit/recent?limit={limit}"))
+            .get(format!("{base}/api/audit/recent?n={limit}"))
             .send(),
     );
     if json {
@@ -5572,20 +5572,31 @@ fn cmd_security_audit(limit: usize, json: bool) {
         );
         return;
     }
-    if let Some(arr) = body.as_array() {
+    let entries = body
+        .get("entries")
+        .and_then(|v| v.as_array())
+        .or_else(|| body.as_array());
+    if let Some(arr) = entries {
         if arr.is_empty() {
             println!("No audit entries.");
             return;
         }
-        println!("{:<24} {:<16} {:<12} EVENT", "TIMESTAMP", "AGENT", "TYPE");
-        println!("{}", "-".repeat(80));
+        println!(
+            "{:<28} {:<16} {:<24} DETAIL",
+            "TIMESTAMP", "AGENT", "ACTION"
+        );
+        println!("{}", "-".repeat(90));
         for entry in arr {
+            let agent = entry["agent_name"]
+                .as_str()
+                .or_else(|| entry["agent_id"].as_str())
+                .unwrap_or("?");
             println!(
-                "{:<24} {:<16} {:<12} {}",
+                "{:<28} {:<16} {:<24} {}",
                 entry["timestamp"].as_str().unwrap_or("?"),
-                entry["agent_name"].as_str().unwrap_or("?"),
-                entry["event_type"].as_str().unwrap_or("?"),
-                entry["description"].as_str().unwrap_or(""),
+                agent,
+                entry["action"].as_str().unwrap_or("?"),
+                entry["detail"].as_str().unwrap_or(""),
             );
         }
     } else {
@@ -5768,7 +5779,11 @@ fn cmd_memory_list(agent: &str, json: bool) {
         );
         return;
     }
-    if let Some(arr) = body.as_array() {
+    let arr = body
+        .get("kv_pairs")
+        .and_then(|v| v.as_array())
+        .or_else(|| body.as_array());
+    if let Some(arr) = arr {
         if arr.is_empty() {
             println!("No memory entries for agent '{agent}'.");
             return;
@@ -5959,11 +5974,16 @@ fn cmd_webhooks_list(json: bool) {
         println!("{:<38} {:<16} URL", "ID", "AGENT");
         println!("{}", "-".repeat(80));
         for w in arr {
+            // URL is nested in pattern.webhook.url
+            let url = w["pattern"]["webhook"]["url"]
+                .as_str()
+                .or_else(|| w["url"].as_str())
+                .unwrap_or("?");
             println!(
                 "{:<38} {:<16} {}",
                 w["id"].as_str().unwrap_or("?"),
                 w["agent_id"].as_str().unwrap_or("?"),
-                w["url"].as_str().unwrap_or(""),
+                url,
             );
         }
     } else {
