@@ -1925,9 +1925,10 @@ fn cmd_agent_chat(config: Option<PathBuf>, agent_id_str: &str) {
 fn cmd_agent_kill(config: Option<PathBuf>, agent_id_str: &str) {
     if let Some(base) = find_daemon() {
         let client = daemon_client();
+        let agent_id = resolve_agent_id(&client, &base, agent_id_str);
         let body = daemon_json(
             client
-                .delete(format!("{base}/api/agents/{agent_id_str}"))
+                .delete(format!("{base}/api/agents/{agent_id}"))
                 .send(),
         );
         if body.get("status").is_some() {
