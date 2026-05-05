@@ -5251,17 +5251,28 @@ fn cmd_cron_list(json: bool) {
 fn cmd_cron_create(agent: &str, spec: &str, prompt: &str) {
     let base = require_daemon("cron create");
     let client = daemon_client();
+    let agent_id = resolve_agent_id(&client, &base, agent);
+    // Generate a name from the first 32 chars of the prompt.
+    let name: String = prompt.chars().take(32).collect();
+    let payload = serde_json::json!({
+        "agent_id": agent_id,
+        "name": name,
+        "schedule": {"kind": "cron", "expr": spec},
+        "action": {"kind": "agent_turn", "message": prompt},
+    });
     let body = daemon_json(
         client
             .post(format!("{base}/api/cron/jobs"))
-            .json(&serde_json::json!({
-                "agent_id": agent,
-                "cron_expr": spec,
-                "prompt": prompt,
-            }))
+            .json(&payload)
             .send(),
     );
-    if let Some(id) = body["id"].as_str() {
+    // Response: {"result": "{\"job_id\":\"...\",\"status\":\"created\"}" }
+    // Parse the nested JSON string to extract job_id.
+    let job_id = body["result"]
+        .as_str()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .and_then(|v| v["job_id"].as_str().map(|s| s.to_string()));
+    if let Some(id) = job_id {
         ui::success(&format!("Cron job created: {id}"));
     } else {
         ui::error(&format!(
