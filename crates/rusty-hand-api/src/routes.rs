@@ -3653,18 +3653,29 @@ pub async fn agent_budget_ranking(State(state): State<Arc<AppState>>) -> impl In
 pub async fn list_sessions(
     State(state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationQuery>,
+    Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
+    // Optional agent_id filter: accepts ?agent_id= or ?agent= (short form)
+    let agent_filter = params
+        .get("agent_id")
+        .or_else(|| params.get("agent"))
+        .cloned()
+        .unwrap_or_default();
+
     match state.kernel.memory.list_sessions() {
         Ok(sessions) => {
             let enriched: Vec<serde_json::Value> = sessions
                 .into_iter()
-                .map(|session| {
+                .filter_map(|session| {
                     let agent_id = session["agent_id"].as_str().unwrap_or("").to_string();
+                    if !agent_filter.is_empty() && !agent_id.starts_with(&agent_filter) {
+                        return None;
+                    }
                     let agent_name = uuid::Uuid::parse_str(&agent_id)
                         .ok()
                         .and_then(|uuid| state.kernel.registry.get(AgentId(uuid)))
                         .map(|entry| entry.name);
-                    serde_json::json!({
+                    Some(serde_json::json!({
                         "session_id": session["session_id"].as_str().unwrap_or(""),
                         "agent_id": agent_id,
                         "agent_name": agent_name,
@@ -3672,7 +3683,7 @@ pub async fn list_sessions(
                         "created_at": session["created_at"].as_str().unwrap_or(""),
                         "updated_at": session["updated_at"].as_str().unwrap_or(""),
                         "label": session.get("label").cloned().unwrap_or(serde_json::Value::Null),
-                    })
+                    }))
                 })
                 .collect();
             let total = enriched.len();
