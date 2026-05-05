@@ -4502,6 +4502,17 @@ mark.search-highlight {
 .agent-list-status.stopped {
   background: var(--text-muted);
 }
+.agent-list-status.crashed {
+  background: var(--danger);
+  box-shadow: 0 0 4px var(--danger);
+}
+.agent-list-status.suspended {
+  background: var(--warning);
+}
+.agent-list-status.terminated {
+  background: var(--text-muted);
+  opacity: 0.4;
+}
 
 /* Pin button on agent list items */
 .agent-pin-btn {

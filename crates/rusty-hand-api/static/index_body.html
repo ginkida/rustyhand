@@ -93,7 +93,7 @@
               </div>
               <div class="agent-list-meta sidebar-label">
                 <button class="agent-pin-btn pinned" @click.stop="$store.app.togglePin(agent.id)" title="Unpin agent">★</button>
-                <span class="agent-list-status" :class="agent.state === 'running' ? 'running' : 'stopped'"></span>
+                <span class="agent-list-status" :class="agent.state || 'stopped'"></span>
               </div>
             </div>
           </template>
@@ -124,7 +124,7 @@
                 </div>
                 <div class="agent-list-meta sidebar-label">
                   <span class="agent-list-time" x-text="timeAgo(agent.last_activity || agent.created_at)"></span>
-                  <span class="agent-list-status" :class="agent.state === 'running' ? 'running' : 'stopped'"></span>
+                  <span class="agent-list-status" :class="agent.state || 'stopped'"></span>
                 </div>
               </div>
             </template>
@@ -157,7 +157,7 @@
                           <span x-text="$store.app.isPinned(agent.id) ? '★' : '☆'"></span>
                         </button>
                         <span class="agent-list-time" x-text="timeAgo(agent.last_activity || agent.created_at)"></span>
-                        <span class="agent-list-status" :class="agent.state === 'running' ? 'running' : 'stopped'"></span>
+                        <span class="agent-list-status" :class="agent.state || 'stopped'"></span>
                       </div>
                     </div>
                   </template>
@@ -746,7 +746,7 @@
                                 </div>
                               </div>
                               <div class="agent-directory-row-meta">
-                                <span class="badge" :class="agent.state === 'running' ? 'badge-success' : 'badge-muted'" x-text="agent.state"></span>
+                                <span class="badge" :class="'badge-' + (agent.state || 'muted')" x-text="agent.state"></span>
                                 <span class="text-xs text-dim" x-text="agentLastSeen(agent)"></span>
                                 <button class="btn btn-ghost btn-sm" @click.stop="showDetail(agent)">Inspect</button>
                               </div>
