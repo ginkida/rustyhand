@@ -107,6 +107,18 @@ async fn start_test_server_with_provider(
                 .delete(routes::kill_agent),
         )
         .route(
+            "/api/agents/{id}/restart",
+            axum::routing::post(routes::restart_agent),
+        )
+        .route(
+            "/api/sessions/{id}",
+            axum::routing::get(routes::get_session).delete(routes::delete_session),
+        )
+        .route(
+            "/api/sessions/{id}/export.md",
+            axum::routing::get(routes::export_session_markdown),
+        )
+        .route(
             "/api/triggers",
             axum::routing::get(routes::list_triggers).post(routes::create_trigger),
         )
@@ -1341,4 +1353,241 @@ async fn test_user_api_key_rbac_denies_admin_endpoint() {
         .unwrap();
 
     assert_eq!(resp.status(), 201);
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/sessions/:id
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_get_session_returns_session_json() {
+    let server = require_server!(start_test_server());
+    let client = reqwest::Client::new();
+
+    // Spawn agent
+    let resp = client
+        .post(format!("{}/api/agents", server.base_url))
+        .json(&serde_json::json!({"manifest_toml": TEST_MANIFEST}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 201);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let agent_id = body["agent_id"].as_str().unwrap().to_string();
+
+    // GET /api/agents/:id to obtain session_id
+    let resp = client
+        .get(format!("{}/api/agents/{}", server.base_url, agent_id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let agent_body: serde_json::Value = resp.json().await.unwrap();
+    let session_id = agent_body["session_id"].as_str().unwrap().to_string();
+
+    // GET /api/sessions/:session_id
+    let resp = client
+        .get(format!("{}/api/sessions/{}", server.base_url, session_id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["id"], session_id);
+    assert_eq!(body["agent_id"], agent_id);
+    assert_eq!(body["message_count"], 0);
+    assert!(body["messages"].as_array().is_some());
+
+    // Invalid UUID → 400
+    let resp = client
+        .get(format!("{}/api/sessions/not-a-uuid", server.base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400);
+
+    // Non-existent UUID → 404
+    let resp = client
+        .get(format!(
+            "{}/api/sessions/00000000-0000-0000-0000-000000000000",
+            server.base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 404);
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/sessions/:id/export.md
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_export_session_markdown() {
+    let server = require_server!(start_test_server());
+    let client = reqwest::Client::new();
+
+    // Spawn agent
+    let resp = client
+        .post(format!("{}/api/agents", server.base_url))
+        .json(&serde_json::json!({"manifest_toml": TEST_MANIFEST}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 201);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let agent_id = body["agent_id"].as_str().unwrap().to_string();
+
+    let resp = client
+        .get(format!("{}/api/agents/{}", server.base_url, agent_id))
+        .send()
+        .await
+        .unwrap();
+    let agent_body: serde_json::Value = resp.json().await.unwrap();
+    let session_id = agent_body["session_id"].as_str().unwrap().to_string();
+
+    // Export as Markdown
+    let resp = client
+        .get(format!(
+            "{}/api/sessions/{}/export.md",
+            server.base_url, session_id
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        ct.contains("text/markdown"),
+        "Expected text/markdown, got {ct}"
+    );
+
+    let cd = resp
+        .headers()
+        .get("content-disposition")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        cd.contains("attachment"),
+        "Expected attachment disposition, got {cd}"
+    );
+    assert!(cd.contains(".md"), "Filename should end in .md, got {cd}");
+
+    let text = resp.text().await.unwrap();
+    assert!(
+        text.starts_with('#'),
+        "Markdown should start with a heading"
+    );
+    assert!(text.contains("Session ID:"), "Should include session ID");
+
+    // Non-existent → 404
+    let resp = client
+        .get(format!(
+            "{}/api/sessions/00000000-0000-0000-0000-000000000000/export.md",
+            server.base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 404);
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/agents/:id/restart
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_restart_agent_preserves_sessions() {
+    let server = require_server!(start_test_server());
+    let client = reqwest::Client::new();
+
+    // Spawn agent
+    let resp = client
+        .post(format!("{}/api/agents", server.base_url))
+        .json(&serde_json::json!({"manifest_toml": TEST_MANIFEST}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 201);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let old_agent_id = body["agent_id"].as_str().unwrap().to_string();
+
+    // Obtain session_id before restart
+    let resp = client
+        .get(format!("{}/api/agents/{}", server.base_url, old_agent_id))
+        .send()
+        .await
+        .unwrap();
+    let agent_body: serde_json::Value = resp.json().await.unwrap();
+    let old_session_id = agent_body["session_id"].as_str().unwrap().to_string();
+
+    // Restart
+    let resp = client
+        .post(format!(
+            "{}/api/agents/{}/restart",
+            server.base_url, old_agent_id
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["status"], "restarted");
+    assert_eq!(body["old_agent_id"], old_agent_id);
+    let new_agent_id = body["new_agent_id"].as_str().unwrap().to_string();
+    assert_ne!(
+        new_agent_id, old_agent_id,
+        "New agent must have a different ID"
+    );
+
+    // Old session still accessible (sessions were NOT deleted)
+    let resp = client
+        .get(format!(
+            "{}/api/sessions/{}",
+            server.base_url, old_session_id
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        200,
+        "Old session must survive restart — sessions should be preserved"
+    );
+    let sess: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(sess["id"], old_session_id);
+
+    // New agent is live
+    let resp = client
+        .get(format!("{}/api/agents/{}", server.base_url, new_agent_id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let new_body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(new_body["name"], "test-agent");
+
+    // Old agent ID is gone
+    let resp = client
+        .get(format!("{}/api/agents/{}", server.base_url, old_agent_id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 404);
+
+    // Restart nonexistent (already gone) → 404
+    let resp = client
+        .post(format!(
+            "{}/api/agents/{}/restart",
+            server.base_url, old_agent_id
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 404);
 }

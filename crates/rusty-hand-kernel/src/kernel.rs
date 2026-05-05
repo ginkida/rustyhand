@@ -1100,15 +1100,18 @@ impl RustyHandKernel {
         parent: Option<AgentId>,
     ) -> KernelResult<AgentId> {
         let agent_id = AgentId::new();
-        let session_id = SessionId::new();
         let name = manifest.name.clone();
 
         info!(agent = %name, id = %agent_id, parent = ?parent, "Spawning agent");
 
-        // Create session
-        self.memory
+        // Create session — use the ID the store assigns so entry.session_id
+        // matches the actual DB row (previously a fresh SessionId::new() was
+        // used here but create_session generates its own, so they diverged).
+        let session_id = self
+            .memory
             .create_session(agent_id)
-            .map_err(KernelError::RustyHand)?;
+            .map_err(KernelError::RustyHand)?
+            .id;
 
         // Inherit kernel exec_policy as fallback if agent manifest doesn't have one
         let mut manifest = manifest;

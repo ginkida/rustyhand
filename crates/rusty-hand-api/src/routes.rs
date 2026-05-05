@@ -888,6 +888,12 @@ pub async fn restart_agent(
                 })),
             )
         }
+        Err(rusty_hand_kernel::error::KernelError::RustyHand(
+            rusty_hand_types::error::RustyHandError::AgentNotFound(_),
+        )) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": format!("Agent '{id}' not found")})),
+        ),
         Err(e) => safe_error(StatusCode::INTERNAL_SERVER_ERROR, "Agent restart", &e),
     }
 }
