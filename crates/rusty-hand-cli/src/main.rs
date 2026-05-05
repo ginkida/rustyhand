@@ -225,6 +225,9 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Manage a specific session (label, export, show, delete).
+    #[command(subcommand)]
+    Session(SessionCommands),
     /// Tail the RustyHand log file.
     Logs {
         /// Number of lines to show.
@@ -627,6 +630,41 @@ enum SecurityCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum SessionCommands {
+    /// Set or clear a human-readable label for a session.
+    Label {
+        /// Session ID (UUID).
+        session_id: String,
+        /// Label text. Omit to clear the existing label.
+        label: Option<String>,
+    },
+    /// Export a session as a Markdown file.
+    Export {
+        /// Session ID (UUID).
+        session_id: String,
+        /// Output file path. Defaults to <session-id>.md in the current directory.
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+    },
+    /// Print the full conversation for a session.
+    Show {
+        /// Session ID (UUID).
+        session_id: String,
+        /// Output as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Permanently delete a session and all its messages.
+    Delete {
+        /// Session ID (UUID).
+        session_id: String,
+        /// Skip confirmation prompt.
+        #[arg(long)]
+        confirm: bool,
+    },
+}
+
 #[derive(Clone, Copy, clap::ValueEnum)]
 enum BackupFormatArg {
     Json,
@@ -939,6 +977,19 @@ fn main() {
             CronCommands::Disable { id } => cmd_cron_toggle(&id, false),
         },
         Some(Commands::Sessions { agent, json }) => cmd_sessions(agent.as_deref(), json),
+        Some(Commands::Session(sub)) => match sub {
+            SessionCommands::Label { session_id, label } => {
+                cmd_session_label(&session_id, label.as_deref())
+            }
+            SessionCommands::Export { session_id, output } => {
+                cmd_session_export(&session_id, output.as_deref())
+            }
+            SessionCommands::Show { session_id, json } => cmd_session_show(&session_id, json),
+            SessionCommands::Delete {
+                session_id,
+                confirm,
+            } => cmd_session_delete(&session_id, confirm),
+        },
         Some(Commands::Logs { lines, follow }) => cmd_logs(lines, follow),
         Some(Commands::Health { json }) => cmd_health(json),
         Some(Commands::Security(sub)) => match sub {
@@ -5251,6 +5302,117 @@ fn cmd_sessions(agent: Option<&str>, json: bool) {
             }
         }
     }
+}
+
+fn cmd_session_label(session_id: &str, label: Option<&str>) {
+    let base = require_daemon("session label");
+    let client = daemon_client();
+    let body = daemon_json(
+        client
+            .put(format!("{base}/api/sessions/{session_id}/label"))
+            .json(&serde_json::json!({"label": label}))
+            .send(),
+    );
+    if body["error"].is_string() {
+        eprintln!("Error: {}", body["error"].as_str().unwrap_or("unknown"));
+        std::process::exit(1);
+    }
+    match label {
+        Some(l) => ui::check_ok(&format!("Label set to \"{l}\"")),
+        None => ui::check_ok("Label cleared"),
+    }
+}
+
+fn cmd_session_export(session_id: &str, output: Option<&std::path::Path>) {
+    let base = require_daemon("session export");
+    let client = daemon_client();
+    let response = match client
+        .get(format!("{base}/api/sessions/{session_id}/export.md"))
+        .send()
+    {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Request failed: {e}");
+            std::process::exit(1);
+        }
+    };
+    if response.status().as_u16() == 404 {
+        ui::error("Session not found");
+        std::process::exit(1);
+    }
+    let markdown = response
+        .text()
+        .unwrap_or_else(|e| format!("<read error: {e}>"));
+    let dest = output
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from(format!("{session_id}.md")));
+    if let Err(e) = std::fs::write(&dest, &markdown) {
+        eprintln!("Write failed: {e}");
+        std::process::exit(1);
+    }
+    ui::check_ok(&format!("Exported to {}", dest.display()));
+}
+
+fn cmd_session_show(session_id: &str, json: bool) {
+    let base = require_daemon("session show");
+    let client = daemon_client();
+    let body = daemon_json(
+        client
+            .get(format!("{base}/api/sessions/{session_id}"))
+            .send(),
+    );
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&body).unwrap_or_default()
+        );
+        return;
+    }
+    if let Some(err) = body["error"].as_str() {
+        eprintln!("Error: {err}");
+        std::process::exit(1);
+    }
+    let label = body["label"].as_str().unwrap_or("");
+    let agent_id = body["agent_id"].as_str().unwrap_or("?");
+    println!("Session: {session_id}");
+    if !label.is_empty() {
+        println!("Label:   {label}");
+    }
+    println!("Agent:   {agent_id}");
+    println!("{}", "─".repeat(60));
+    if let Some(messages) = body["messages"].as_array() {
+        for msg in messages {
+            let role = msg["role"].as_str().unwrap_or("?");
+            let content = msg["content"].as_str().unwrap_or("");
+            println!("\n[{role}]\n{content}");
+        }
+    } else {
+        println!("(no messages)");
+    }
+}
+
+fn cmd_session_delete(session_id: &str, confirm: bool) {
+    if !confirm {
+        eprint!("Permanently delete session {session_id}? This cannot be undone. [y/N] ");
+        let mut input = String::new();
+        let _ = std::io::stdin().read_line(&mut input);
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!("Cancelled.");
+            return;
+        }
+    }
+    let base = require_daemon("session delete");
+    let client = daemon_client();
+    let body = daemon_json(
+        client
+            .delete(format!("{base}/api/sessions/{session_id}"))
+            .send(),
+    );
+    if body["error"].is_string() {
+        eprintln!("Error: {}", body["error"].as_str().unwrap_or("unknown"));
+        std::process::exit(1);
+    }
+    ui::check_ok(&format!("Session {session_id} deleted"));
 }
 
 fn cmd_logs(lines: usize, follow: bool) {
