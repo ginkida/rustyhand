@@ -3086,12 +3086,17 @@ pub async fn audit_recent(
         .and_then(|v| v.parse().ok())
         .unwrap_or(50)
         .min(1000); // Cap at 1000
+    let agent_id_filter = params.get("agent_id").cloned().unwrap_or_default();
 
-    let entries = state.kernel.audit_log.recent(n);
+    // Fetch extra entries when filtering so we still return `n` after the filter
+    let fetch_n = if agent_id_filter.is_empty() { n } else { 1000 };
+    let entries = state.kernel.audit_log.recent(fetch_n);
     let tip = state.kernel.audit_log.tip_hash();
 
     let items: Vec<serde_json::Value> = entries
         .iter()
+        .filter(|e| agent_id_filter.is_empty() || e.agent_id.starts_with(&agent_id_filter))
+        .take(n)
         .map(|e| {
             let agent_name = uuid::Uuid::parse_str(&e.agent_id)
                 .ok()

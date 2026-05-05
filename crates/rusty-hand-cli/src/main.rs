@@ -2011,37 +2011,26 @@ fn cmd_agent_logs(agent_id_str: &str, follow: bool, lines: usize) {
             }
         }
     } else {
-        // Snapshot: fetch recent audit entries filtered by agent_id
-        let body = daemon_json(client.get(format!("{base}/api/audit/recent?n=200")).send());
+        // Snapshot: server filters by agent_id, returns up to `lines` entries
+        let body = daemon_json(
+            client
+                .get(format!(
+                    "{base}/api/audit/recent?n={lines}&agent_id={agent_id}"
+                ))
+                .send(),
+        );
         let entries = body.get("entries").and_then(|v| v.as_array());
         let Some(entries) = entries else {
             println!("No audit entries found.");
             return;
         };
-        let filtered: Vec<_> = entries
-            .iter()
-            .filter(|e| {
-                e["agent_id"]
-                    .as_str()
-                    .map(|id| id.starts_with(&agent_id))
-                    .unwrap_or(false)
-            })
-            .collect();
-        if filtered.is_empty() {
+        if entries.is_empty() {
             println!("No log entries found for agent {agent_id_str}.");
             return;
         }
-        let show: Vec<_> = filtered
-            .into_iter()
-            .rev()
-            .take(lines)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
         println!("{:<28} {:<20} {:<5} DETAIL", "TIMESTAMP", "ACTION", "OK");
         println!("{}", "─".repeat(80));
-        for e in show {
+        for e in entries {
             let ts = e["timestamp"].as_str().unwrap_or("");
             let action = e["action"].as_str().unwrap_or("");
             let detail = e["detail"].as_str().unwrap_or("");
