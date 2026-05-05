@@ -296,7 +296,7 @@ document.addEventListener('alpine:init', function() {
         }
         groups[key].agents.push(agent);
         groups[key].agent_count += 1;
-        if (agent.state === 'Running') groups[key].running_count += 1;
+        if (agent.state === 'running') groups[key].running_count += 1;
         groups[key].latest_activity = Math.max(
           groups[key].latest_activity,
           new Date(agent.last_activity || agent.created_at || 0).getTime()
@@ -321,7 +321,7 @@ document.addEventListener('alpine:init', function() {
     },
 
     get runningCount() {
-      return this.agents.filter(function(a) { return a.state === 'Running'; }).length;
+      return this.agents.filter(function(a) { return a.state === 'running'; }).length;
     },
 
     chatWithAgent(agent) {

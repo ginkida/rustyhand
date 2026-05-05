@@ -285,7 +285,7 @@ function agentsPage() {
     },
 
     get stoppedCount() {
-      return this.agents.filter(function(a) { return a.state !== 'Running'; }).length;
+      return this.agents.filter(function(a) { return a.state !== 'running'; }).length;
     },
 
     get recentAgents() {

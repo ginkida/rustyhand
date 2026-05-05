@@ -794,6 +794,18 @@ tr:hover td { background: var(--surface2); }
   flex-shrink: 0;
 }
 .session-dot.active { background: var(--success); }
+.session-action-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  color: var(--text-dim);
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: color 0.1s, background 0.1s;
+}
+.session-action-btn:hover { color: var(--accent); background: var(--surface3); }
+.session-item:hover .session-action-btn { display: flex; }
 
 /* Chat search bar */
 .chat-search-bar {

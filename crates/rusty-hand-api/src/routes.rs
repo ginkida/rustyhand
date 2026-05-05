@@ -218,7 +218,7 @@ pub async fn list_agents(
             serde_json::json!({
                 "id": e.id.to_string(),
                 "name": e.name,
-                "state": format!("{:?}", e.state),
+                "state": format!("{:?}", e.state).to_lowercase(),
                 "mode": e.mode,
                 "created_at": e.created_at.to_rfc3339(),
                 "group": e.manifest.group,
@@ -266,7 +266,7 @@ pub async fn export_agents(State(state): State<Arc<AppState>>) -> impl IntoRespo
             serde_json::json!({
                 "id": e.id.to_string(),
                 "name": e.name,
-                "state": format!("{:?}", e.state),
+                "state": format!("{:?}", e.state).to_lowercase(),
                 "mode": e.mode,
                 "group": e.manifest.group,
                 "description": e.manifest.description,
@@ -464,7 +464,7 @@ pub async fn search_agents(
             serde_json::json!({
                 "id": e.id.to_string(),
                 "name": e.name,
-                "state": format!("{:?}", e.state),
+                "state": format!("{:?}", e.state).to_lowercase(),
                 "group": e.manifest.group,
                 "model_provider": e.manifest.model.provider,
                 "model_name": e.manifest.model.model,
@@ -1358,7 +1358,7 @@ pub async fn get_agent(
         Json(serde_json::json!({
             "id": entry.id.to_string(),
             "name": entry.name,
-            "state": format!("{:?}", entry.state),
+            "state": format!("{:?}", entry.state).to_lowercase(),
             "mode": entry.mode,
             "profile": entry.manifest.profile,
             "created_at": entry.created_at.to_rfc3339(),
