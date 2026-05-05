@@ -3670,6 +3670,7 @@ pub async fn list_sessions(
                         "agent_name": agent_name,
                         "message_count": session["message_count"].as_u64().unwrap_or(0),
                         "created_at": session["created_at"].as_str().unwrap_or(""),
+                        "updated_at": session["updated_at"].as_str().unwrap_or(""),
                         "label": session.get("label").cloned().unwrap_or(serde_json::Value::Null),
                     })
                 })

@@ -5219,27 +5219,37 @@ fn cmd_sessions(agent: Option<&str>, json: bool) {
         );
         return;
     }
-    if let Some(arr) = body.as_array() {
-        if arr.is_empty() {
-            println!("No sessions found.");
-            return;
-        }
-        println!("{:<38} {:<16} {:<8} LAST ACTIVE", "ID", "AGENT", "MSGS");
-        println!("{}", "-".repeat(80));
-        for s in arr {
+    let sessions = body
+        .get("sessions")
+        .and_then(|v| v.as_array())
+        .or_else(|| body.as_array());
+    match sessions {
+        None => println!("No sessions found."),
+        Some(arr) if arr.is_empty() => println!("No sessions found."),
+        Some(arr) => {
+            let total = body["total"].as_u64().unwrap_or(arr.len() as u64);
             println!(
-                "{:<38} {:<16} {:<8} {}",
-                s["id"].as_str().unwrap_or("?"),
-                s["agent_name"].as_str().unwrap_or("?"),
-                s["message_count"].as_u64().unwrap_or(0),
-                s["last_active"].as_str().unwrap_or("?"),
+                "{:<38} {:<16} {:<8} LAST ACTIVE",
+                "SESSION ID", "AGENT", "MSGS"
             );
+            println!("{}", "-".repeat(80));
+            for s in arr {
+                let last = s["updated_at"]
+                    .as_str()
+                    .or_else(|| s["created_at"].as_str())
+                    .unwrap_or("?");
+                println!(
+                    "{:<38} {:<16} {:<8} {}",
+                    s["session_id"].as_str().unwrap_or("?"),
+                    s["agent_name"].as_str().unwrap_or("?"),
+                    s["message_count"].as_u64().unwrap_or(0),
+                    last,
+                );
+            }
+            if total > arr.len() as u64 {
+                println!("  … {total} total");
+            }
         }
-    } else {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&body).unwrap_or_default()
-        );
     }
 }
 

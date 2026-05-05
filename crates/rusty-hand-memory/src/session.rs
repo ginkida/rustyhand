@@ -176,7 +176,7 @@ impl SessionStore {
             .map_err(|e| RustyHandError::Internal(e.to_string()))?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, agent_id, message_count, created_at, label, messages FROM sessions ORDER BY updated_at DESC",
+                "SELECT id, agent_id, message_count, created_at, updated_at, label, messages FROM sessions ORDER BY updated_at DESC",
             )
             .map_err(|e| RustyHandError::Memory(e.to_string()))?;
 
@@ -186,12 +186,13 @@ impl SessionStore {
                 let agent_id: String = row.get(1)?;
                 let stored_count: i64 = row.get::<_, i64>(2).unwrap_or(0);
                 let created_at: String = row.get(3)?;
-                let label: Option<String> = row.get(4)?;
+                let updated_at: String = row.get(4)?;
+                let label: Option<String> = row.get(5)?;
                 // Use stored count; fall back to blob deserialization for pre-v8 data
                 let msg_count = if stored_count > 0 {
                     stored_count as usize
                 } else {
-                    let messages_blob: Vec<u8> = row.get(5)?;
+                    let messages_blob: Vec<u8> = row.get(6)?;
                     rmp_serde::from_slice::<Vec<Message>>(&messages_blob)
                         .map(|m| m.len())
                         .unwrap_or(0)
@@ -201,6 +202,7 @@ impl SessionStore {
                     "agent_id": agent_id,
                     "message_count": msg_count,
                     "created_at": created_at,
+                    "updated_at": updated_at,
                     "label": label,
                 }))
             })
