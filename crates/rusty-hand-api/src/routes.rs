@@ -856,6 +856,46 @@ pub async fn kill_agent(
     }
 }
 
+/// POST /api/agents/:id/restart — Kill and re-spawn an agent with the same manifest.
+///
+/// Useful for recovering crashed agents without losing their configuration.
+/// Returns the new agent's ID so callers can reconnect.
+pub async fn restart_agent(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let agent_id = match parse_agent_id(&id) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
+
+    let entry = match state.kernel.registry.get(agent_id) {
+        Some(e) => e,
+        None => return agent_not_found(&id),
+    };
+
+    let manifest = entry.manifest.clone();
+    let name = entry.name.clone();
+
+    if let Err(e) = state.kernel.kill_agent(agent_id) {
+        tracing::warn!("restart_agent: kill failed for {id}: {e}");
+        // Continue even if kill fails (agent may already be terminated)
+    }
+
+    match state.kernel.spawn_agent(manifest) {
+        Ok(new_id) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "restarted",
+                "old_agent_id": id,
+                "new_agent_id": new_id.to_string(),
+                "name": name,
+            })),
+        ),
+        Err(e) => safe_error(StatusCode::INTERNAL_SERVER_ERROR, "Agent restart", &e),
+    }
+}
+
 /// GET /api/status — Kernel status.
 pub async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let uptime = state.started_at.elapsed().as_secs();

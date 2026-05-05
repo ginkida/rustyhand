@@ -880,6 +880,7 @@
                   <button class="btn btn-primary" @click="chatWithAgent(detailAgent); showDetailModal = false">Chat</button>
                   <button class="btn btn-ghost" @click="showDetailModal = false; navigate('automation'); $nextTick(() => { var sp = document.querySelector('[x-data=&quot;automationPage()&quot;]'); if(sp && sp.__x) { sp.__x.$data.filterAgentId = detailAgent.id; sp.__x.$data.loadJobs(); } })">Automation</button>
                   <button class="btn btn-ghost" @click="cloneAgent(detailAgent)">Clone</button>
+                  <button class="btn btn-warning btn-sm" @click="restartAgent(detailAgent)" x-show="detailAgent && detailAgent.state !== 'running'" title="Kill and re-spawn with same manifest">Restart</button>
                   <button class="btn btn-danger" @click="killAgent(detailAgent)">Stop</button>
                 </div>
               </div>

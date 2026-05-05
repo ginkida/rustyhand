@@ -516,6 +516,22 @@ function agentsPage() {
       });
     },
 
+    async restartAgent(agent) {
+      try {
+        var res = await RustyHandAPI.post('/api/agents/' + agent.id + '/restart', {});
+        RustyHandToast.success('Agent "' + agent.name + '" restarted');
+        this.showDetailModal = false;
+        await Alpine.store('app').refreshAgents();
+        // Switch detail view to new agent if sidebar is open
+        if (res && res.new_agent_id) {
+          var newAgent = (Alpine.store('app').agents || []).find(function(a) { return a.id === res.new_agent_id; });
+          if (newAgent) this.openAgentDetail(newAgent);
+        }
+      } catch(e) {
+        RustyHandToast.error('Failed to restart agent: ' + e.message);
+      }
+    },
+
     killAllAgents() {
       var list = this.filteredAgents;
       if (!list.length) return;

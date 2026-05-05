@@ -169,6 +169,10 @@ pub async fn build_router(
             axum::routing::get(routes::get_agent).delete(routes::kill_agent),
         )
         .route(
+            "/api/agents/{id}/restart",
+            axum::routing::post(routes::restart_agent),
+        )
+        .route(
             "/api/agents/{id}/mode",
             axum::routing::put(routes::set_agent_mode),
         )

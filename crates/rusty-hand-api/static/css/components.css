@@ -99,6 +99,8 @@
 .btn-success:hover { background: var(--success-dim); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
 .btn-danger { background: var(--error); color: #fff; box-shadow: var(--shadow-xs); }
 .btn-danger:hover { background: var(--error-dim); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
+.btn-warning { background: var(--warning); color: #000; box-shadow: var(--shadow-xs); }
+.btn-warning:hover { background: var(--warning-dim, #d97706); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
 .btn-ghost {
   background: transparent;
   color: var(--text-dim);
