@@ -4690,7 +4690,12 @@ fn cmd_models_providers(json: bool) {
             );
             return;
         }
-        if let Some(arr) = body.as_array() {
+        // /api/providers returns {providers:[...], total:N} envelope
+        let arr = body
+            .get("providers")
+            .and_then(|v| v.as_array())
+            .or_else(|| body.as_array());
+        if let Some(arr) = arr {
             println!(
                 "{:<20} {:<12} {:<10} BASE URL",
                 "PROVIDER", "AUTH", "MODELS"
