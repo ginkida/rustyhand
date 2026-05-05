@@ -197,7 +197,13 @@ pub fn run(_config: Option<PathBuf>) -> LauncherChoice {
                 client
                     .and_then(|c| c.get(format!("{base}/api/agents")).send().ok())
                     .and_then(|r| r.json::<serde_json::Value>().ok())
-                    .and_then(|v| v.as_array().map(|a| a.len() as u64))
+                    .and_then(|v| {
+                        // /api/agents returns {agents:[...], total:N} envelope
+                        v.get("agents")
+                            .and_then(|a| a.as_array())
+                            .or_else(|| v.as_array())
+                            .map(|a| a.len() as u64)
+                    })
                     .unwrap_or(0)
             });
             let _ = daemon_tx.send((result, agent_count));

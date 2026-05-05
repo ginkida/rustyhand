@@ -2729,7 +2729,12 @@ decay_rate = 0.05
         match client.get(format!("{base}/api/skills")).send() {
             Ok(resp) if resp.status().is_success() => {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    if let Some(arr) = body.as_array() {
+                    // /api/skills returns {skills:[...], total:N} envelope
+                    let arr = body
+                        .get("skills")
+                        .and_then(|v| v.as_array())
+                        .or_else(|| body.as_array());
+                    if let Some(arr) = arr {
                         if !json {
                             ui::check_ok(&format!("Skills loaded in daemon: {}", arr.len()));
                         }
@@ -2744,15 +2749,22 @@ decay_rate = 0.05
         match client.get(format!("{base}/api/mcp/servers")).send() {
             Ok(resp) if resp.status().is_success() => {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    if let Some(arr) = body.as_array() {
-                        let connected = arr
-                            .iter()
-                            .filter(|s| {
-                                s.get("connected")
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false)
-                            })
-                            .count();
+                    // /api/mcp/servers returns {configured:[...], connected:[...], total_configured:N}
+                    let _total_configured = body
+                        .get("total_configured")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let total_connected = body
+                        .get("total_connected")
+                        .and_then(|v| v.as_u64())
+                        .or_else(|| {
+                            body.get("connected")
+                                .and_then(|v| v.as_array())
+                                .map(|a| a.len() as u64)
+                        })
+                        .unwrap_or(0);
+                    if let Some(arr) = body.get("configured").and_then(|v| v.as_array()) {
+                        let connected = total_connected as usize;
                         if !json {
                             ui::check_ok(&format!(
                                 "MCP servers: {} configured, {} connected",
@@ -4572,7 +4584,12 @@ fn cmd_models_list(provider_filter: Option<&str>, json: bool) {
             );
             return;
         }
-        if let Some(arr) = body.as_array() {
+        // /api/models returns {models:[...], total:N, available:N} envelope
+        let arr = body
+            .get("models")
+            .and_then(|v| v.as_array())
+            .or_else(|| body.as_array());
+        if let Some(arr) = arr {
             if arr.is_empty() {
                 println!("No models found.");
                 return;
