@@ -5108,14 +5108,14 @@ fn cmd_approvals_list(json: bool) {
             println!("No pending approvals.");
             return;
         }
-        println!("{:<38} {:<16} {:<12} REQUEST", "ID", "AGENT", "TYPE");
-        println!("{}", "-".repeat(80));
+        println!("{:<38} {:<16} {:<20} REQUEST", "ID", "AGENT ID", "TOOL");
+        println!("{}", "-".repeat(90));
         for a in arr {
             println!(
-                "{:<38} {:<16} {:<12} {}",
+                "{:<38} {:<16} {:<20} {}",
                 a["id"].as_str().unwrap_or("?"),
-                a["agent_name"].as_str().unwrap_or("?"),
-                a["approval_type"].as_str().unwrap_or("?"),
+                a["agent_id"].as_str().unwrap_or("?"),
+                a["tool_name"].as_str().unwrap_or("?"),
                 a["description"].as_str().unwrap_or(""),
             );
         }
