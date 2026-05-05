@@ -1995,19 +1995,31 @@ fn cmd_status(config: Option<PathBuf>, json: bool) {
         ui::section("RustyHand Daemon Status");
         ui::blank();
         ui::kv_ok("Status", body["status"].as_str().unwrap_or("?"));
+        let total = body["agent_count"].as_u64().unwrap_or(0);
+        let running = body["running_count"].as_u64().unwrap_or(0);
         ui::kv(
             "Agents",
-            &body["agent_count"].as_u64().unwrap_or(0).to_string(),
+            &if running > 0 {
+                format!("{total} total, {running} running")
+            } else {
+                format!("{total} total")
+            },
         );
         ui::kv("Provider", body["default_provider"].as_str().unwrap_or("?"));
         ui::kv("Model", body["default_model"].as_str().unwrap_or("?"));
         ui::kv("API", &base);
         ui::kv("Dashboard", &format!("{base}/"));
         ui::kv("Data dir", body["data_dir"].as_str().unwrap_or("?"));
-        ui::kv(
-            "Uptime",
-            &format!("{}s", body["uptime_seconds"].as_u64().unwrap_or(0)),
-        );
+        let uptime_secs = body["uptime_seconds"].as_u64().unwrap_or(0);
+        let uptime_str = if uptime_secs >= 3600 {
+            format!("{}h {}m", uptime_secs / 3600, (uptime_secs % 3600) / 60)
+        } else if uptime_secs >= 60 {
+            format!("{}m {}s", uptime_secs / 60, uptime_secs % 60)
+        } else {
+            format!("{uptime_secs}s")
+        };
+        ui::kv("Uptime", &uptime_str);
+        ui::kv("Version", body["version"].as_str().unwrap_or("?"));
 
         if let Some(agents) = body["agents"].as_array() {
             if !agents.is_empty() {
@@ -2015,12 +2027,12 @@ fn cmd_status(config: Option<PathBuf>, json: bool) {
                 ui::section("Active Agents");
                 for a in agents {
                     println!(
-                        "    {} ({}) -- {} [{}:{}]",
+                        "    {:<20} {:<10} {}:{} ({})",
                         a["name"].as_str().unwrap_or("?"),
-                        a["id"].as_str().unwrap_or("?"),
                         a["state"].as_str().unwrap_or("?"),
                         a["model_provider"].as_str().unwrap_or("?"),
                         a["model_name"].as_str().unwrap_or("?"),
+                        a["id"].as_str().unwrap_or("?"),
                     );
                 }
             }
