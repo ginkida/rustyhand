@@ -5829,9 +5829,10 @@ fn cmd_memory_import(path: &std::path::Path, format: Option<BackupFormatArg>) {
 fn cmd_memory_list(agent: &str, json: bool) {
     let base = require_daemon("memory list");
     let client = daemon_client();
+    let agent_id = resolve_agent_id(&client, &base, agent);
     let body = daemon_json(
         client
-            .get(format!("{base}/api/memory/agents/{agent}/kv"))
+            .get(format!("{base}/api/memory/agents/{agent_id}/kv"))
             .send(),
     );
     if json {
@@ -5875,9 +5876,10 @@ fn cmd_memory_list(agent: &str, json: bool) {
 fn cmd_memory_get(agent: &str, key: &str, json: bool) {
     let base = require_daemon("memory get");
     let client = daemon_client();
+    let agent_id = resolve_agent_id(&client, &base, agent);
     let body = daemon_json(
         client
-            .get(format!("{base}/api/memory/agents/{agent}/kv/{key}"))
+            .get(format!("{base}/api/memory/agents/{agent_id}/kv/{key}"))
             .send(),
     );
     if json {
@@ -5900,9 +5902,10 @@ fn cmd_memory_get(agent: &str, key: &str, json: bool) {
 fn cmd_memory_set(agent: &str, key: &str, value: &str) {
     let base = require_daemon("memory set");
     let client = daemon_client();
+    let agent_id = resolve_agent_id(&client, &base, agent);
     let body = daemon_json(
         client
-            .put(format!("{base}/api/memory/agents/{agent}/kv/{key}"))
+            .put(format!("{base}/api/memory/agents/{agent_id}/kv/{key}"))
             .json(&serde_json::json!({"value": value}))
             .send(),
     );
@@ -5919,9 +5922,10 @@ fn cmd_memory_set(agent: &str, key: &str, value: &str) {
 fn cmd_memory_delete(agent: &str, key: &str) {
     let base = require_daemon("memory delete");
     let client = daemon_client();
+    let agent_id = resolve_agent_id(&client, &base, agent);
     let body = daemon_json(
         client
-            .delete(format!("{base}/api/memory/agents/{agent}/kv/{key}"))
+            .delete(format!("{base}/api/memory/agents/{agent_id}/kv/{key}"))
             .send(),
     );
     if body.get("error").is_some() {
