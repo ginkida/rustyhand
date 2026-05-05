@@ -3507,6 +3507,37 @@ if __name__ == "__main__":
 // ---------------------------------------------------------------------------
 
 fn cmd_channel_list() {
+    // If daemon is running, get richer live status from /api/channels
+    if let Some(base) = find_daemon() {
+        let client = daemon_client();
+        let body = daemon_json(client.get(format!("{base}/api/channels")).send());
+        let channels = body
+            .get("channels")
+            .and_then(|v| v.as_array())
+            .or_else(|| body.as_array());
+        if let Some(channels) = channels {
+            println!("Channel Integrations (live daemon status):\n");
+            println!("{:<12} {:<16} STATUS", "CHANNEL", "DISPLAY NAME");
+            println!("{}", "-".repeat(60));
+            for ch in channels {
+                let name = ch["name"].as_str().unwrap_or("?");
+                let display = ch["display_name"].as_str().unwrap_or("?");
+                let auth = ch["auth_status"].as_str().unwrap_or("unknown");
+                let status_label = match auth {
+                    "ok" => "Connected",
+                    "auth_failed" => "Auth failed",
+                    "missing_token" => "Missing token",
+                    "not_configured" => "Not configured",
+                    other => other,
+                };
+                println!("{:<12} {:<16} {}", name, display, status_label);
+            }
+        }
+        println!("\nUse `rustyhand channel setup <channel>` to configure a channel.");
+        return;
+    }
+
+    // Offline fallback: read config file
     let home = rusty_hand_home();
     let config_path = home.join("config.toml");
 
@@ -3518,8 +3549,8 @@ fn cmd_channel_list() {
     let config_str = std::fs::read_to_string(&config_path).unwrap_or_default();
 
     println!("Channel Integrations:\n");
-    println!("{:<12} {:<10} STATUS", "CHANNEL", "ENV VAR");
-    println!("{}", "-".repeat(50));
+    println!("{:<12} {:<22} STATUS", "CHANNEL", "ENV VAR");
+    println!("{}", "-".repeat(58));
 
     let channels: Vec<(&str, &str)> = vec![
         ("telegram", "TELEGRAM_BOT_TOKEN"),
@@ -3537,7 +3568,7 @@ fn cmd_channel_list() {
             (false, _) => "Not configured",
         };
 
-        println!("{:<12} {:<10} {}", name, env_var, status);
+        println!("{:<12} {:<22} {}", name, env_var, status);
     }
 
     println!("\nUse `rustyhand channel setup <channel>` to configure a channel.");
