@@ -6941,7 +6941,17 @@ pub async fn serve_upload(Path(file_id): Path<String>) -> impl IntoResponse {
 pub async fn list_approvals(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let pending = state.kernel.approval_manager.list_pending();
     let total = pending.len();
-    Json(serde_json::json!({"approvals": pending, "total": total}))
+    let approvals: Vec<_> = pending
+        .into_iter()
+        .map(|r| {
+            let mut v = serde_json::to_value(&r).unwrap_or_default();
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("status".to_string(), serde_json::json!("pending"));
+            }
+            v
+        })
+        .collect();
+    Json(serde_json::json!({"approvals": approvals, "total": total}))
 }
 
 /// POST /api/approvals — Create a manual approval request (for external systems).

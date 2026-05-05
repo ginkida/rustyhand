@@ -5970,8 +5970,8 @@ fn cmd_devices_list(json: bool) {
         for d in arr {
             println!(
                 "{:<38} {:<20} {}",
-                d["id"].as_str().unwrap_or("?"),
-                d["name"].as_str().unwrap_or("?"),
+                d["device_id"].as_str().unwrap_or("?"),
+                d["display_name"].as_str().unwrap_or("?"),
                 d["last_seen"].as_str().unwrap_or("?"),
             );
         }
