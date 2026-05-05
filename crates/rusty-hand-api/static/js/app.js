@@ -924,7 +924,7 @@ function app() {
           return {
             type: 'history',
             label: r.excerpt || '(no preview)',
-            sublabel: (r.label || r.session_id.substring(0, 8)) + ' · ' + r.role,
+            sublabel: r.label || r.session_id.substring(0, 8),
             hint: 'Chat',
             agentId: r.agent_id,
             sessionId: r.session_id,
