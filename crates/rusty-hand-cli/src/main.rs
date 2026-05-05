@@ -1753,10 +1753,14 @@ fn cmd_agent_list(config: Option<PathBuf>, json: bool) {
             return;
         }
 
-        let agents = body.as_array();
+        // /api/agents returns {agents: [...], total: N} envelope
+        let agents_arr = body
+            .get("agents")
+            .and_then(|v| v.as_array())
+            .map(|v| v.as_slice());
 
-        match agents {
-            Some(agents) if agents.is_empty() => println!("No agents running."),
+        match agents_arr {
+            Some([]) => println!("No agents running."),
             Some(agents) => {
                 println!(
                     "{:<38} {:<16} {:<10} {:<12} MODEL",
@@ -1787,7 +1791,7 @@ fn cmd_agent_list(config: Option<PathBuf>, json: bool) {
                     serde_json::json!({
                         "id": e.id.to_string(),
                         "name": e.name,
-                        "state": format!("{:?}", e.state),
+                        "state": format!("{:?}", e.state).to_lowercase(),
                         "created_at": e.created_at.to_rfc3339(),
                     })
                 })
