@@ -985,8 +985,12 @@ fn cmd_eval(suite_path: &std::path::Path, agent: Option<&str>, json: bool) {
                 eprintln!("Error listing agents: {e}");
                 std::process::exit(1);
             });
-        resp.as_array()
-            .and_then(|a| a.first())
+        // /api/agents returns {agents:[...], total:N} envelope
+        let arr = resp
+            .get("agents")
+            .and_then(|v| v.as_array())
+            .or_else(|| resp.as_array());
+        arr.and_then(|a| a.first())
             .and_then(|a| a["id"].as_str())
             .map(String::from)
             .unwrap_or_else(|| {
@@ -1141,7 +1145,12 @@ fn resolve_agent_id(
         .send()
         .and_then(|r| r.json())
         .unwrap_or_default();
-    resp.as_array()
+    // /api/agents returns {agents:[...], total:N} envelope
+    let agents_arr = resp
+        .get("agents")
+        .and_then(|v| v.as_array())
+        .or_else(|| resp.as_array());
+    agents_arr
         .and_then(|agents| {
             agents
                 .iter()
