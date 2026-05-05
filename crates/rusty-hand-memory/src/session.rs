@@ -526,7 +526,8 @@ impl SessionStore {
             .map_err(|e| RustyHandError::Internal(e.to_string()))?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, messages, created_at, label FROM sessions WHERE agent_id = ?1 ORDER BY created_at DESC",
+                "SELECT id, messages, created_at, updated_at, label, message_count \
+                 FROM sessions WHERE agent_id = ?1 ORDER BY updated_at DESC",
             )
             .map_err(|e| RustyHandError::Memory(e.to_string()))?;
 
@@ -535,11 +536,14 @@ impl SessionStore {
                 let session_id: String = row.get(0)?;
                 let messages_blob: Vec<u8> = row.get(1)?;
                 let created_at: String = row.get(2)?;
-                let label: Option<String> = row.get(3)?;
+                let updated_at: String = row.get(3)?;
+                let label: Option<String> = row.get(4)?;
+                // Use stored column (O(1)); fall back to blob count for pre-v8 rows.
+                let stored_count: Option<i64> = row.get(5)?;
                 let msgs =
                     rmp_serde::from_slice::<Vec<Message>>(&messages_blob).unwrap_or_default();
-                let msg_count = msgs.len();
-                // Extract the first user message as a preview for the session picker.
+                let msg_count = stored_count.unwrap_or(msgs.len() as i64) as usize;
+                // First user message as a short preview for the session picker.
                 let first_preview: Option<String> = msgs.iter().find_map(|m| {
                     if m.role != rusty_hand_types::message::Role::User {
                         return None;
@@ -568,6 +572,7 @@ impl SessionStore {
                     "session_id": session_id,
                     "message_count": msg_count,
                     "created_at": created_at,
+                    "updated_at": updated_at,
                     "label": label,
                     "first_preview": first_preview,
                 }))
