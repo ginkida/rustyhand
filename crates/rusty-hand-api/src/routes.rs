@@ -3668,13 +3668,20 @@ pub async fn list_sessions(
                 .into_iter()
                 .filter_map(|session| {
                     let agent_id = session["agent_id"].as_str().unwrap_or("").to_string();
-                    if !agent_filter.is_empty() && !agent_id.starts_with(&agent_filter) {
-                        return None;
-                    }
                     let agent_name = uuid::Uuid::parse_str(&agent_id)
                         .ok()
                         .and_then(|uuid| state.kernel.registry.get(AgentId(uuid)))
                         .map(|entry| entry.name);
+                    if !agent_filter.is_empty() {
+                        let matches_id = agent_id.starts_with(&agent_filter);
+                        let matches_name = agent_name
+                            .as_deref()
+                            .map(|n| n.eq_ignore_ascii_case(&agent_filter))
+                            .unwrap_or(false);
+                        if !matches_id && !matches_name {
+                            return None;
+                        }
+                    }
                     Some(serde_json::json!({
                         "session_id": session["session_id"].as_str().unwrap_or(""),
                         "agent_id": agent_id,

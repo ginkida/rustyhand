@@ -6068,17 +6068,18 @@ fn cmd_webhooks_list(json: bool) {
 fn cmd_webhooks_create(agent: &str, url: &str) {
     let base = require_daemon("webhooks create");
     let client = daemon_client();
+    let agent_id = resolve_agent_id(&client, &base, agent);
     let body = daemon_json(
         client
             .post(format!("{base}/api/triggers"))
             .json(&serde_json::json!({
-                "agent_id": agent,
+                "agent_id": agent_id,
                 "pattern": {"webhook": {"url": url}},
                 "prompt_template": "Webhook event: {{event}}",
             }))
             .send(),
     );
-    if let Some(id) = body["id"].as_str() {
+    if let Some(id) = body["trigger_id"].as_str().or_else(|| body["id"].as_str()) {
         ui::success(&format!("Webhook created: {id}"));
     } else {
         ui::error(&format!(

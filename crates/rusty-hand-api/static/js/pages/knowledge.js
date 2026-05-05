@@ -20,7 +20,7 @@ function knowledgePage() {
             this.loading = true;
             this.error = null;
             try {
-                const data = await api.get('/api/knowledge');
+                const data = await RustyHandAPI.get('/api/knowledge');
                 this.nodes = data.nodes || [];
                 this.edges = data.edges || [];
             } catch (e) {
