@@ -6110,11 +6110,12 @@ fn cmd_webhooks_test(id: &str) {
 fn cmd_message(agent: &str, text: &str, json: bool, stream: bool) {
     let base = require_daemon("message");
     let client = daemon_client();
+    let agent_id = resolve_agent_id(&client, &base, agent);
 
     if stream {
         // POST to stream endpoint and print tokens as they arrive
         let response = match client
-            .post(format!("{base}/api/agents/{agent}/message/stream"))
+            .post(format!("{base}/api/agents/{agent_id}/message/stream"))
             .json(&serde_json::json!({"message": text}))
             .send()
         {
@@ -6181,7 +6182,7 @@ fn cmd_message(agent: &str, text: &str, json: bool, stream: bool) {
 
     let body = daemon_json(
         client
-            .post(format!("{base}/api/agents/{agent}/message"))
+            .post(format!("{base}/api/agents/{agent_id}/message"))
             .json(&serde_json::json!({"message": text}))
             .send(),
     );
