@@ -441,6 +441,17 @@ enum AgentCommands {
         /// Agent ID or name.
         agent_id: String,
     },
+    /// Stream audit log entries for a specific agent.
+    Logs {
+        /// Agent ID or name.
+        agent_id: String,
+        /// Keep streaming new events (like tail -f).
+        #[arg(long, short)]
+        follow: bool,
+        /// Number of recent entries to show (snapshot mode only).
+        #[arg(long, default_value = "50")]
+        lines: usize,
+    },
 }
 
 #[derive(Subcommand)]
@@ -837,6 +848,11 @@ fn main() {
             AgentCommands::Kill { agent_id } => cmd_agent_kill(cli.config, &agent_id),
             AgentCommands::Restart { agent_id } => cmd_agent_restart(&agent_id),
             AgentCommands::Sessions { agent_id } => cmd_agent_sessions(&agent_id),
+            AgentCommands::Logs {
+                agent_id,
+                follow,
+                lines,
+            } => cmd_agent_logs(&agent_id, follow, lines),
         },
         Some(Commands::Workflow(sub)) => match sub {
             WorkflowCommands::List => cmd_workflow_list(),
@@ -1942,6 +1958,87 @@ fn cmd_agent_sessions(agent_id_str: &str) {
                 let label = s["label"].as_str().unwrap_or("");
                 println!("{id:<36}  {count:>4}  {updated:<22}  {label}");
             }
+        }
+    }
+}
+
+fn cmd_agent_logs(agent_id_str: &str, follow: bool, lines: usize) {
+    let Some(base) = find_daemon() else {
+        ui::error("Daemon not running. Start it with `rustyhand start`.");
+        std::process::exit(1);
+    };
+    let client = daemon_client();
+    let agent_id = resolve_agent_id(&client, &base, agent_id_str);
+
+    if follow {
+        // Stream via SSE — read response body line by line
+        println!("Streaming logs for agent {agent_id} (Ctrl+C to stop)…");
+        println!("{}", "─".repeat(80));
+        let response = match client
+            .get(format!("{base}/api/logs/stream?agent_id={agent_id}"))
+            .send()
+        {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Failed to connect to log stream: {e}");
+                std::process::exit(1);
+            }
+        };
+        use std::io::{BufRead, BufReader};
+        let reader = BufReader::new(response);
+        for line in reader.lines() {
+            match line {
+                Ok(l) if l.starts_with("data: ") => {
+                    let data = &l["data: ".len()..];
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                        let ts = json["timestamp"].as_str().unwrap_or("");
+                        let action = json["action"].as_str().unwrap_or("");
+                        let detail = json["detail"].as_str().unwrap_or("");
+                        let outcome = json["outcome"].as_str().unwrap_or("");
+                        println!("{ts:<28} {action:<20} {outcome:<5} {detail}");
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+    } else {
+        // Snapshot: fetch recent audit entries filtered by agent_id
+        let body = daemon_json(client.get(format!("{base}/api/audit/recent?n=200")).send());
+        let entries = body.get("entries").and_then(|v| v.as_array());
+        let Some(entries) = entries else {
+            println!("No audit entries found.");
+            return;
+        };
+        let filtered: Vec<_> = entries
+            .iter()
+            .filter(|e| {
+                e["agent_id"]
+                    .as_str()
+                    .map(|id| id.starts_with(&agent_id))
+                    .unwrap_or(false)
+            })
+            .collect();
+        if filtered.is_empty() {
+            println!("No log entries found for agent {agent_id_str}.");
+            return;
+        }
+        let show: Vec<_> = filtered
+            .into_iter()
+            .rev()
+            .take(lines)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        println!("{:<28} {:<20} {:<5} DETAIL", "TIMESTAMP", "ACTION", "OK");
+        println!("{}", "─".repeat(80));
+        for e in show {
+            let ts = e["timestamp"].as_str().unwrap_or("");
+            let action = e["action"].as_str().unwrap_or("");
+            let detail = e["detail"].as_str().unwrap_or("");
+            let outcome = e["outcome"].as_str().unwrap_or("");
+            println!("{ts:<28} {action:<20} {outcome:<5} {detail}");
         }
     }
 }

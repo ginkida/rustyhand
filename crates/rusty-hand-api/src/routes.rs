@@ -3170,6 +3170,7 @@ pub async fn logs_stream(
         .cloned()
         .unwrap_or_default()
         .to_lowercase();
+    let agent_id_filter = params.get("agent_id").cloned().unwrap_or_default();
 
     let (tx, rx) = tokio::sync::mpsc::channel::<
         Result<axum::response::sse::Event, std::convert::Infallible>,
@@ -3192,6 +3193,11 @@ pub async fn logs_stream(
                 }
 
                 let action_str = format!("{:?}", entry.action);
+
+                // Apply agent_id filter (exact prefix match covers both UUID and name)
+                if !agent_id_filter.is_empty() && !entry.agent_id.starts_with(&agent_id_filter) {
+                    continue;
+                }
 
                 // Apply level filter
                 if !level_filter.is_empty() {
