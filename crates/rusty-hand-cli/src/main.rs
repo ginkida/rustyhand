@@ -5383,7 +5383,31 @@ fn cmd_session_show(session_id: &str, json: bool) {
     if let Some(messages) = body["messages"].as_array() {
         for msg in messages {
             let role = msg["role"].as_str().unwrap_or("?");
-            let content = msg["content"].as_str().unwrap_or("");
+            // content is either a string (Text) or array of blocks (Blocks)
+            let content = if let Some(s) = msg["content"].as_str() {
+                s.to_string()
+            } else if let Some(blocks) = msg["content"].as_array() {
+                blocks
+                    .iter()
+                    .filter_map(|b| {
+                        if b["type"].as_str() == Some("text") {
+                            b["text"].as_str().map(|s| s.to_string())
+                        } else if b["type"].as_str() == Some("tool_use") {
+                            Some(format!("[tool_use: {}]", b["name"].as_str().unwrap_or("?")))
+                        } else if b["type"].as_str() == Some("tool_result") {
+                            Some(format!(
+                                "[tool_result: {}]",
+                                b["content"].as_str().unwrap_or("")
+                            ))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            } else {
+                String::new()
+            };
             println!("\n[{role}]\n{content}");
         }
     } else {
