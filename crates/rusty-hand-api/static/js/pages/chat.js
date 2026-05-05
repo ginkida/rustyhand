@@ -24,6 +24,7 @@ function chatPage() {
     sessions: [],
     sessionsLoadError: '',
     sessionsOpen: false,
+    currentSessionId: null,
     searchOpen: false,
     searchQuery: '',
     // Activity log state
@@ -285,8 +286,10 @@ function chatPage() {
         self.groupEditOpen = false;
         self.groupDraft = '';
         if (agent) {
-          self.loadSession(agent.id);
-          self.loadSessions(agent.id);
+          // Load session first so currentSessionId is set before marking active
+          self.loadSession(agent.id).then(function() {
+            self.loadSessions(agent.id);
+          });
           self.loadStars();
         }
       });
@@ -632,6 +635,7 @@ function chatPage() {
       var self = this;
       try {
         var data = await RustyHandAPI.get('/api/agents/' + agentId + '/session');
+        if (data.session_id) self.currentSessionId = data.session_id;
         if (data.messages && data.messages.length) {
           self.messages = data.messages.map(function(m) {
             var role = m.role === 'User' ? 'user' : (m.role === 'System' ? 'system' : 'agent');
@@ -672,7 +676,10 @@ function chatPage() {
     async loadSessions(agentId) {
       try {
         var data = await RustyHandAPI.get('/api/agents/' + agentId + '/sessions');
-        this.sessions = data.sessions || [];
+        var self = this;
+        this.sessions = (data.sessions || []).map(function(s) {
+          return Object.assign({}, s, { active: s.session_id === self.currentSessionId });
+        });
         this.sessionsLoadError = '';
       } catch(e) {
         this.sessions = [];
