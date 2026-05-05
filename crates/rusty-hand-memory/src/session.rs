@@ -341,11 +341,15 @@ impl SessionStore {
             .conn
             .lock()
             .map_err(|e| RustyHandError::Internal(e.to_string()))?;
-        conn.execute(
-            "UPDATE sessions SET label = ?1, updated_at = ?2 WHERE id = ?3",
-            rusqlite::params![label, Utc::now().to_rfc3339(), session_id.0.to_string()],
-        )
-        .map_err(|e| RustyHandError::Memory(e.to_string()))?;
+        let rows = conn
+            .execute(
+                "UPDATE sessions SET label = ?1, updated_at = ?2 WHERE id = ?3",
+                rusqlite::params![label, Utc::now().to_rfc3339(), session_id.0.to_string()],
+            )
+            .map_err(|e| RustyHandError::Memory(e.to_string()))?;
+        if rows == 0 {
+            return Err(RustyHandError::SessionNotFound(session_id.0.to_string()));
+        }
         Ok(())
     }
 

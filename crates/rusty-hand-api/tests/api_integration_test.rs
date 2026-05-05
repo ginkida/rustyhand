@@ -119,6 +119,10 @@ async fn start_test_server_with_provider(
             axum::routing::get(routes::export_session_markdown),
         )
         .route(
+            "/api/sessions/{id}/label",
+            axum::routing::put(routes::set_session_label),
+        )
+        .route(
             "/api/triggers",
             axum::routing::get(routes::list_triggers).post(routes::create_trigger),
         )
@@ -1586,6 +1590,108 @@ async fn test_restart_agent_preserves_sessions() {
             "{}/api/agents/{}/restart",
             server.base_url, old_agent_id
         ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 404);
+}
+
+#[tokio::test]
+async fn test_session_label_set_and_clear() {
+    let server = require_server!(start_test_server());
+    let client = reqwest::Client::new();
+
+    // Spawn agent to get a session
+    let resp = client
+        .post(format!("{}/api/agents", server.base_url))
+        .json(&serde_json::json!({"manifest_toml": TEST_MANIFEST}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 201);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let agent_id = body["agent_id"].as_str().unwrap().to_string();
+
+    // Get the session ID from the agent
+    let resp = client
+        .get(format!("{}/api/agents/{}", server.base_url, agent_id))
+        .send()
+        .await
+        .unwrap();
+    let agent: serde_json::Value = resp.json().await.unwrap();
+    let session_id = agent["session_id"].as_str().unwrap().to_string();
+
+    // Initially label is null
+    let resp = client
+        .get(format!("{}/api/sessions/{}", server.base_url, session_id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let sess: serde_json::Value = resp.json().await.unwrap();
+    assert!(sess["label"].is_null(), "New session should have no label");
+
+    // Set a label
+    let resp = client
+        .put(format!(
+            "{}/api/sessions/{}/label",
+            server.base_url, session_id
+        ))
+        .json(&serde_json::json!({"label": "my-label"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let upd: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(upd["label"], "my-label");
+
+    // Confirm label persisted
+    let resp = client
+        .get(format!("{}/api/sessions/{}", server.base_url, session_id))
+        .send()
+        .await
+        .unwrap();
+    let sess: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(sess["label"], "my-label");
+
+    // Clear the label (null)
+    let resp = client
+        .put(format!(
+            "{}/api/sessions/{}/label",
+            server.base_url, session_id
+        ))
+        .json(&serde_json::json!({"label": null}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    // Confirm cleared
+    let resp = client
+        .get(format!("{}/api/sessions/{}", server.base_url, session_id))
+        .send()
+        .await
+        .unwrap();
+    let sess: serde_json::Value = resp.json().await.unwrap();
+    assert!(sess["label"].is_null(), "Label should be cleared");
+
+    // Invalid session ID → 400
+    let resp = client
+        .put(format!("{}/api/sessions/not-a-uuid/label", server.base_url))
+        .json(&serde_json::json!({"label": "x"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400);
+
+    // Unknown session → 404
+    let fake_id = uuid::Uuid::new_v4();
+    let resp = client
+        .put(format!(
+            "{}/api/sessions/{}/label",
+            server.base_url, fake_id
+        ))
+        .json(&serde_json::json!({"label": "x"}))
         .send()
         .await
         .unwrap();

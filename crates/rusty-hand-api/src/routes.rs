@@ -3904,6 +3904,10 @@ pub async fn set_session_label(
                 "label": label,
             })),
         ),
+        Err(rusty_hand_types::error::RustyHandError::SessionNotFound(_)) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": format!("Session '{id}' not found")})),
+        ),
         Err(e) => safe_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Session label update",
