@@ -3384,7 +3384,10 @@ fn cmd_trigger_list(agent_id: Option<&str>) {
     let client = daemon_client();
 
     let url = match agent_id {
-        Some(id) => format!("{base}/api/triggers?agent_id={id}"),
+        Some(id) => {
+            let resolved = resolve_agent_id(&client, &base, id);
+            format!("{base}/api/triggers?agent_id={resolved}")
+        }
         None => format!("{base}/api/triggers"),
     };
     let body = daemon_json(client.get(&url).send());
@@ -3425,11 +3428,12 @@ fn cmd_trigger_create(agent_id: &str, pattern_json: &str, prompt: &str, max_fire
     });
 
     let client = daemon_client();
+    let resolved_agent_id = resolve_agent_id(&client, &base, agent_id);
     let body = daemon_json(
         client
             .post(format!("{base}/api/triggers"))
             .json(&serde_json::json!({
-                "agent_id": agent_id,
+                "agent_id": resolved_agent_id,
                 "pattern": pattern,
                 "prompt_template": prompt,
                 "max_fires": max_fires,
