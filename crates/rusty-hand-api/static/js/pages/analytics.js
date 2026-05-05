@@ -14,6 +14,7 @@ function analyticsPage() {
         summary: null,
         byModel: [],
         daily: [],
+        todayCost: 0,
         budget: null,
         agentCosts: [],
         loading: true,
@@ -37,6 +38,7 @@ function analyticsPage() {
                 this.summary = summaryRes;
                 this.byModel = modelRes.models || modelRes || [];
                 this.daily = dailyRes.days || dailyRes.daily || dailyRes || [];
+                this.todayCost = dailyRes.today_cost_usd || (this.daily.length > 0 ? this.daily[this.daily.length - 1].cost_usd || 0 : 0);
                 this.budget = budgetRes;
                 this.agentCosts = agentRes.agents || agentRes || [];
             } catch (e) {
