@@ -28,11 +28,11 @@ function analyticsPage() {
             this.error = null;
             try {
                 const [summaryRes, modelRes, dailyRes, budgetRes, agentRes] = await Promise.all([
-                    api.get('/api/usage/summary'),
-                    api.get('/api/usage/by-model'),
-                    api.get('/api/usage/daily'),
-                    api.get('/api/budget'),
-                    api.get('/api/budget/agents'),
+                    RustyHandAPI.get('/api/usage/summary'),
+                    RustyHandAPI.get('/api/usage/by-model'),
+                    RustyHandAPI.get('/api/usage/daily'),
+                    RustyHandAPI.get('/api/budget'),
+                    RustyHandAPI.get('/api/budget/agents'),
                 ]);
                 this.summary = summaryRes;
                 this.byModel = modelRes.models || modelRes || [];

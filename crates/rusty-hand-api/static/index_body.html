@@ -2716,31 +2716,31 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
               </div>
 
               <!-- Budget Status -->
-              <template x-if="budget && (budget.max_daily_usd > 0 || budget.max_monthly_usd > 0)">
+              <template x-if="budget && (budget.daily_limit > 0 || budget.monthly_limit > 0)">
                 <div class="card" style="padding:20px;margin-bottom:24px">
                   <h3 style="font-size:14px;margin-bottom:16px">Budget</h3>
                   <div style="display:flex;gap:24px;flex-wrap:wrap">
-                    <template x-if="budget.max_daily_usd > 0">
+                    <template x-if="budget.daily_limit > 0">
                       <div style="flex:1;min-width:200px">
                         <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
                           <span>Daily</span>
-                          <span x-text="usd(budget.daily_spend || 0) + ' / ' + usd(budget.max_daily_usd)"></span>
+                          <span x-text="usd(budget.daily_spend || 0) + ' / ' + usd(budget.daily_limit)"></span>
                         </div>
                         <div style="height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">
                           <div style="height:100%;border-radius:3px;transition:width 0.3s"
-                               :style="'width:' + (budgetPct(budget.daily_spend || 0, budget.max_daily_usd) || 0) + '%;background:' + ((budgetPct(budget.daily_spend || 0, budget.max_daily_usd) || 0) > 80 ? 'var(--error)' : 'var(--accent)')"></div>
+                               :style="'width:' + (budgetPct(budget.daily_spend || 0, budget.daily_limit) || 0) + '%;background:' + ((budgetPct(budget.daily_spend || 0, budget.daily_limit) || 0) > 80 ? 'var(--error)' : 'var(--accent)')"></div>
                         </div>
                       </div>
                     </template>
-                    <template x-if="budget.max_monthly_usd > 0">
+                    <template x-if="budget.monthly_limit > 0">
                       <div style="flex:1;min-width:200px">
                         <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
                           <span>Monthly</span>
-                          <span x-text="usd(budget.monthly_spend || 0) + ' / ' + usd(budget.max_monthly_usd)"></span>
+                          <span x-text="usd(budget.monthly_spend || 0) + ' / ' + usd(budget.monthly_limit)"></span>
                         </div>
                         <div style="height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">
                           <div style="height:100%;border-radius:3px;transition:width 0.3s"
-                               :style="'width:' + (budgetPct(budget.monthly_spend || 0, budget.max_monthly_usd) || 0) + '%;background:' + ((budgetPct(budget.monthly_spend || 0, budget.max_monthly_usd) || 0) > 80 ? 'var(--error)' : 'var(--accent)')"></div>
+                               :style="'width:' + (budgetPct(budget.monthly_spend || 0, budget.monthly_limit) || 0) + '%;background:' + ((budgetPct(budget.monthly_spend || 0, budget.monthly_limit) || 0) > 80 ? 'var(--error)' : 'var(--accent)')"></div>
                         </div>
                       </div>
                     </template>
