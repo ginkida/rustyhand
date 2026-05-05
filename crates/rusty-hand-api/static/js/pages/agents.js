@@ -710,7 +710,7 @@ function agentsPage() {
       this.activityBudget = null;
       try {
         var results = await Promise.allSettled([
-          RustyHandAPI.get('/api/audit/recent?n=1000'),
+          RustyHandAPI.get('/api/audit/recent?n=200&agent_id=' + encodeURIComponent(agentId)),
           RustyHandAPI.get('/api/agents/' + agentId + '/sessions?limit=50'),
           RustyHandAPI.get('/api/cron/jobs?agent_id=' + encodeURIComponent(agentId)),
           RustyHandAPI.get('/api/budget/agents/' + encodeURIComponent(agentId)),
@@ -722,12 +722,11 @@ function agentsPage() {
 
         var events = [];
 
-        // Audit events — filter to this agent
+        // Audit events — already server-filtered by agent_id
         if (results[0].status === 'fulfilled') {
           var entries = (results[0].value && results[0].value.entries) || [];
           for (var i = 0; i < entries.length; i++) {
             var e = entries[i];
-            if (e.agent_id !== agentId) continue;
             events.push({
               ts: e.timestamp,
               type: 'audit',
@@ -750,7 +749,7 @@ function agentsPage() {
               ts: s.updated_at || s.created_at,
               type: 'session',
               action: 'SessionActivity',
-              title: 'Session ' + (s.label || s.id || '').substring(0, 40),
+              title: 'Session ' + (s.label || s.session_id || '').substring(0, 40),
               detail: (s.message_count || 0) + ' message(s)',
               outcome: ''
             });
