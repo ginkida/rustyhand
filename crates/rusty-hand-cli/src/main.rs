@@ -5299,10 +5299,11 @@ fn cmd_cron_delete(id: &str) {
 fn cmd_cron_toggle(id: &str, enable: bool) {
     let base = require_daemon("cron");
     let client = daemon_client();
-    let endpoint = if enable { "enable" } else { "disable" };
+    // PUT /api/cron/jobs/{id}/enable with {"enabled": bool}
     let body = daemon_json(
         client
-            .post(format!("{base}/api/cron/jobs/{id}/{endpoint}"))
+            .put(format!("{base}/api/cron/jobs/{id}/enable"))
+            .json(&serde_json::json!({"enabled": enable}))
             .send(),
     );
     if body.get("error").is_some() {
@@ -5311,7 +5312,8 @@ fn cmd_cron_toggle(id: &str, enable: bool) {
             body["error"].as_str().unwrap_or("?")
         ));
     } else {
-        ui::success(&format!("Cron job {id} {endpoint}d."));
+        let action = if enable { "enabled" } else { "disabled" };
+        ui::success(&format!("Cron job {id} {action}."));
     }
 }
 
