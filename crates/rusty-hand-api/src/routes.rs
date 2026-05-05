@@ -856,10 +856,11 @@ pub async fn kill_agent(
     }
 }
 
-/// POST /api/agents/:id/restart — Kill and re-spawn an agent with the same manifest.
+/// POST /api/agents/:id/restart — Stop an agent and re-spawn with the same manifest.
 ///
-/// Useful for recovering crashed agents without losing their configuration.
-/// Returns the new agent's ID so callers can reconnect.
+/// Unlike DELETE (kill), this preserves session history — old sessions remain
+/// in the DB and are still retrievable. The new agent starts fresh.
+/// Returns both old and new agent IDs so callers can reconnect.
 pub async fn restart_agent(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -869,29 +870,24 @@ pub async fn restart_agent(
         Err(e) => return e,
     };
 
-    let entry = match state.kernel.registry.get(agent_id) {
-        Some(e) => e,
-        None => return agent_not_found(&id),
-    };
-
-    let manifest = entry.manifest.clone();
-    let name = entry.name.clone();
-
-    if let Err(e) = state.kernel.kill_agent(agent_id) {
-        tracing::warn!("restart_agent: kill failed for {id}: {e}");
-        // Continue even if kill fails (agent may already be terminated)
-    }
-
-    match state.kernel.spawn_agent(manifest) {
-        Ok(new_id) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "status": "restarted",
-                "old_agent_id": id,
-                "new_agent_id": new_id.to_string(),
-                "name": name,
-            })),
-        ),
+    match state.kernel.restart_agent(agent_id) {
+        Ok((old_id, new_id)) => {
+            let name = state
+                .kernel
+                .registry
+                .get(new_id)
+                .map(|e| e.name)
+                .unwrap_or_default();
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "status": "restarted",
+                    "old_agent_id": old_id.to_string(),
+                    "new_agent_id": new_id.to_string(),
+                    "name": name,
+                })),
+            )
+        }
         Err(e) => safe_error(StatusCode::INTERNAL_SERVER_ERROR, "Agent restart", &e),
     }
 }

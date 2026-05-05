@@ -2899,6 +2899,43 @@ impl RustyHandKernel {
         Ok(())
     }
 
+    /// Restart an agent: clean up runtime state and re-spawn with the same
+    /// manifest, but **preserve sessions and memory** (unlike `kill_agent`
+    /// which calls `memory.remove_agent` and deletes all history).
+    ///
+    /// Returns `(old_agent_id, new_agent_id)`. The old sessions remain in
+    /// the DB under `old_agent_id` and are still retrievable; the new agent
+    /// starts with a fresh session.
+    pub fn restart_agent(&self, agent_id: AgentId) -> KernelResult<(AgentId, AgentId)> {
+        let entry = self
+            .registry
+            .remove(agent_id)
+            .map_err(KernelError::RustyHand)?;
+
+        // Stop runtime state — same as kill_agent except no memory deletion.
+        self.background.stop_agent(agent_id);
+        self.scheduler.unregister(agent_id);
+        self.capabilities.revoke_all(agent_id);
+        self.event_bus.unsubscribe_agent(agent_id);
+        self.triggers.remove_agent_triggers(agent_id);
+        if let Some((_, handle)) = self.running_tasks.remove(&agent_id) {
+            handle.abort();
+        }
+
+        self.audit_log.record(
+            agent_id.to_string(),
+            rusty_hand_runtime::audit::AuditAction::AgentKill,
+            format!("name={} reason=restart", entry.name),
+            "ok",
+        );
+
+        info!(agent = %entry.name, old_id = %agent_id, "Agent stopped for restart (sessions preserved)");
+
+        let new_id = self.spawn_agent(entry.manifest)?;
+        info!(agent = %entry.name, new_id = %new_id, "Agent restarted");
+        Ok((agent_id, new_id))
+    }
+
     /// Set the weak self-reference for trigger dispatch.
     ///
     /// Must be called once after the kernel is wrapped in `Arc`.
