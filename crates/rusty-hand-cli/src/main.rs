@@ -277,6 +277,9 @@ enum Commands {
         /// Output as JSON for scripting.
         #[arg(long)]
         json: bool,
+        /// Stream the response token by token.
+        #[arg(long, short = 's')]
+        stream: bool,
     },
     /// System info and version [*].
     #[command(subcommand)]
@@ -968,7 +971,12 @@ fn main() {
             cmd_init(quick, false)
         }
         Some(Commands::Configure) => cmd_init(false, false),
-        Some(Commands::Message { agent, text, json }) => cmd_message(&agent, &text, json),
+        Some(Commands::Message {
+            agent,
+            text,
+            json,
+            stream,
+        }) => cmd_message(&agent, &text, json, stream),
         Some(Commands::System(sub)) => match sub {
             SystemCommands::Info { json } => cmd_system_info(json),
             SystemCommands::Version { json } => cmd_system_version(json),
@@ -5832,9 +5840,78 @@ fn cmd_webhooks_test(id: &str) {
     }
 }
 
-fn cmd_message(agent: &str, text: &str, json: bool) {
+fn cmd_message(agent: &str, text: &str, json: bool, stream: bool) {
     let base = require_daemon("message");
     let client = daemon_client();
+
+    if stream {
+        // POST to stream endpoint and print tokens as they arrive
+        let response = match client
+            .post(format!("{base}/api/agents/{agent}/message/stream"))
+            .json(&serde_json::json!({"message": text}))
+            .send()
+        {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Failed to connect: {e}");
+                std::process::exit(1);
+            }
+        };
+        use std::io::{BufRead, BufReader, Write};
+        let reader = BufReader::new(response);
+        let stdout = std::io::stdout();
+        let mut out = stdout.lock();
+        let mut event_type = String::new();
+        for line in reader.lines() {
+            match line {
+                Ok(l) if l.starts_with("event: ") => {
+                    event_type = l["event: ".len()..].to_string();
+                }
+                Ok(l) if l.starts_with("data: ") => {
+                    let data = &l["data: ".len()..];
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
+                        match event_type.as_str() {
+                            "chunk" => {
+                                if let Some(content) = v["content"].as_str() {
+                                    let _ = out.write_all(content.as_bytes());
+                                    let _ = out.flush();
+                                }
+                            }
+                            "done" => {
+                                let _ = writeln!(out);
+                                if json {
+                                    println!(
+                                        "{}",
+                                        serde_json::to_string_pretty(&v).unwrap_or_default()
+                                    );
+                                }
+                                break;
+                            }
+                            "phase" => {
+                                if let Some(phase) = v["phase"].as_str() {
+                                    let _ = writeln!(out, "\r\x1b[2K[{phase}]");
+                                }
+                            }
+                            "tool_use" => {
+                                if let Some(tool) = v["tool"].as_str() {
+                                    let _ = writeln!(out, "\r\x1b[2K[tool: {tool}]");
+                                }
+                            }
+                            "error" => {
+                                eprintln!("Error: {}", v["error"].as_str().unwrap_or("unknown"));
+                                std::process::exit(1);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+        return;
+    }
+
     let body = daemon_json(
         client
             .post(format!("{base}/api/agents/{agent}/message"))
