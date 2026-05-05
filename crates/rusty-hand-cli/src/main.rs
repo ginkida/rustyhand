@@ -5146,6 +5146,60 @@ fn cmd_approvals_respond(id: &str, approve: bool) {
     }
 }
 
+/// Format a serialized `CronSchedule` tagged-enum value as a short human-readable string.
+fn fmt_cron_schedule(v: &serde_json::Value) -> String {
+    match v["kind"].as_str() {
+        Some("cron") => format!("cron:{}", v["expr"].as_str().unwrap_or("?")),
+        Some("every") => {
+            let secs = v["every_secs"].as_u64().unwrap_or(0);
+            if secs >= 3600 && secs.is_multiple_of(3600) {
+                format!("every {}h", secs / 3600)
+            } else if secs >= 60 && secs.is_multiple_of(60) {
+                format!("every {}m", secs / 60)
+            } else {
+                format!("every {}s", secs)
+            }
+        }
+        Some("at") => format!("at {}", v["at"].as_str().unwrap_or("?")),
+        _ => serde_json::to_string(v).unwrap_or_else(|_| "?".to_string()),
+    }
+}
+
+/// Format a serialized `CronAction` tagged-enum value as a short human-readable string.
+fn fmt_cron_action(v: &serde_json::Value) -> String {
+    match v["kind"].as_str() {
+        Some("agent_turn") => v["message"]
+            .as_str()
+            .unwrap_or("")
+            .chars()
+            .take(40)
+            .collect(),
+        Some("system_event") => format!(
+            "[event] {}",
+            v["text"]
+                .as_str()
+                .unwrap_or("")
+                .chars()
+                .take(33)
+                .collect::<String>()
+        ),
+        Some("workflow_run") => format!(
+            "[wf] {}",
+            v["workflow_id"]
+                .as_str()
+                .unwrap_or("?")
+                .chars()
+                .take(32)
+                .collect::<String>()
+        ),
+        _ => serde_json::to_string(v)
+            .unwrap_or_else(|_| "?".to_string())
+            .chars()
+            .take(40)
+            .collect(),
+    }
+}
+
 fn cmd_cron_list(json: bool) {
     let base = require_daemon("cron list");
     let client = daemon_client();
@@ -5168,27 +5222,22 @@ fn cmd_cron_list(json: bool) {
             return;
         }
         println!(
-            "{:<38} {:<16} {:<20} {:<8} PROMPT",
+            "{:<38} {:<16} {:<22} {:<8} ACTION",
             "ID", "AGENT", "SCHEDULE", "ENABLED"
         );
         println!("{}", "-".repeat(100));
         for j in arr {
             println!(
-                "{:<38} {:<16} {:<20} {:<8} {}",
+                "{:<38} {:<16} {:<22} {:<8} {}",
                 j["id"].as_str().unwrap_or("?"),
                 j["agent_id"].as_str().unwrap_or("?"),
-                j["cron_expr"].as_str().unwrap_or("?"),
+                fmt_cron_schedule(&j["schedule"]),
                 if j["enabled"].as_bool().unwrap_or(false) {
                     "yes"
                 } else {
                     "no"
                 },
-                j["prompt"]
-                    .as_str()
-                    .unwrap_or("")
-                    .chars()
-                    .take(40)
-                    .collect::<String>(),
+                fmt_cron_action(&j["action"]),
             );
         }
     } else {

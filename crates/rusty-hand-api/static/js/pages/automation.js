@@ -120,7 +120,7 @@ function automationPage() {
     async loadAgents() {
       try {
         var data = await RustyHandAPI.get('/api/agents');
-        this.agents = Array.isArray(data) ? data : [];
+        this.agents = data.agents || (Array.isArray(data) ? data : []);
         this.agentsLoadError = '';
       } catch(e) {
         this.agents = Alpine.store('app').agents || [];

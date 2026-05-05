@@ -36,7 +36,7 @@ function analyticsPage() {
                 ]);
                 this.summary = summaryRes;
                 this.byModel = modelRes.models || modelRes || [];
-                this.daily = dailyRes.daily || dailyRes || [];
+                this.daily = dailyRes.days || dailyRes.daily || dailyRes || [];
                 this.budget = budgetRes;
                 this.agentCosts = agentRes.agents || agentRes || [];
             } catch (e) {
@@ -76,13 +76,13 @@ function analyticsPage() {
         // Max cost in agent ranking (for bar scaling)
         maxAgentCost() {
             if (!this.agentCosts.length) return 1;
-            return Math.max(...this.agentCosts.map(a => a.total_cost || a.cost || 0), 0.0001);
+            return Math.max(...this.agentCosts.map(a => a.daily_cost_usd || a.total_cost || a.cost || 0), 0.0001);
         },
 
         // Max daily cost (for bar scaling)
         maxDailyCost() {
             if (!this.daily.length) return 1;
-            return Math.max(...this.daily.map(d => d.cost || 0), 0.0001);
+            return Math.max(...this.daily.map(d => d.cost_usd || d.cost || 0), 0.0001);
         },
     };
 }

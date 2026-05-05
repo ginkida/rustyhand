@@ -44,7 +44,7 @@ function workflowsPage() {
           RustyHandAPI.get('/api/agents')
         ]);
         this.workflows = Array.isArray(results[0]) ? results[0] : (results[0].workflows || []);
-        this.agents = Array.isArray(results[1]) ? results[1] : [];
+        this.agents = results[1].agents || (Array.isArray(results[1]) ? results[1] : []);
       } catch(e) {
         this.workflows = [];
         this.loadError = e.message || 'Could not load workflows.';

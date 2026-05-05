@@ -48,7 +48,7 @@ function workflowBuilder() {
     async loadAgents() {
       try {
         var list = await RustyHandAPI.get('/api/agents');
-        this.agents = Array.isArray(list) ? list : [];
+        this.agents = list.agents || (Array.isArray(list) ? list : []);
         this.agentsLoadError = '';
       } catch(e) {
         this.agents = Alpine.store('app').agents || [];

@@ -2703,15 +2703,15 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
                 </div>
                 <div class="card" style="padding:16px">
                   <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em">Total Tokens</div>
-                  <div class="stat-value" style="font-size:24px;margin-top:4px" x-text="fmt(summary.total_tokens)"></div>
+                  <div class="stat-value" style="font-size:24px;margin-top:4px" x-text="fmt((summary.total_input_tokens || 0) + (summary.total_output_tokens || 0))"></div>
                 </div>
                 <div class="card" style="padding:16px">
                   <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em">API Calls</div>
-                  <div class="stat-value" style="font-size:24px;margin-top:4px" x-text="fmt(summary.total_calls || summary.call_count)"></div>
+                  <div class="stat-value" style="font-size:24px;margin-top:4px" x-text="fmt(summary.call_count || summary.total_calls)"></div>
                 </div>
                 <div class="card" style="padding:16px">
                   <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em">Total Cost</div>
-                  <div class="stat-value" style="font-size:24px;margin-top:4px" x-text="usd(summary.total_cost)"></div>
+                  <div class="stat-value" style="font-size:24px;margin-top:4px" x-text="usd(summary.total_cost_usd || summary.total_cost)"></div>
                 </div>
               </div>
 
@@ -2757,10 +2757,10 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
                       <div style="flex:1;display:flex;flex-direction:column;align-items:center;height:100%">
                         <div style="flex:1;width:100%;display:flex;align-items:flex-end">
                           <div style="width:100%;background:var(--accent);border-radius:4px 4px 0 0;min-height:2px;transition:height 0.3s"
-                               :style="'height:' + Math.max(2, (day.cost / maxDailyCost()) * 100) + '%'"></div>
+                               :style="'height:' + Math.max(2, ((day.cost_usd || day.cost || 0) / maxDailyCost()) * 100) + '%'"></div>
                         </div>
                         <div style="font-size:10px;color:var(--text-muted);margin-top:6px" x-text="day.date ? day.date.slice(5) : ''"></div>
-                        <div style="font-size:10px;color:var(--text-dim)" x-text="usd(day.cost)"></div>
+                        <div style="font-size:10px;color:var(--text-dim)" x-text="usd(day.cost_usd || day.cost)"></div>
                       </div>
                     </template>
                   </div>
@@ -2777,9 +2777,9 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
                       <template x-for="m in byModel" :key="m.model">
                         <tr>
                           <td class="font-mono" style="font-size:12px" x-text="m.model"></td>
-                          <td style="text-align:right" x-text="fmt(m.calls || m.call_count)"></td>
-                          <td style="text-align:right" x-text="fmt(m.tokens || m.total_tokens)"></td>
-                          <td style="text-align:right;font-weight:600" x-text="usd(m.cost || m.total_cost)"></td>
+                          <td style="text-align:right" x-text="fmt(m.call_count || m.calls)"></td>
+                          <td style="text-align:right" x-text="fmt((m.total_input_tokens || 0) + (m.total_output_tokens || 0))"></td>
+                          <td style="text-align:right;font-weight:600" x-text="usd(m.total_cost_usd || m.cost || m.total_cost)"></td>
                         </tr>
                       </template>
                     </tbody>
@@ -2797,11 +2797,11 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
                       <template x-for="a in agentCosts" :key="a.agent_id || a.name">
                         <tr>
                           <td x-text="a.name || a.agent_id"></td>
-                          <td style="text-align:right;font-weight:600" x-text="usd(a.total_cost || a.cost)"></td>
+                          <td style="text-align:right;font-weight:600" x-text="usd(a.daily_cost_usd || a.total_cost || a.cost)"></td>
                           <td>
                             <div style="height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">
                               <div style="height:100%;background:var(--accent);border-radius:3px"
-                                   :style="'width:' + Math.max(2, ((a.total_cost || a.cost || 0) / maxAgentCost()) * 100) + '%'"></div>
+                                   :style="'width:' + Math.max(2, ((a.daily_cost_usd || a.total_cost || a.cost || 0) / maxAgentCost()) * 100) + '%'"></div>
                             </div>
                           </td>
                         </tr>
