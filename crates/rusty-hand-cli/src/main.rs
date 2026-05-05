@@ -431,6 +431,16 @@ enum AgentCommands {
         /// Agent ID (UUID).
         agent_id: String,
     },
+    /// Stop and re-spawn an agent with the same manifest (preserves session history).
+    Restart {
+        /// Agent ID or name.
+        agent_id: String,
+    },
+    /// List sessions for an agent.
+    Sessions {
+        /// Agent ID or name.
+        agent_id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -825,6 +835,8 @@ fn main() {
             AgentCommands::List { json } => cmd_agent_list(cli.config, json),
             AgentCommands::Chat { agent_id } => cmd_agent_chat(cli.config, &agent_id),
             AgentCommands::Kill { agent_id } => cmd_agent_kill(cli.config, &agent_id),
+            AgentCommands::Restart { agent_id } => cmd_agent_restart(&agent_id),
+            AgentCommands::Sessions { agent_id } => cmd_agent_sessions(&agent_id),
         },
         Some(Commands::Workflow(sub)) => match sub {
             WorkflowCommands::List => cmd_workflow_list(),
@@ -1863,6 +1875,72 @@ fn cmd_agent_kill(config: Option<PathBuf>, agent_id_str: &str) {
             Err(e) => {
                 eprintln!("Failed to kill agent: {e}");
                 std::process::exit(1);
+            }
+        }
+    }
+}
+
+fn cmd_agent_restart(agent_id_str: &str) {
+    let Some(base) = find_daemon() else {
+        ui::error("Daemon not running. Start it with `rustyhand start`.");
+        std::process::exit(1);
+    };
+    let client = daemon_client();
+    let agent_id = resolve_agent_id(&client, &base, agent_id_str);
+    let body = daemon_json(
+        client
+            .post(format!("{base}/api/agents/{agent_id}/restart"))
+            .send(),
+    );
+    if body["status"].as_str() == Some("restarted") {
+        let new_id = body["new_agent_id"].as_str().unwrap_or("?");
+        let name = body["name"].as_str().unwrap_or("?");
+        ui::check_ok(&format!("Agent \"{name}\" restarted — new ID: {new_id}"));
+    } else {
+        eprintln!(
+            "Failed to restart agent: {}",
+            body["error"].as_str().unwrap_or("unknown error")
+        );
+        std::process::exit(1);
+    }
+}
+
+fn cmd_agent_sessions(agent_id_str: &str) {
+    let Some(base) = find_daemon() else {
+        ui::error("Daemon not running. Start it with `rustyhand start`.");
+        std::process::exit(1);
+    };
+    let client = daemon_client();
+    let agent_id = resolve_agent_id(&client, &base, agent_id_str);
+    let body = daemon_json(
+        client
+            .get(format!("{base}/api/agents/{agent_id}/sessions"))
+            .send(),
+    );
+    let sessions = body
+        .get("sessions")
+        .and_then(|v| v.as_array())
+        .or_else(|| body.as_array());
+    match sessions {
+        None => println!("No sessions found for agent {agent_id_str}."),
+        Some(sessions) if sessions.is_empty() => {
+            println!("No sessions found for agent {agent_id_str}.")
+        }
+        Some(sessions) => {
+            println!(
+                "{:<36}  {:>4}  {:<22}  LABEL",
+                "SESSION ID", "MSGS", "LAST ACTIVE"
+            );
+            println!("{}", "-".repeat(80));
+            for s in sessions {
+                let id = s["session_id"].as_str().unwrap_or("?");
+                let count = s["message_count"].as_u64().unwrap_or(0);
+                let updated = s["updated_at"]
+                    .as_str()
+                    .or_else(|| s["created_at"].as_str())
+                    .unwrap_or("?");
+                let label = s["label"].as_str().unwrap_or("");
+                println!("{id:<36}  {count:>4}  {updated:<22}  {label}");
             }
         }
     }

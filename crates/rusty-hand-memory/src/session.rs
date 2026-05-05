@@ -176,7 +176,7 @@ impl SessionStore {
             .map_err(|e| RustyHandError::Internal(e.to_string()))?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, agent_id, message_count, created_at, label, messages FROM sessions ORDER BY created_at DESC",
+                "SELECT id, agent_id, message_count, created_at, label, messages FROM sessions ORDER BY updated_at DESC",
             )
             .map_err(|e| RustyHandError::Memory(e.to_string()))?;
 
