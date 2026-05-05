@@ -4810,7 +4810,12 @@ fn cmd_approvals_list(json: bool) {
         );
         return;
     }
-    if let Some(arr) = body.as_array() {
+    // /api/approvals returns {approvals:[...], total:N} envelope
+    let arr = body
+        .get("approvals")
+        .and_then(|v| v.as_array())
+        .or_else(|| body.as_array());
+    if let Some(arr) = arr {
         if arr.is_empty() {
             println!("No pending approvals.");
             return;
@@ -4864,7 +4869,12 @@ fn cmd_cron_list(json: bool) {
         );
         return;
     }
-    if let Some(arr) = body.as_array() {
+    // /api/cron/jobs returns {jobs:[...], total:N} envelope
+    let arr = body
+        .get("jobs")
+        .and_then(|v| v.as_array())
+        .or_else(|| body.as_array());
+    if let Some(arr) = arr {
         if arr.is_empty() {
             println!("No scheduled jobs.");
             return;
@@ -5425,7 +5435,12 @@ fn cmd_devices_list(json: bool) {
         );
         return;
     }
-    if let Some(arr) = body.as_array() {
+    // /api/pairing/devices returns {devices:[...]} envelope
+    let arr = body
+        .get("devices")
+        .and_then(|v| v.as_array())
+        .or_else(|| body.as_array());
+    if let Some(arr) = arr {
         if arr.is_empty() {
             println!("No paired devices.");
             return;
