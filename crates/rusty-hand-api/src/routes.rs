@@ -3817,14 +3817,12 @@ pub async fn export_session_markdown(
             .replace(|c: char| !c.is_alphanumeric(), "-")
             .trim_matches('-')
     );
+    let disposition = format!("attachment; filename=\"{filename}\"");
     (
         StatusCode::OK,
         [
             ("Content-Type", "text/markdown; charset=utf-8"),
-            (
-                "Content-Disposition",
-                &format!("attachment; filename=\"{filename}\""),
-            ),
+            ("Content-Disposition", disposition.as_str()),
         ],
         md,
     )

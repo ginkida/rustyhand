@@ -4515,6 +4515,10 @@ mark.search-highlight {
   background: var(--text-muted);
   opacity: 0.4;
 }
+.agent-list-status.created {
+  background: var(--info);
+  opacity: 0.6;
+}
 
 /* Pin button on agent list items */
 .agent-pin-btn {
