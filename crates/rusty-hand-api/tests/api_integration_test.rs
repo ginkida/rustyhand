@@ -236,6 +236,24 @@ memory_read = ["*"]
 memory_write = ["self.*"]
 "#;
 
+/// Manifest for the offline mock driver — no API key needed, deterministic
+/// echo response. Useful for testing the spawn → message → session flow
+/// without burning real LLM credits.
+const MOCK_MANIFEST: &str = r#"
+name = "mock-test-agent"
+version = "0.1.0"
+description = "Mock-driver integration test agent"
+author = "test"
+module = "builtin:chat"
+
+[model]
+provider = "mock"
+model = "mock-model"
+system_prompt = "You are a deterministic mock."
+
+[capabilities]
+"#;
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1696,4 +1714,99 @@ async fn test_session_label_set_and_clear() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 404);
+}
+
+/// End-to-end agent message round-trip using the deterministic mock driver.
+/// This test exercises the full HTTP → kernel → driver → session pipeline
+/// without an LLM API key, so it always runs in CI. Until v0.7.30 there was
+/// no way to test agent.message end-to-end without burning real LLM credits.
+#[tokio::test]
+async fn test_mock_driver_full_message_roundtrip() {
+    let server = require_server!(start_test_server_with_provider(
+        "mock",
+        "mock-model",
+        "MOCK_API_KEY"
+    ));
+    let client = reqwest::Client::new();
+
+    // Spawn an agent backed by the mock driver.
+    let resp = client
+        .post(format!("{}/api/agents", server.base_url))
+        .json(&serde_json::json!({"manifest_toml": MOCK_MANIFEST}))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        resp.status().is_success(),
+        "spawn returned {}",
+        resp.status()
+    );
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let agent_id = body["agent_id"]
+        .as_str()
+        .expect("spawn response includes agent_id")
+        .to_string();
+
+    // Send a message — the mock driver should echo it back as `[mock] <text>`.
+    let resp = client
+        .post(format!(
+            "{}/api/agents/{}/message",
+            server.base_url, agent_id
+        ))
+        .json(&serde_json::json!({"message": "ping"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "message returned {}", resp.status());
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let response_text = body["response"]
+        .as_str()
+        .expect("message response includes `response`");
+    assert_eq!(response_text, "[mock] ping");
+    assert!(
+        body["input_tokens"].as_u64().unwrap_or(0) > 0,
+        "input_tokens should be tracked"
+    );
+    assert!(
+        body["output_tokens"].as_u64().unwrap_or(0) > 0,
+        "output_tokens should be tracked"
+    );
+
+    // Session should have grown.
+    let resp = client
+        .get(format!(
+            "{}/api/agents/{}/session",
+            server.base_url, agent_id
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let session: serde_json::Value = resp.json().await.unwrap();
+    let count = session["message_count"].as_u64().unwrap_or(0);
+    assert!(
+        count >= 2,
+        "session should have user + assistant messages, got {count}"
+    );
+
+    // A second turn must echo the latest user message, not the first.
+    let resp = client
+        .post(format!(
+            "{}/api/agents/{}/message",
+            server.base_url, agent_id
+        ))
+        .json(&serde_json::json!({"message": "pong"}))
+        .send()
+        .await
+        .unwrap();
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["response"].as_str(), Some("[mock] pong"));
+
+    // Kill cleanly.
+    let resp = client
+        .delete(format!("{}/api/agents/{}", server.base_url, agent_id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
 }

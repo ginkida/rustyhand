@@ -16,6 +16,7 @@
 
 pub mod anthropic;
 pub mod fallback;
+pub mod mock;
 pub mod openai;
 
 use crate::llm_driver::{CompletionRequest, CompletionResponse, DriverConfig, LlmDriver, LlmError};
@@ -126,6 +127,13 @@ fn pick_api_key(explicit: &Option<String>, env_var: &str) -> Option<String> {
 /// - Any custom provider with `base_url` set uses OpenAI-compatible format
 pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmError> {
     let provider = config.provider.as_str();
+
+    // Mock — deterministic offline driver for integration tests and demos.
+    // No API key needed; every call returns a constant echo of the last user
+    // message. Selected by `default_model.provider = "mock"` in config.toml.
+    if provider == "mock" {
+        return Ok(Arc::new(mock::MockDriver::new()));
+    }
 
     // Anthropic uses its own API format — special case.
     if provider == "anthropic" {
@@ -264,6 +272,7 @@ pub fn known_providers() -> &'static [&'static str] {
         "glm", // alias for zhipu
         "openrouter",
         "ollama",
+        "mock", // offline echo driver for integration tests
     ]
 }
 
@@ -469,8 +478,8 @@ mod tests {
     #[test]
     fn test_known_providers_list() {
         let providers = known_providers();
-        // 7 canonical providers + "glm" alias for zhipu.
-        assert_eq!(providers.len(), 8);
+        // 7 canonical providers + "glm" alias for zhipu + "mock" offline driver.
+        assert_eq!(providers.len(), 9);
         for expected in [
             "anthropic",
             "kimi",
@@ -480,6 +489,7 @@ mod tests {
             "glm",
             "openrouter",
             "ollama",
+            "mock",
         ] {
             assert!(
                 providers.contains(&expected),
