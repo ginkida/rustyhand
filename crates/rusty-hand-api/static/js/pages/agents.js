@@ -159,7 +159,7 @@ function agentsPage() {
       if (this.spawnProfilesLoaded) return;
       try {
         var data = await RustyHandAPI.get('/api/profiles');
-        this.spawnProfiles = data.profiles || [];
+        this.spawnProfiles = Array.isArray(data) ? data : (data.profiles || []);
         this.spawnProfilesError = '';
         this.spawnProfilesLoaded = true;
       } catch(e) {
