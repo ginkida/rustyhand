@@ -970,6 +970,31 @@ impl RustyHandKernel {
         let auto_reply_engine = crate::auto_reply::AutoReplyEngine::new(config.auto_reply.clone());
         let runtime_budget = std::sync::RwLock::new(config.budget.clone());
 
+        // Open the persisted audit log before consuming `config` into the struct.
+        // On disk failure we fall back to an in-memory log so kernel boot is
+        // never blocked by an unreadable audit file.
+        let audit_log = {
+            let audit_path = config.data_dir.join("audit.jsonl");
+            match AuditLog::open(&audit_path) {
+                Ok(log) => {
+                    tracing::info!(
+                        path = %audit_path.display(),
+                        entries = log.len(),
+                        "Audit log loaded from disk"
+                    );
+                    Arc::new(log)
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        path = %audit_path.display(),
+                        error = %e,
+                        "Could not open audit log on disk — falling back to in-memory only"
+                    );
+                    Arc::new(AuditLog::new())
+                }
+            }
+        };
+
         let kernel = Self {
             config,
             registry: AgentRegistry::new(),
@@ -981,7 +1006,7 @@ impl RustyHandKernel {
             workflows: WorkflowEngine::new(),
             triggers: TriggerEngine::new(),
             background,
-            audit_log: Arc::new(AuditLog::new()),
+            audit_log,
             metering,
             runtime_budget,
             default_driver: driver,

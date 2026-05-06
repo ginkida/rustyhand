@@ -3,10 +3,18 @@
 //! Every auditable event is appended to an append-only log where each entry
 //! contains the SHA-256 hash of its own contents concatenated with the hash of
 //! the previous entry, forming a tamper-evident chain (similar to a blockchain).
+//!
+//! When constructed via [`AuditLog::open`], entries are also persisted to an
+//! append-only JSONL file so the chain survives daemon restarts. Each `record()`
+//! writes one JSON-encoded line and `fsync`s the file. On boot, existing lines
+//! are replayed to rebuild the in-memory state.
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 /// Categories of auditable actions within the agent runtime.
@@ -77,20 +85,123 @@ fn compute_entry_hash(
 /// An append-only, tamper-evident audit log using a Merkle hash chain.
 ///
 /// Thread-safe — all access is serialised through internal mutexes.
+///
+/// The log is in-memory by default. Use [`AuditLog::open`] to persist entries
+/// to an append-only JSONL file so the chain survives daemon restarts.
 pub struct AuditLog {
     entries: Mutex<Vec<AuditEntry>>,
     tip: Mutex<String>,
+    /// Optional persistence file. When set, every recorded entry is appended
+    /// (and `fsync`'d) to this writer in JSONL format.
+    sink: Mutex<Option<BufWriter<File>>>,
+    /// Path of the persistence file, kept for diagnostics. `None` for purely
+    /// in-memory logs.
+    path: Option<PathBuf>,
 }
 
 impl AuditLog {
-    /// Creates a new empty audit log.
+    /// Creates a new empty in-memory audit log (no disk persistence).
     ///
     /// The initial tip hash is 64 zero characters (the "genesis" sentinel).
     pub fn new() -> Self {
         Self {
             entries: Mutex::new(Vec::new()),
             tip: Mutex::new("0".repeat(64)),
+            sink: Mutex::new(None),
+            path: None,
         }
+    }
+
+    /// Opens (or creates) a persisted audit log at `path`.
+    ///
+    /// Existing entries in the file are replayed to rebuild the in-memory
+    /// chain. Subsequent `record()` calls append to the file and `fsync` it.
+    /// Corrupt lines (un-parsable JSON or a chain break) are skipped with a
+    /// `tracing::warn!` so a partially-damaged file does not prevent boot.
+    pub fn open(path: impl AsRef<Path>) -> std::io::Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let mut entries: Vec<AuditEntry> = Vec::new();
+        let mut tip = "0".repeat(64);
+
+        if path.exists() {
+            let file = File::open(&path)?;
+            for (lineno, line) in BufReader::new(file).lines().enumerate() {
+                let line = match line {
+                    Ok(l) => l,
+                    Err(e) => {
+                        tracing::warn!(
+                            audit_path = %path.display(),
+                            line = lineno + 1,
+                            error = %e,
+                            "Skipping unreadable audit log line"
+                        );
+                        continue;
+                    }
+                };
+                if line.trim().is_empty() {
+                    continue;
+                }
+                match serde_json::from_str::<AuditEntry>(&line) {
+                    Ok(entry) => {
+                        if entry.prev_hash != tip {
+                            tracing::warn!(
+                                audit_path = %path.display(),
+                                line = lineno + 1,
+                                expected = %tip,
+                                got = %entry.prev_hash,
+                                "Audit log chain break — skipping remaining entries"
+                            );
+                            break;
+                        }
+                        let recomputed = compute_entry_hash(
+                            entry.seq,
+                            &entry.timestamp,
+                            &entry.agent_id,
+                            &entry.action,
+                            &entry.detail,
+                            &entry.outcome,
+                            &entry.prev_hash,
+                        );
+                        if recomputed != entry.hash {
+                            tracing::warn!(
+                                audit_path = %path.display(),
+                                line = lineno + 1,
+                                "Audit log hash mismatch — skipping remaining entries"
+                            );
+                            break;
+                        }
+                        tip = entry.hash.clone();
+                        entries.push(entry);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            audit_path = %path.display(),
+                            line = lineno + 1,
+                            error = %e,
+                            "Skipping un-parsable audit log line"
+                        );
+                    }
+                }
+            }
+        }
+
+        let writer = OpenOptions::new().create(true).append(true).open(&path)?;
+
+        Ok(Self {
+            entries: Mutex::new(entries),
+            tip: Mutex::new(tip),
+            sink: Mutex::new(Some(BufWriter::new(writer))),
+            path: Some(path),
+        })
+    }
+
+    /// Returns the on-disk path if this log is persisted, otherwise `None`.
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
     }
 
     /// Records a new auditable event and returns the SHA-256 hash of the entry.
@@ -119,7 +230,7 @@ impl AuditLog {
             seq, &timestamp, &agent_id, &action, &detail, &outcome, &prev_hash,
         );
 
-        entries.push(AuditEntry {
+        let entry = AuditEntry {
             seq,
             timestamp,
             agent_id,
@@ -128,8 +239,29 @@ impl AuditLog {
             outcome,
             prev_hash,
             hash: hash.clone(),
-        });
+        };
 
+        // Persist before mutating in-memory state. If persistence fails we
+        // still record in memory (forensic value beats hard-failing recording),
+        // but the warning surfaces the disk problem.
+        if let Some(sink) = self.sink.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            match serde_json::to_string(&entry) {
+                Ok(line) => {
+                    if let Err(e) = writeln!(sink, "{line}").and_then(|()| sink.flush()) {
+                        tracing::warn!(
+                            audit_path = ?self.path,
+                            error = %e,
+                            "Failed to persist audit entry — entry remains in-memory only"
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to serialize audit entry for disk write");
+                }
+            }
+        }
+
+        entries.push(entry);
         *tip = hash.clone();
         hash
     }
@@ -270,5 +402,79 @@ mod tests {
         let h2 = log.record("b", AuditAction::AgentKill, "kill", "ok");
         assert_eq!(log.tip_hash(), h2);
         assert_ne!(h2, h1);
+    }
+
+    #[test]
+    fn test_audit_persists_across_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+
+        // First daemon "lifetime" — records three entries.
+        let h_first;
+        let tip_first;
+        {
+            let log = AuditLog::open(&path).unwrap();
+            assert_eq!(log.len(), 0);
+            log.record("agent-1", AuditAction::AgentSpawn, "boot", "ok");
+            log.record("agent-1", AuditAction::ToolInvoke, "read_file", "ok");
+            h_first = log.record("agent-2", AuditAction::AgentKill, "shutdown", "ok");
+            tip_first = log.tip_hash();
+        }
+        assert_ne!(tip_first, "0".repeat(64));
+
+        // Second daemon "lifetime" — replays from disk.
+        let log = AuditLog::open(&path).unwrap();
+        assert_eq!(log.len(), 3);
+        assert_eq!(log.tip_hash(), tip_first);
+        assert!(log.verify_integrity().is_ok());
+        assert_eq!(log.recent(1)[0].hash, h_first);
+
+        // New entry chains onto the persisted tip and survives one more reopen.
+        let h_new = log.record("agent-3", AuditAction::ConfigChange, "set foo", "ok");
+        drop(log);
+
+        let reloaded = AuditLog::open(&path).unwrap();
+        assert_eq!(reloaded.len(), 4);
+        assert_eq!(reloaded.tip_hash(), h_new);
+        assert!(reloaded.verify_integrity().is_ok());
+    }
+
+    #[test]
+    fn test_audit_open_on_missing_path_starts_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested/never-created/audit.jsonl");
+        let log = AuditLog::open(&path).unwrap();
+        assert_eq!(log.len(), 0);
+        assert_eq!(log.tip_hash(), "0".repeat(64));
+        // Write must succeed even though the parent dir was created lazily.
+        log.record("a", AuditAction::AgentSpawn, "x", "ok");
+        assert_eq!(log.len(), 1);
+    }
+
+    #[test]
+    fn test_audit_open_skips_corrupt_trailing_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+
+        // Seed with two valid entries.
+        {
+            let log = AuditLog::open(&path).unwrap();
+            log.record("agent-1", AuditAction::AgentSpawn, "boot", "ok");
+            log.record("agent-1", AuditAction::ToolInvoke, "read_file", "ok");
+        }
+
+        // Append a corrupt line.
+        use std::io::Write as _;
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writeln!(f, "this is not valid json").unwrap();
+        drop(f);
+
+        // Reopen — should keep the two good entries and skip the bad line.
+        let log = AuditLog::open(&path).unwrap();
+        assert_eq!(log.len(), 2);
+        assert!(log.verify_integrity().is_ok());
     }
 }
