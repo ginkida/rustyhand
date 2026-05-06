@@ -14,7 +14,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.7.28"
+version = "0.7.29"
 edition = "2021"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/ginkida/rustyhand"
@@ -72,7 +72,7 @@ tokio-tungstenite = { version = "0.24", default-features = false, features = ["c
 url = "2"
 
 # WASM sandbox
-wasmtime = "42"
+wasmtime = "44"
 
 # HTTP server (for API daemon)
 axum = { version = "0.8", features = ["ws"] }
