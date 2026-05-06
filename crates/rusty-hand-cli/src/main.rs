@@ -3682,7 +3682,11 @@ fn cmd_skill_create() {
         std::process::exit(1);
     });
 
-    let entry_file = if runtime == "python" { "src/main.py" } else { "src/index.js" };
+    let entry_file = if runtime == "python" {
+        "src/main.py"
+    } else {
+        "src/index.js"
+    };
     let manifest = format!(
         r#"[skill]
 name = "{name}"
