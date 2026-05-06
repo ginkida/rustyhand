@@ -226,6 +226,9 @@ pub async fn list_agents(
                 "system_prompt": e.manifest.model.system_prompt,
                 "model_provider": e.manifest.model.provider,
                 "model_name": e.manifest.model.model,
+                "model_temperature": e.manifest.model.temperature,
+                "model_max_tokens": e.manifest.model.max_tokens,
+                "model_thinking_enabled": e.manifest.model.thinking.is_some(),
                 "profile": e.manifest.profile,
                 "identity": {
                     "emoji": e.identity.emoji,
