@@ -3134,7 +3134,7 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
                   </div>
                   <div class="security-card-desc">Run cryptographic verification of the entire SHA-256 Merkle hash chain.</div>
                   <div x-show="chainResult" class="mt-2">
-                    <span class="sec-badge" :class="chainResult && chainResult.valid ? 'sec-badge-core' : 'sec-badge-warn'" x-text="chainResult && chainResult.valid ? 'CHAIN VALID — ' + (chainResult.entries || 0) + ' entries verified' : 'CHAIN BROKEN — ' + (chainResult ? chainResult.error : '')"></span>
+                    <span class="sec-badge" :class="!chainResult ? '' : (!chainResult.valid ? 'sec-badge-warn' : (chainResult.warning ? 'sec-badge-config' : 'sec-badge-core'))" x-text="!chainResult ? '' : (!chainResult.valid ? 'CHAIN BROKEN — ' + (chainResult.error || 'unknown error') : (chainResult.warning ? 'NO ENTRIES — ' + chainResult.warning : 'CHAIN VALID — ' + (chainResult.entries || 0) + ' entries verified'))"></span>
                   </div>
                 </div>
               </div>

@@ -398,6 +398,136 @@ async fn agent_sessions_envelope() {
     body["sessions"].as_array().expect("sessions is array");
 }
 
+/// `GET /api/status` returns the kernel status the CLI `system info` reads.
+/// Specifically `status`, `agent_count`, `default_provider`, `default_model`,
+/// `uptime_seconds`, `data_dir` are all referenced by cmd_system_info.
+#[tokio::test]
+async fn status_endpoint_shape() {
+    let server = require_server!(start_test_server());
+    let body = get_json(&server.base_url, "/api/status").await;
+    require_keys(
+        &body,
+        &[
+            "status",
+            "version",
+            "agent_count",
+            "running_count",
+            "default_provider",
+            "default_model",
+            "uptime_seconds",
+            "data_dir",
+            "agents",
+        ],
+        "/api/status",
+    );
+    assert_eq!(body["status"].as_str(), Some("running"));
+    body["agents"].as_array().expect("agents is array");
+}
+
+/// `GET /api/peers` returns `{peers, total}`. Each peer (when present) has
+/// `node_id`, `node_name`, `address`, `state`, `agents`.
+#[tokio::test]
+async fn peers_envelope_and_entry_shape() {
+    let server = require_server!(start_test_server());
+    let body = get_json(&server.base_url, "/api/peers").await;
+    require_keys(&body, &["peers", "total"], "/api/peers");
+    let peers = body["peers"].as_array().expect("peers is array");
+    if let Some(first) = peers.first() {
+        require_keys(
+            first,
+            &[
+                "node_id",
+                "node_name",
+                "address",
+                "state",
+                "agents",
+                "protocol_version",
+            ],
+            "/api/peers[0]",
+        );
+    }
+}
+
+/// `GET /api/network/status` exposes the RHP network summary.
+#[tokio::test]
+async fn network_status_shape() {
+    let server = require_server!(start_test_server());
+    let body = get_json(&server.base_url, "/api/network/status").await;
+    require_keys(
+        &body,
+        &[
+            "enabled",
+            "node_id",
+            "listen_address",
+            "connected_peers",
+            "total_peers",
+        ],
+        "/api/network/status",
+    );
+}
+
+/// `GET /api/knowledge` returns `{nodes, edges, total_nodes, total_edges}`.
+/// The knowledge.js page reads `data.nodes` and `data.edges`.
+#[tokio::test]
+async fn knowledge_graph_shape() {
+    let server = require_server!(start_test_server());
+    let body = get_json(&server.base_url, "/api/knowledge").await;
+    // The endpoint may return either the success or error envelope; both
+    // must always carry nodes/edges arrays so the dashboard never crashes.
+    require_keys(&body, &["nodes", "edges"], "/api/knowledge");
+    body["nodes"].as_array().expect("nodes is array");
+    body["edges"].as_array().expect("edges is array");
+}
+
+/// `GET /api/models` returns `{models, total, available_count}`.
+#[tokio::test]
+async fn models_envelope_and_entry_shape() {
+    let server = require_server!(start_test_server());
+    let body = get_json(&server.base_url, "/api/models").await;
+    require_keys(&body, &["models"], "/api/models");
+    let models = body["models"].as_array().expect("models is array");
+    if let Some(first) = models.first() {
+        require_keys(first, &["id", "provider", "display_name"], "/api/models[0]");
+    }
+}
+
+/// `GET /api/sessions` returns the paginated envelope with `agent_name`
+/// joined onto each session entry. The CLI `cmd_sessions` reads
+/// `s["session_id"]`, `s["agent_name"]`, `s["message_count"]`, `s["updated_at"]`.
+#[tokio::test]
+async fn sessions_endpoint_envelope() {
+    let server = require_server!(start_test_server());
+    spawn_test_agent(&server).await;
+    let body = get_json(&server.base_url, "/api/sessions").await;
+    require_keys(&body, &["sessions", "total"], "/api/sessions");
+    let sessions = body["sessions"].as_array().expect("sessions is array");
+    if let Some(first) = sessions.first() {
+        require_keys(
+            first,
+            &[
+                "session_id",
+                "agent_id",
+                "agent_name",
+                "message_count",
+                "created_at",
+                "updated_at",
+                "label",
+            ],
+            "/api/sessions[0]",
+        );
+    }
+}
+
+/// `GET /api/agents/{id}/metrics` returns counters the dashboard activity
+/// tab reads. `total_calls` (NOT `call_count`) was a recent rename source.
+#[tokio::test]
+async fn agent_metrics_shape() {
+    let server = require_server!(start_test_server());
+    let agent_id = spawn_test_agent(&server).await;
+    let body = get_json(&server.base_url, &format!("/api/agents/{agent_id}/metrics")).await;
+    require_keys(&body, &["total_calls"], "/api/agents/:id/metrics");
+}
+
 /// `GET /api/budget/agents/{id}` returns flat fields the dashboard reads.
 /// The struct serialization is the source of truth — this test pins the
 /// fields the dashboard activity tab references.
