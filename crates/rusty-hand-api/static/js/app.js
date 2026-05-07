@@ -134,6 +134,7 @@ document.addEventListener('alpine:init', function() {
     defaultModel: '',
     demoMode: false,
     demoBannerDismissed: false,
+    demoWelcomeShown: true, // start true so the modal never flashes on non-demo loads
     connected: false,
     booting: true,
     wsConnected: false,
@@ -378,6 +379,11 @@ document.addEventListener('alpine:init', function() {
     dismissDemoBanner() {
       this.demoBannerDismissed = true;
       try { localStorage.setItem('rh-demo-banner-dismissed', 'true'); } catch (e) { /* ignore */ }
+    },
+
+    dismissDemoWelcome() {
+      this.demoWelcomeShown = true;
+      try { localStorage.setItem('rh-demo-welcome-seen', 'true'); } catch (e) { /* ignore */ }
     },
 
     async refreshAgents() {
@@ -710,6 +716,12 @@ function app() {
       }
       this.demoBannerDismissed =
         localStorage.getItem('rh-demo-banner-dismissed') === 'true';
+      // Welcome modal: show once per browser when demo mode is active.
+      // The modal lists the four pre-seeded samples (rusty agent,
+      // demo-pipeline workflow, sample trigger, demo-daily-ping cron)
+      // so first-time visitors know exactly what to try.
+      var welcomeSeen = localStorage.getItem('rh-demo-welcome-seen') === 'true';
+      this.demoWelcomeShown = welcomeSeen || !this.demoMode;
 
       // Listen for OS theme changes (only matters when mode is 'system')
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
