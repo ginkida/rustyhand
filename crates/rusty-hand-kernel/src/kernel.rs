@@ -1206,6 +1206,58 @@ impl RustyHandKernel {
                         // constructor — same blocking_write pattern.
                         kernel.workflows.register_blocking(sample_workflow);
 
+                        // Sample event trigger — fires whenever any new
+                        // agent is spawned in the system. Pattern is
+                        // intentionally narrow (only matches agents
+                        // whose name starts with `demo-`) so it doesn't
+                        // fire on every coordinator/diagnostic
+                        // meta-agent spawn at boot. The user can edit
+                        // the pattern from the Triggers page.
+                        kernel.triggers.register(
+                            id,
+                            crate::triggers::TriggerPattern::AgentSpawned {
+                                name_pattern: "demo-".to_string(),
+                            },
+                            "A new demo agent was spawned: {{event}}".to_string(),
+                            0, // unlimited fires
+                        );
+
+                        // Sample cron job — daily ping at midnight UTC,
+                        // disabled by default so it doesn't actually
+                        // wake the user up before they've even
+                        // explored the dashboard. Visible on the
+                        // Automation page; one click to enable.
+                        let sample_cron = rusty_hand_types::scheduler::CronJob {
+                            id: rusty_hand_types::scheduler::CronJobId::new(),
+                            agent_id: id,
+                            name: "demo-daily-ping".to_string(),
+                            enabled: false,
+                            schedule: rusty_hand_types::scheduler::CronSchedule::Cron {
+                                expr: "0 0 * * *".to_string(),
+                                tz: None,
+                            },
+                            action: rusty_hand_types::scheduler::CronAction::AgentTurn {
+                                message: "Good morning! Anything to report?".to_string(),
+                                model_override: None,
+                                timeout_secs: Some(30),
+                            },
+                            delivery: rusty_hand_types::scheduler::CronDelivery::None,
+                            created_at: chrono::Utc::now(),
+                            last_run: None,
+                            next_run: None,
+                        };
+                        if let Err(e) = kernel.cron_scheduler.add_job(sample_cron, false) {
+                            tracing::warn!(
+                                error = %e,
+                                "Failed to register sample cron job in demo mode"
+                            );
+                        } else if let Err(e) = kernel.cron_scheduler.persist() {
+                            tracing::warn!(
+                                error = %e,
+                                "Failed to persist sample cron job"
+                            );
+                        }
+
                         if let Err(e) = std::fs::write(&marker, b"") {
                             tracing::warn!(
                                 error = %e,
@@ -1215,8 +1267,9 @@ impl RustyHandKernel {
                         }
                         info!(
                             agent_id = %id,
-                            "Demo Mode: spawned welcome agent `rusty` and `demo-pipeline` \
-                             workflow (delete them if unwanted; they will not respawn)"
+                            "Demo Mode: seeded `rusty` agent + `demo-pipeline` workflow + \
+                             sample trigger + disabled `demo-daily-ping` cron job (delete any \
+                             of them if unwanted; they will not respawn on next boot)"
                         );
                     }
                     Err(e) => {

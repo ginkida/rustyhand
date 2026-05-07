@@ -1788,6 +1788,49 @@ async fn test_demo_mode_auto_spawns_welcome_agent() {
         Some(2),
         "demo-pipeline should be a 2-step workflow"
     );
+
+    // /api/triggers returns a bare array; the demo seeder registers one
+    // sample trigger that watches for new agents whose name starts with
+    // "demo-". The user can edit the pattern from the Triggers page.
+    let resp = client
+        .get(format!("{}/api/triggers", server.base_url))
+        .send()
+        .await
+        .unwrap();
+    let triggers: serde_json::Value = resp.json().await.unwrap();
+    let arr = triggers
+        .as_array()
+        .expect("/api/triggers returns a bare array");
+    assert!(
+        !arr.is_empty(),
+        "demo mode should pre-install at least one sample trigger"
+    );
+    let sample = arr
+        .iter()
+        .find(|t| t["agent_id"].as_str() == Some(&agent_id))
+        .expect("sample trigger should be owned by `rusty`");
+    assert_eq!(sample["enabled"].as_bool(), Some(true));
+    assert!(sample["prompt_template"].as_str().is_some());
+
+    // /api/cron/jobs returns {jobs, total}; the demo seeder registers
+    // one *disabled* job so the Automation page is non-empty but the
+    // user isn't surprised by an unexpected fire.
+    let resp = client
+        .get(format!("{}/api/cron/jobs", server.base_url))
+        .send()
+        .await
+        .unwrap();
+    let cron: serde_json::Value = resp.json().await.unwrap();
+    let jobs = cron["jobs"].as_array().expect("cron jobs envelope");
+    let demo_job = jobs
+        .iter()
+        .find(|j| j["name"].as_str() == Some("demo-daily-ping"))
+        .expect("demo mode should pre-install `demo-daily-ping` cron job");
+    assert_eq!(
+        demo_job["enabled"].as_bool(),
+        Some(false),
+        "sample cron job should be disabled by default — user enables it manually"
+    );
 }
 
 /// End-to-end cron run that fires a workflow (the third CronAction variant).
