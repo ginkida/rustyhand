@@ -11,6 +11,7 @@ pub mod capabilities;
 pub mod config;
 pub mod config_reload;
 pub mod cron;
+mod demo_seed;
 pub mod error;
 pub mod event_bus;
 pub mod heartbeat;
