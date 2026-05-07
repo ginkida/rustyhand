@@ -32,15 +32,19 @@ impl Drop for TestServer {
 }
 
 async fn start_test_server() -> Option<TestServer> {
+    start_test_server_with_provider("ollama", "OLLAMA_API_KEY").await
+}
+
+async fn start_test_server_with_provider(provider: &str, api_key_env: &str) -> Option<TestServer> {
     let tmp = tempfile::tempdir().ok()?;
 
     let mut config = KernelConfig {
         home_dir: tmp.path().to_path_buf(),
         data_dir: tmp.path().join("data"),
         default_model: DefaultModelConfig {
-            provider: "ollama".to_string(),
+            provider: provider.to_string(),
             model: "test-model".to_string(),
-            api_key_env: "OLLAMA_API_KEY".to_string(),
+            api_key_env: api_key_env.to_string(),
             base_url: None,
         },
         ..KernelConfig::default()
@@ -730,11 +734,23 @@ async fn onboarding_status_shape() {
     );
     // Tests use no API key → must be reported as not-set.
     assert_eq!(body["api_key_set"].as_bool(), Some(false));
-    // The test fixture pins provider=ollama, so demo_mode is false even
-    // though no API key is set. The dashboard demo-mode banner only
+    // The default test fixture pins provider=ollama, so demo_mode is false
+    // even though no API key is set. The dashboard demo-mode banner only
     // appears when the active provider is `mock`.
     assert_eq!(body["demo_mode"].as_bool(), Some(false));
     assert_eq!(body["provider"].as_str(), Some("ollama"));
+}
+
+/// `GET /api/onboarding` reports `demo_mode = true` when the kernel is
+/// running on the mock driver. Without this contract, the dashboard's
+/// demo-mode banner and welcome modal would silently disappear after a
+/// future refactor that renames or drops the field.
+#[tokio::test]
+async fn onboarding_demo_mode_true_for_mock_provider() {
+    let server = require_server!(start_test_server_with_provider("mock", "MOCK_API_KEY"));
+    let body = get_json(&server.base_url, "/api/onboarding").await;
+    assert_eq!(body["demo_mode"].as_bool(), Some(true));
+    assert_eq!(body["provider"].as_str(), Some("mock"));
 }
 
 /// `GET /api/budget/agents/{id}` returns flat fields the dashboard reads.
