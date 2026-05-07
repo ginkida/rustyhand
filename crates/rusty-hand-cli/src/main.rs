@@ -1686,6 +1686,18 @@ fn cmd_start(config: Option<PathBuf>) {
         ui::kv("Provider", &provider);
         ui::kv("Model", &model);
         ui::blank();
+        // Demo mode hint: if the kernel ended up on the mock driver
+        // (because no API key was found and demo mode wasn't disabled),
+        // call that out prominently before the generic "Open the dashboard"
+        // hint so the user isn't surprised by `[mock]` replies.
+        if provider == "mock" {
+            ui::hint("Running in DEMO MODE — replies are mocked; the dashboard, audit log,");
+            ui::hint("workflows, triggers, and cron jobs are all real and persistent.");
+            ui::hint(
+                "Set ANTHROPIC_API_KEY (or any other provider's env var) for real LLM responses.",
+            );
+            ui::blank();
+        }
         ui::hint("Open the dashboard in your browser, or run `rustyhand chat`");
         ui::hint("Press Ctrl+C to stop the daemon");
         ui::blank();

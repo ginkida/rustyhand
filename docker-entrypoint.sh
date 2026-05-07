@@ -240,10 +240,24 @@ for VAR in ANTHROPIC_API_KEY KIMI_API_KEY DEEPSEEK_API_KEY ZHIPU_API_KEY \
 done
 
 if [ "$HAS_KEY" = "0" ]; then
-    echo "WARNING: No LLM API key found. Set at least one of:"
-    echo "  ANTHROPIC_API_KEY, KIMI_API_KEY, DEEPSEEK_API_KEY, ZHIPU_API_KEY,"
-    echo "  MINIMAX_API_KEY, OPENROUTER_API_KEY"
+    echo ""
+    echo "──────────────────────────────────────────────────────────────────────"
+    echo "  RustyHand: no LLM API key found — booting in DEMO MODE."
+    echo ""
+    echo "  Every agent message will receive a deterministic '[mock] ...'"
+    echo "  reply. The dashboard, audit log, workflows, triggers, and cron"
+    echo "  jobs are all real and persistent — only the LLM responses are"
+    echo "  stubbed. Use this to evaluate the system without credentials."
+    echo ""
+    echo "  Set any of these env vars and restart for real LLM responses:"
+    echo "    ANTHROPIC_API_KEY, KIMI_API_KEY, DEEPSEEK_API_KEY,"
+    echo "    ZHIPU_API_KEY, MINIMAX_API_KEY, OPENROUTER_API_KEY"
     echo "  (Ollama needs no key — just run it locally on localhost:11434)"
+    echo ""
+    echo "  Set RUSTYHAND_DISABLE_DEMO_MODE=1 to disable demo mode and"
+    echo "  hard-fail any LLM call instead."
+    echo "──────────────────────────────────────────────────────────────────────"
+    echo ""
 fi
 
 # ── 4. Exec into rustyhand ──────────────────────────────────────────
