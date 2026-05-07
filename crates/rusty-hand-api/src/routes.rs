@@ -7591,6 +7591,11 @@ pub async fn run_cron_job(
                         Json(serde_json::json!({
                             "status": "completed",
                             "job_id": id,
+                            // Match the `mode` field that SystemEvent and WorkflowRun
+                            // already emit. Without this, consumers had to special-case
+                            // the AgentTurn branch by inferring it from absence-of-mode
+                            // — easy bug source.
+                            "mode": "agent_turn",
                             "agent_id": agent_id.to_string(),
                             "response": response,
                         })),

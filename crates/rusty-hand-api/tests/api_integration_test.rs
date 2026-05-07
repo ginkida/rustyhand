@@ -1716,6 +1716,220 @@ async fn test_session_label_set_and_clear() {
     assert_eq!(resp.status(), 404);
 }
 
+/// End-to-end manual cron run that actually invokes the agent loop.
+///
+/// The existing test_cron_job_manual_run_system_event covers the
+/// system_event path which doesn't talk to an LLM. This test covers the
+/// agent_turn path: a cron job that asks an agent (backed by the mock
+/// driver) to respond. Catches regressions in the cron → kernel →
+/// driver → cron-result wiring.
+#[tokio::test]
+async fn test_cron_manual_run_agent_turn_with_mock_driver() {
+    let server = require_server!(start_test_server_with_provider(
+        "mock",
+        "mock-model",
+        "MOCK_API_KEY"
+    ));
+    let client = reqwest::Client::new();
+
+    // Spawn a mock-driver agent.
+    let manifest = MOCK_MANIFEST.replace("mock-test-agent", "cron-mock-agent");
+    let resp = client
+        .post(format!("{}/api/agents", server.base_url))
+        .json(&serde_json::json!({"manifest_toml": manifest}))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let agent_id = resp.json::<serde_json::Value>().await.unwrap()["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Create an agent_turn cron job. The schedule is far in the future
+    // so the kernel's tick won't fire it before we manually invoke run.
+    let resp = client
+        .post(format!("{}/api/cron/jobs", server.base_url))
+        .json(&serde_json::json!({
+            "agent_id": agent_id,
+            "name": "morning-ping",
+            "schedule": { "kind": "cron", "expr": "0 0 1 1 *" }, // Jan 1 midnight
+            "action": {
+                "kind": "agent_turn",
+                "message": "say hi",
+                "timeout_secs": 10
+            },
+            "delivery": { "kind": "none" },
+            "one_shot": false,
+            "enabled": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 201, "cron create returned {}", resp.status());
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let create_result: serde_json::Value =
+        serde_json::from_str(body["result"].as_str().unwrap()).unwrap();
+    let job_id = create_result["job_id"].as_str().unwrap().to_string();
+
+    // Manually trigger the run.
+    let resp = client
+        .post(format!("{}/api/cron/jobs/{job_id}/run", server.base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "cron run returned {}", resp.status());
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["status"], "completed");
+    assert_eq!(body["mode"], "agent_turn");
+
+    // The cron run response carries the agent's reply (the mock echoes
+    // the message). Verify the mock prefix is present so we know the
+    // run actually went through the driver, not a dry-run path.
+    let response = body["response"].as_str().unwrap_or("");
+    assert!(
+        response.contains("[mock]"),
+        "cron agent_turn response should include the mock prefix, got: {response}"
+    );
+    assert!(
+        response.contains("say hi"),
+        "cron agent_turn response should echo the prompt, got: {response}"
+    );
+}
+
+/// End-to-end workflow run using mock-driver agents.
+///
+/// This was previously not testable without an LLM API key. With the mock
+/// driver in v0.7.30, we can exercise the full workflow → kernel → agent
+/// → driver → step result pipeline in CI. Catches regressions in:
+///   - Workflow registration via the API
+///   - Step → agent name resolution
+///   - Sequential step execution + output piping
+///   - Workflow run completion + final output assembly
+#[tokio::test]
+async fn test_workflow_run_end_to_end_with_mock_driver() {
+    let server = require_server!(start_test_server_with_provider(
+        "mock",
+        "mock-model",
+        "MOCK_API_KEY"
+    ));
+    let client = reqwest::Client::new();
+
+    // Spawn an agent backed by the mock driver. We need a unique manifest
+    // name in case the test runs alongside other tests reusing MOCK_MANIFEST.
+    let manifest = MOCK_MANIFEST.replace("mock-test-agent", "wf-mock-agent");
+    let resp = client
+        .post(format!("{}/api/agents", server.base_url))
+        .json(&serde_json::json!({"manifest_toml": manifest}))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let agent_name = body["name"]
+        .as_str()
+        .expect("spawn returns the resolved agent name")
+        .to_string();
+
+    // Create a 2-step workflow. Step 1 receives `{{input}}`, step 2
+    // receives step 1's output via `{{input}}`. With the mock driver
+    // each step echoes its prompt as `[mock] <prompt>`, so the final
+    // output is `[mock] Stage two: [mock] Stage one: hello`.
+    let resp = client
+        .post(format!("{}/api/workflows", server.base_url))
+        .json(&serde_json::json!({
+            "name": "echo-pipeline",
+            "description": "Two-step echo through mock driver",
+            "steps": [
+                {
+                    "name": "stage_one",
+                    "agent_name": agent_name,
+                    "prompt": "Stage one: {{input}}",
+                    "mode": "sequential",
+                    "timeout_secs": 30
+                },
+                {
+                    "name": "stage_two",
+                    "agent_name": agent_name,
+                    "prompt": "Stage two: {{input}}",
+                    "mode": "sequential",
+                    "timeout_secs": 30
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        resp.status().is_success(),
+        "workflow create returned {}",
+        resp.status()
+    );
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let workflow_id = body["workflow_id"]
+        .as_str()
+        .expect("workflow_id in response")
+        .to_string();
+
+    // Run the workflow.
+    let resp = client
+        .post(format!(
+            "{}/api/workflows/{}/run",
+            server.base_url, workflow_id
+        ))
+        .json(&serde_json::json!({"input": "hello"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        200,
+        "workflow run returned {}",
+        resp.status()
+    );
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["status"].as_str(), Some("completed"));
+    let output = body["output"]
+        .as_str()
+        .expect("workflow run returns final output");
+
+    // The mock driver replies `[mock] <prompt>`. After two stages, the
+    // final output must contain both prompts piped through.
+    assert!(
+        output.contains("[mock]"),
+        "expected mock-prefixed output, got: {output}"
+    );
+    assert!(
+        output.contains("Stage two:"),
+        "final output should reflect stage_two's prompt template, got: {output}"
+    );
+    assert!(
+        output.contains("Stage one:"),
+        "final output should carry stage_one's content forward, got: {output}"
+    );
+    assert!(
+        output.contains("hello"),
+        "original input should propagate end-to-end, got: {output}"
+    );
+
+    // The runs endpoint should now have one completed run for this workflow.
+    let resp = client
+        .get(format!(
+            "{}/api/workflows/{}/runs",
+            server.base_url, workflow_id
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let runs: serde_json::Value = resp.json().await.unwrap();
+    let arr = runs["runs"]
+        .as_array()
+        .or_else(|| runs.as_array())
+        .expect("runs response is an array (bare or under .runs)");
+    assert_eq!(arr.len(), 1, "expected exactly one run, got {}", arr.len());
+}
+
 /// End-to-end agent message round-trip using the deterministic mock driver.
 /// This test exercises the full HTTP → kernel → driver → session pipeline
 /// without an LLM API key, so it always runs in CI. Until v0.7.30 there was
