@@ -528,6 +528,145 @@ async fn agent_metrics_shape() {
     require_keys(&body, &["total_calls"], "/api/agents/:id/metrics");
 }
 
+/// `GET /api/budget` returns the flat BudgetStatus the analytics page reads
+/// as `this.budget`. Pre-shape-test, an accidental rename of `hourly_spend`
+/// to `hourly.spend` would have silently zeroed the budget bars in the UI.
+#[tokio::test]
+async fn budget_status_envelope() {
+    let server = require_server!(start_test_server());
+    let body = get_json(&server.base_url, "/api/budget").await;
+    require_keys(
+        &body,
+        &[
+            "hourly_spend",
+            "hourly_limit",
+            "hourly_pct",
+            "daily_spend",
+            "daily_limit",
+            "daily_pct",
+            "monthly_spend",
+            "monthly_limit",
+            "monthly_pct",
+            "alert_threshold",
+        ],
+        "/api/budget",
+    );
+}
+
+/// `GET /api/budget/agents` returns `{agents, total}` — the analytics page
+/// reads `agentRes.agents` (with a fallback to bare-array). Each entry has
+/// `agent_id`, `name`, `daily_cost_usd`, and the per-agent limits.
+#[tokio::test]
+async fn budget_agents_ranking_envelope() {
+    let server = require_server!(start_test_server());
+    let body = get_json(&server.base_url, "/api/budget/agents").await;
+    require_keys(&body, &["agents", "total"], "/api/budget/agents");
+    body["agents"].as_array().expect("agents is array");
+}
+
+/// `GET /api/usage/summary` returns the flat counters the analytics page
+/// reads via `this.summary`. Field renames here would silently zero the
+/// tokens / cost / calls headline on the dashboard.
+#[tokio::test]
+async fn usage_summary_shape() {
+    let server = require_server!(start_test_server());
+    let body = get_json(&server.base_url, "/api/usage/summary").await;
+    require_keys(
+        &body,
+        &[
+            "total_input_tokens",
+            "total_output_tokens",
+            "total_cost_usd",
+            "call_count",
+            "total_tool_calls",
+        ],
+        "/api/usage/summary",
+    );
+}
+
+/// `GET /api/usage/by-model` returns `{models: [{model, total_cost_usd,
+/// total_input_tokens, total_output_tokens, call_count}]}`. The analytics
+/// page reads `modelRes.models` with a bare-array fallback.
+#[tokio::test]
+async fn usage_by_model_envelope() {
+    let server = require_server!(start_test_server());
+    let body = get_json(&server.base_url, "/api/usage/by-model").await;
+    require_keys(&body, &["models"], "/api/usage/by-model");
+    body["models"].as_array().expect("models is array");
+}
+
+/// `GET /api/usage/daily` returns `{days, today_cost_usd, first_event_date}`.
+/// The analytics page reads `dailyRes.days` (with `daily` and bare-array
+/// fallbacks) and `dailyRes.today_cost_usd` for the headline.
+#[tokio::test]
+async fn usage_daily_envelope() {
+    let server = require_server!(start_test_server());
+    let body = get_json(&server.base_url, "/api/usage/daily").await;
+    require_keys(
+        &body,
+        &["days", "today_cost_usd", "first_event_date"],
+        "/api/usage/daily",
+    );
+    body["days"].as_array().expect("days is array");
+}
+
+/// `GET /api/usage` returns `{agents: [...]}` — used by older clients
+/// (analytics page primarily uses /usage/summary now, but CLI may still
+/// read this).
+#[tokio::test]
+async fn usage_stats_envelope() {
+    let server = require_server!(start_test_server());
+    let body = get_json(&server.base_url, "/api/usage").await;
+    require_keys(&body, &["agents"], "/api/usage");
+    body["agents"].as_array().expect("agents is array");
+}
+
+/// `GET /api/health/detail` returns the diagnostics the CLI security
+/// status command reads. Pre-shape-test, a renamed `agent_count` here would
+/// silently make `rustyhand security status` show "Active agents: -".
+#[tokio::test]
+async fn health_detail_shape() {
+    let server = require_server!(start_test_server());
+    let body = get_json(&server.base_url, "/api/health/detail").await;
+    require_keys(
+        &body,
+        &[
+            "status",
+            "version",
+            "uptime_seconds",
+            "agent_count",
+            "database",
+            "panic_count",
+            "restart_count",
+        ],
+        "/api/health/detail",
+    );
+}
+
+/// `GET /api/auth/me` returns the current principal — fields the dashboard
+/// uses to decide which UI affordances to show.
+#[tokio::test]
+async fn auth_me_shape() {
+    let server = require_server!(start_test_server());
+    let body = get_json(&server.base_url, "/api/auth/me").await;
+    require_keys(&body, &["authenticated", "role", "source"], "/api/auth/me");
+    // No API key configured → implicit-owner localhost session.
+    assert_eq!(body["authenticated"].as_bool(), Some(true));
+    assert_eq!(body["source"].as_str(), Some("localhost"));
+}
+
+/// `GET /api/onboarding` returns `{api_key_set, agent_count}`. The
+/// dashboard onboarding wizard reads `data.api_key_set` to decide whether
+/// to show the welcome screen.
+#[tokio::test]
+async fn onboarding_status_shape() {
+    let server = require_server!(start_test_server());
+    let body = get_json(&server.base_url, "/api/onboarding").await;
+    require_keys(&body, &["api_key_set", "agent_count"], "/api/onboarding");
+    // Tests use no API key → must be reported as not-set.
+    assert_eq!(body["api_key_set"].as_bool(), Some(false));
+}
+
 /// `GET /api/budget/agents/{id}` returns flat fields the dashboard reads.
 /// The struct serialization is the source of truth — this test pins the
 /// fields the dashboard activity tab references.
