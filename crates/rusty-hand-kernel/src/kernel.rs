@@ -1123,6 +1123,60 @@ impl RustyHandKernel {
             }
         }
 
+        // Demo Mode welcome agent: when the kernel is running on the mock
+        // driver and no user agents exist, auto-spawn a friendly "rusty"
+        // agent so the dashboard is interactive on first paint instead of
+        // showing an empty list. We persist a marker so the agent isn't
+        // re-created if the user deletes it deliberately.
+        if kernel.config.default_model.provider == "mock" && kernel.registry.list().is_empty() {
+            let marker = kernel.config.home_dir.join(".rustyhand_demo_seeded");
+            if !marker.exists() {
+                let demo_manifest = rusty_hand_types::agent::AgentManifest {
+                    name: "rusty".to_string(),
+                    version: "0.1.0".to_string(),
+                    description: "Welcome agent — RustyHand demo mode".to_string(),
+                    author: "rusty-hand".to_string(),
+                    module: "builtin:chat".to_string(),
+                    tags: vec!["demo".to_string(), "welcome".to_string()],
+                    model: rusty_hand_types::agent::ModelConfig {
+                        provider: "mock".to_string(),
+                        model: "mock-model".to_string(),
+                        max_tokens: 1024,
+                        temperature: 0.5,
+                        system_prompt: "You are Rusty, the welcome agent for RustyHand's demo \
+                            mode. The user is running RustyHand without an LLM API key, so every \
+                            reply will appear with a `[mock]` prefix — that's expected. The \
+                            dashboard, audit log, workflow engine, and trigger engine are all \
+                            real and persistent; only the LLM responses are stubbed. Be brief, \
+                            be friendly, and point users to set ANTHROPIC_API_KEY (or any other \
+                            supported provider) when they want real responses."
+                            .to_string(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                match kernel.spawn_agent(demo_manifest) {
+                    Ok(id) => {
+                        if let Err(e) = std::fs::write(&marker, b"") {
+                            tracing::warn!(
+                                error = %e,
+                                "Could not write demo-seeded marker — demo agent may be \
+                                 re-created on next restart"
+                            );
+                        }
+                        info!(
+                            agent_id = %id,
+                            "Demo Mode: spawned welcome agent `rusty` (delete it if unwanted; \
+                             it will not respawn)"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to spawn demo welcome agent");
+                    }
+                }
+            }
+        }
+
         // Validate routing configs against model catalog
         for entry in kernel.registry.list() {
             if let Some(ref routing_config) = entry.manifest.routing {

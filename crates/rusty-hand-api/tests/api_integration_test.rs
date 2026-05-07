@@ -1716,6 +1716,57 @@ async fn test_session_label_set_and_clear() {
     assert_eq!(resp.status(), 404);
 }
 
+/// Demo Mode boot: when the kernel boots with provider=mock and no user
+/// agents exist, a welcome agent named `rusty` should be auto-spawned so
+/// the dashboard is interactive on first load. The agent must accept a
+/// message and reply through the mock driver.
+#[tokio::test]
+async fn test_demo_mode_auto_spawns_welcome_agent() {
+    let server = require_server!(start_test_server_with_provider(
+        "mock",
+        "mock-model",
+        "MOCK_API_KEY"
+    ));
+    let client = reqwest::Client::new();
+
+    // The kernel should have auto-spawned exactly one welcome agent.
+    let resp = client
+        .get(format!("{}/api/agents", server.base_url))
+        .send()
+        .await
+        .unwrap();
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let agents = body["agents"].as_array().expect("agents envelope");
+    let rusty = agents
+        .iter()
+        .find(|a| a["name"].as_str() == Some("rusty"))
+        .expect("demo mode should auto-spawn `rusty`");
+    let agent_id = rusty["id"].as_str().unwrap().to_string();
+
+    // The agent must be tagged so the dashboard can highlight it as a demo.
+    // (The test fixture doesn't read tags directly but registering them in
+    // the manifest is part of the contract.)
+    assert_eq!(rusty["model_provider"].as_str(), Some("mock"));
+
+    // The agent is interactive end-to-end.
+    let resp = client
+        .post(format!(
+            "{}/api/agents/{}/message",
+            server.base_url, agent_id
+        ))
+        .json(&serde_json::json!({"message": "what can you do"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let response = body["response"].as_str().unwrap_or("");
+    assert!(
+        response.contains("[mock]") && response.contains("what can you do"),
+        "demo welcome agent should reply through the mock driver, got: {response}"
+    );
+}
+
 /// End-to-end cron run that fires a workflow (the third CronAction variant).
 /// system_event and agent_turn are covered by other tests; this fills the gap
 /// for workflow_run, which has its own kernel branch and was not exercised
