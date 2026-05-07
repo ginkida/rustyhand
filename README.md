@@ -19,22 +19,30 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT" />
-  <img src="https://img.shields.io/badge/version-0.7.33-green?style=flat-square" alt="v0.7.33" />
-  <img src="https://img.shields.io/badge/tests-1,575%20passing-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/version-0.7.39-green?style=flat-square" alt="v0.7.39" />
+  <img src="https://img.shields.io/badge/tests-1,577%20passing-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/clippy-0%20warnings-brightgreen?style=flat-square" alt="Clippy" />
 </p>
 
 ---
 
-> **v0.7.33 — Demo Mode: works without an API key (May 2026)**
+> **v0.7.33–v0.7.39 — Demo Mode + persistence + product polish (May 2026)**
 >
 > Clone → `cargo run --release start` → open the dashboard → talk to an agent.
 > **No API key required.** When no provider key is found in the environment,
-> RustyHand falls back to a deterministic mock driver so the full agent loop,
-> audit trail, workflows, triggers, and cron jobs all run end-to-end on a
-> fresh install. Every message gets a `[mock] ...` reply so it's obvious
-> when you're in demo mode; set `ANTHROPIC_API_KEY` (or any of 26 other
-> supported providers) and restart for real LLM responses.
+> RustyHand falls back to a deterministic mock driver and seeds four sample
+> resources so every major dashboard page is interactive on first visit:
+>
+> - **`rusty`** welcome agent (chat-ready)
+> - **`demo-pipeline`** workflow (2-step sample, click to run)
+> - sample agent-spawn trigger
+> - **`demo-daily-ping`** cron job (registered, disabled by default)
+>
+> A welcome modal on first visit lists all four with one-click navigation.
+> The CLI startup banner and Docker entrypoint both announce demo mode
+> as a feature instead of a missing-key warning. Set `ANTHROPIC_API_KEY`
+> (or any of 26 other supported providers' env vars) and restart for real
+> LLM responses, or `RUSTYHAND_DISABLE_DEMO_MODE=1` to force a hard fail.
 >
 > Also new since v0.7.27:
 > - **Audit log persists** — Merkle hash chain at `~/.rustyhand/data/audit.jsonl`,
@@ -45,8 +53,10 @@
 > - **31 API response-shape contract tests** — every endpoint the dashboard
 >   or CLI reads is pinned to its JSON shape, so a server-side rename fails
 >   CI loudly instead of producing a silently-empty widget.
-> - **5 mock-driver e2e tests** — full HTTP → kernel → driver → result
->   pipeline runs in CI without burning real LLM credits.
+> - **6 mock-driver e2e tests** — full HTTP → kernel → driver → result
+>   pipeline runs in CI without burning real LLM credits, covering agent
+>   message round-trip, workflow run, all three CronAction variants, and
+>   the demo-mode auto-spawn flow.
 > - **wasmtime 42 → 44** for [RUSTSEC-2026-0114](https://rustsec.org/advisories/RUSTSEC-2026-0114).
 
 ---
