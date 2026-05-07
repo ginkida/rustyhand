@@ -1716,6 +1716,109 @@ async fn test_session_label_set_and_clear() {
     assert_eq!(resp.status(), 404);
 }
 
+/// End-to-end cron run that fires a workflow (the third CronAction variant).
+/// system_event and agent_turn are covered by other tests; this fills the gap
+/// for workflow_run, which has its own kernel branch and was not exercised
+/// by any integration test before.
+#[tokio::test]
+async fn test_cron_manual_run_workflow_with_mock_driver() {
+    let server = require_server!(start_test_server_with_provider(
+        "mock",
+        "mock-model",
+        "MOCK_API_KEY"
+    ));
+    let client = reqwest::Client::new();
+
+    // 1. Spawn a mock-driver agent for the workflow step.
+    let manifest = MOCK_MANIFEST.replace("mock-test-agent", "cron-wf-mock-agent");
+    let resp = client
+        .post(format!("{}/api/agents", server.base_url))
+        .json(&serde_json::json!({"manifest_toml": manifest}))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let agent_id = body["agent_id"].as_str().unwrap().to_string();
+    let agent_name = body["name"].as_str().unwrap().to_string();
+
+    // 2. Register a single-step workflow.
+    let resp = client
+        .post(format!("{}/api/workflows", server.base_url))
+        .json(&serde_json::json!({
+            "name": "cron-wakeup-workflow",
+            "description": "Workflow fired from a cron job",
+            "steps": [
+                {
+                    "name": "wakeup",
+                    "agent_name": agent_name,
+                    "prompt": "Wakeup says: {{input}}",
+                    "mode": "sequential",
+                    "timeout_secs": 30
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let workflow_id = resp.json::<serde_json::Value>().await.unwrap()["workflow_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // 3. Create a cron job whose action is to run that workflow.
+    let resp = client
+        .post(format!("{}/api/cron/jobs", server.base_url))
+        .json(&serde_json::json!({
+            "agent_id": agent_id,
+            "name": "morning-workflow",
+            "schedule": { "kind": "cron", "expr": "0 0 1 1 *" },
+            "action": {
+                "kind": "workflow_run",
+                "workflow_id": workflow_id,
+                "input": "good morning",
+                "timeout_secs": 30
+            },
+            "delivery": { "kind": "none" },
+            "one_shot": false,
+            "enabled": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 201, "cron create returned {}", resp.status());
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let create_result: serde_json::Value =
+        serde_json::from_str(body["result"].as_str().unwrap()).unwrap();
+    let job_id = create_result["job_id"].as_str().unwrap().to_string();
+
+    // 4. Manually fire the cron job.
+    let resp = client
+        .post(format!("{}/api/cron/jobs/{job_id}/run", server.base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "cron run returned {}", resp.status());
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["status"], "completed");
+    assert_eq!(body["mode"], "workflow_run");
+    assert_eq!(body["workflow_id"], workflow_id);
+
+    // 5. The workflow output must reflect both the mock driver and the
+    //    cron-supplied input — confirms the cron → workflow → driver chain
+    //    propagated the input all the way through.
+    let output = body["output"].as_str().unwrap_or("");
+    assert!(
+        output.contains("[mock]"),
+        "cron workflow_run output should include the mock prefix, got: {output}"
+    );
+    assert!(
+        output.contains("good morning"),
+        "cron-supplied input should propagate to the workflow step, got: {output}"
+    );
+}
+
 /// End-to-end manual cron run that actually invokes the agent loop.
 ///
 /// The existing test_cron_job_manual_run_system_event covers the
