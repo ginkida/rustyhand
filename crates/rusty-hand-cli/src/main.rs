@@ -2241,7 +2241,12 @@ fn cmd_status(config: Option<PathBuf>, json: bool) {
                 format!("{total} total")
             },
         );
-        ui::kv("Provider", body["default_provider"].as_str().unwrap_or("?"));
+        let provider_str = body["default_provider"].as_str().unwrap_or("?");
+        if provider_str == "mock" {
+            ui::kv_warn("Provider", "mock (DEMO MODE — replies are stubbed)");
+        } else {
+            ui::kv("Provider", provider_str);
+        }
         ui::kv("Model", body["default_model"].as_str().unwrap_or("?"));
         ui::kv("API", &base);
         ui::kv("Dashboard", &format!("{base}/"));
@@ -2296,7 +2301,12 @@ fn cmd_status(config: Option<PathBuf>, json: bool) {
         ui::section("RustyHand Status (in-process)");
         ui::blank();
         ui::kv("Agents", &agent_count.to_string());
-        ui::kv("Provider", &kernel.config.default_model.provider);
+        let provider_str = kernel.config.default_model.provider.as_str();
+        if provider_str == "mock" {
+            ui::kv_warn("Provider", "mock (DEMO MODE — replies are stubbed)");
+        } else {
+            ui::kv("Provider", provider_str);
+        }
         ui::kv("Model", &kernel.config.default_model.model);
         ui::kv("Data dir", &kernel.config.data_dir.display().to_string());
         ui::kv_warn("Daemon", "NOT RUNNING");
@@ -6268,7 +6278,12 @@ fn cmd_system_info(json: bool) {
             "Agents",
             &body["agent_count"].as_u64().unwrap_or(0).to_string(),
         );
-        ui::kv("Provider", body["default_provider"].as_str().unwrap_or("?"));
+        let provider_str = body["default_provider"].as_str().unwrap_or("?");
+        if provider_str == "mock" {
+            ui::kv_warn("Provider", "mock (DEMO MODE — replies are stubbed)");
+        } else {
+            ui::kv("Provider", provider_str);
+        }
         ui::kv("Model", body["default_model"].as_str().unwrap_or("?"));
         ui::kv("API", &base);
         ui::kv("Data dir", body["data_dir"].as_str().unwrap_or("?"));
