@@ -354,6 +354,17 @@ async fn audit_verify_envelope() {
         "/api/audit/verify",
     );
     assert_eq!(body["valid"].as_bool(), Some(true));
+    // Brand-new daemon: no entries yet. The empty-log case must surface a
+    // `warning` field so consumers (CLI security verify, settings dashboard)
+    // can show "no entries — nothing to verify" instead of the misleading
+    // "chain valid" success message. Pre-v0.7.30 the dashboard ignored the
+    // warning; pre-v0.7.32 the CLI did too.
+    assert_eq!(body["entries"].as_u64(), Some(0));
+    assert!(
+        body["warning"].is_string(),
+        "empty audit log should surface a `warning` field so consumers don't \
+         render a misleading success state, got: {body}"
+    );
 }
 
 /// `GET /api/skills` returns `{skills, total}`. Each skill has `name`,

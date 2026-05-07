@@ -5684,7 +5684,18 @@ fn cmd_security_verify() {
     let client = daemon_client();
     let body = daemon_json(client.get(format!("{base}/api/audit/verify")).send());
     if body["valid"].as_bool().unwrap_or(false) {
-        ui::success("Audit trail integrity verified (Merkle chain valid).");
+        // Empty-log case: the chain is "valid" only because there's nothing to
+        // verify. Surfacing the API's warning here prevents the misleading
+        // "verified" message that pre-fix made the audit endpoint look healthy
+        // on a brand-new daemon (matches the dashboard fix in v0.7.30).
+        if let Some(warning) = body["warning"].as_str() {
+            ui::check_warn(&format!("Audit trail integrity: no entries — {warning}"));
+        } else {
+            let entries = body["entries"].as_u64().unwrap_or(0);
+            ui::success(&format!(
+                "Audit trail integrity verified (Merkle chain valid, {entries} entries)."
+            ));
+        }
     } else {
         ui::error("Audit trail integrity check FAILED.");
         if let Some(msg) = body["error"].as_str() {
