@@ -157,7 +157,13 @@ function Install-RustyHand {
     }
 
     Write-Host ""
-    Write-Host "  Get started:" -ForegroundColor Cyan
+    Write-Host "  Quickest path - try the dashboard with no API key (Demo Mode):" -ForegroundColor Cyan
+    Write-Host "    rustyhand start"
+    Write-Host "  Then open http://localhost:4200 - a welcome agent and sample"
+    Write-Host "  workflow are pre-installed; replies will be mocked but the"
+    Write-Host "  audit log, persistence, workflows, and triggers are all real."
+    Write-Host ""
+    Write-Host "  When you're ready for real LLM responses:" -ForegroundColor Cyan
     Write-Host "    rustyhand init"
     Write-Host ""
     Write-Host "  The setup wizard will guide you through provider selection"

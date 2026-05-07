@@ -142,7 +142,13 @@ install() {
     fi
 
     echo ""
-    echo "  Get started:"
+    echo "  Quickest path — try the dashboard with no API key (Demo Mode):"
+    echo "    rustyhand start"
+    echo "  Then open http://localhost:4200 — a welcome agent and sample"
+    echo "  workflow are pre-installed; replies will be mocked but the"
+    echo "  audit log, persistence, workflows, and triggers are all real."
+    echo ""
+    echo "  When you're ready for real LLM responses:"
     echo "    rustyhand init"
     echo ""
     echo "  The setup wizard will guide you through provider selection"
