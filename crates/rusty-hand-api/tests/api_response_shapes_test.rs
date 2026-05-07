@@ -265,37 +265,80 @@ async fn approvals_endpoint_envelope() {
 
 /// `GET /api/audit/recent` returns `{entries, total, tip_hash}`. Each entry
 /// carries the fields the CLI `security audit` and dashboard activity tab read.
+/// Also asserts `?agent_id=` actually filters (not just returns 200) — the
+/// dashboard activity tab depends on this for per-agent timelines.
 #[tokio::test]
 async fn audit_recent_envelope_and_entry_shape() {
     let server = require_server!(start_test_server());
-    // Spawn an agent so the audit log has at least one entry.
-    spawn_test_agent(&server).await;
+    // Spawn two agents so we can verify the agent_id filter discriminates.
+    let agent_a = spawn_test_agent(&server).await;
 
-    let body = get_json(&server.base_url, "/api/audit/recent?n=10").await;
+    // Spawn a second agent with a slightly different manifest name.
+    let manifest_b = TEST_MANIFEST.replace("shape-test-agent", "shape-test-agent-b");
+    let resp = reqwest::Client::new()
+        .post(format!("{}/api/agents", server.base_url))
+        .json(&serde_json::json!({"manifest_toml": manifest_b}))
+        .send()
+        .await
+        .expect("second spawn");
+    let agent_b = resp.json::<Value>().await.unwrap()["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let body = get_json(&server.base_url, "/api/audit/recent?n=50").await;
     require_keys(
         &body,
         &["entries", "total", "tip_hash"],
         "/api/audit/recent",
     );
     let entries = body["entries"].as_array().expect("entries is array");
-    if let Some(first) = entries.first() {
-        require_keys(
-            first,
-            &[
-                "seq",
-                "timestamp",
-                "agent_id",
-                "agent_name",
-                "action",
-                "detail",
-                "outcome",
-                "hash",
-            ],
-            "/api/audit/recent.entries[0]",
+    let first = entries
+        .first()
+        .expect("audit log should have spawn entries from two agents");
+    require_keys(
+        first,
+        &[
+            "seq",
+            "timestamp",
+            "agent_id",
+            "agent_name",
+            "action",
+            "detail",
+            "outcome",
+            "hash",
+        ],
+        "/api/audit/recent.entries[0]",
+    );
+    first["timestamp"]
+        .as_str()
+        .expect("timestamp must be a string (CLI calls .as_str on it)");
+
+    // Verify the agent_id filter actually filters: querying for agent_a must
+    // exclude agent_b's entries. Pre-test, the activity tab silently mixed
+    // both agents' events because agent_id mismatches were tolerated.
+    let filtered = get_json(
+        &server.base_url,
+        &format!("/api/audit/recent?n=50&agent_id={agent_a}"),
+    )
+    .await;
+    let filtered_entries = filtered["entries"]
+        .as_array()
+        .expect("filtered entries is array");
+    assert!(
+        !filtered_entries.is_empty(),
+        "agent_a should appear in its own filtered audit log"
+    );
+    for e in filtered_entries {
+        let id = e["agent_id"].as_str().unwrap_or("");
+        assert!(
+            id.starts_with(&agent_a),
+            "filtered entry has agent_id={id}, expected prefix {agent_a}"
         );
-        first["timestamp"]
-            .as_str()
-            .expect("timestamp must be a string (CLI calls .as_str on it)");
+        assert_ne!(
+            id, agent_b,
+            "agent_b entries must not appear when filtering for agent_a"
+        );
     }
 }
 
