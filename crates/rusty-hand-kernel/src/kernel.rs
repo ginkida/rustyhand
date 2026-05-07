@@ -970,9 +970,9 @@ impl RustyHandKernel {
         let auto_reply_engine = crate::auto_reply::AutoReplyEngine::new(config.auto_reply.clone());
         let runtime_budget = std::sync::RwLock::new(config.budget.clone());
 
-        // Path for triggers persistence — must be computed before `config`
-        // is moved into the struct.
+        // Paths for engines that persist before `config` is moved into the struct.
         let triggers_path = config.home_dir.join("triggers.json");
+        let workflows_path = config.home_dir.join("workflows.json");
 
         // Open the persisted audit log before consuming `config` into the struct.
         // On disk failure we fall back to an in-memory log so kernel boot is
@@ -1007,7 +1007,7 @@ impl RustyHandKernel {
             scheduler: AgentScheduler::new(),
             memory: memory.clone(),
             supervisor,
-            workflows: WorkflowEngine::new(),
+            workflows: WorkflowEngine::with_persistence(workflows_path),
             triggers: TriggerEngine::with_persistence(triggers_path.clone()),
             background,
             audit_log,

@@ -198,19 +198,102 @@ pub struct StepResult {
 }
 
 /// The workflow engine — manages definitions and executes pipeline runs.
+///
+/// Workflow *definitions* survive daemon restart when constructed via
+/// [`WorkflowEngine::with_persistence`] — they're persisted to a JSON file
+/// and reloaded on boot. Workflow *runs* (execution history) remain
+/// in-memory because they can grow unbounded for long-lived agents; treat
+/// runs as a recent-runs ring, not a permanent log.
 pub struct WorkflowEngine {
     /// Registered workflow definitions.
     workflows: Arc<RwLock<HashMap<WorkflowId, Workflow>>>,
     /// Active and completed workflow runs.
     runs: Arc<RwLock<HashMap<WorkflowRunId, WorkflowRun>>>,
+    /// Optional persistence file for definitions. When set, every register
+    /// or remove rewrites the file via atomic .tmp + rename.
+    persist_path: Option<std::path::PathBuf>,
 }
 
 impl WorkflowEngine {
-    /// Create a new workflow engine.
+    /// Create a new in-memory workflow engine (no disk persistence).
     pub fn new() -> Self {
         Self {
             workflows: Arc::new(RwLock::new(HashMap::new())),
             runs: Arc::new(RwLock::new(HashMap::new())),
+            persist_path: None,
+        }
+    }
+
+    /// Create a workflow engine that loads definitions from `path` on
+    /// construction and saves there on every register/remove. If the file
+    /// does not exist, the engine starts empty. If the file is unreadable
+    /// or malformed, a warning is logged and the engine starts empty so
+    /// kernel boot is never blocked.
+    pub fn with_persistence(path: impl AsRef<std::path::Path>) -> Self {
+        let path = path.as_ref().to_path_buf();
+        let engine = Self {
+            workflows: Arc::new(RwLock::new(HashMap::new())),
+            runs: Arc::new(RwLock::new(HashMap::new())),
+            persist_path: Some(path.clone()),
+        };
+
+        if path.exists() {
+            match std::fs::read_to_string(&path) {
+                Ok(data) => match serde_json::from_str::<Vec<Workflow>>(&data) {
+                    Ok(loaded) => {
+                        let count = loaded.len();
+                        // Use blocking insert here because we're in a sync
+                        // constructor; tokio::sync::RwLock supports
+                        // blocking_write() for exactly this case.
+                        let mut workflows = engine.workflows.blocking_write();
+                        for wf in loaded {
+                            workflows.insert(wf.id, wf);
+                        }
+                        info!(count, path = %path.display(), "Loaded workflows from disk");
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %path.display(),
+                            error = %e,
+                            "Failed to parse workflows file — starting empty"
+                        );
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "Failed to read workflows file — starting empty"
+                    );
+                }
+            }
+        }
+
+        engine
+    }
+
+    /// Persist current workflow definitions to disk. No-op if no
+    /// persist_path is set. Errors are logged but not returned.
+    async fn persist(&self) {
+        let path = match &self.persist_path {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        let workflows: Vec<Workflow> = self.workflows.read().await.values().cloned().collect();
+        let data = match serde_json::to_string_pretty(&workflows) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to serialize workflows");
+                return;
+            }
+        };
+        let tmp = path.with_extension("json.tmp");
+        if let Err(e) = std::fs::write(&tmp, data.as_bytes()) {
+            tracing::warn!(path = %tmp.display(), error = %e, "Failed to write workflows temp file");
+            return;
+        }
+        if let Err(e) = std::fs::rename(&tmp, &path) {
+            tracing::warn!(path = %path.display(), error = %e, "Failed to rename workflows file");
         }
     }
 
@@ -218,6 +301,7 @@ impl WorkflowEngine {
     pub async fn register(&self, workflow: Workflow) -> WorkflowId {
         let id = workflow.id;
         self.workflows.write().await.insert(id, workflow);
+        self.persist().await;
         info!(workflow_id = %id, "Workflow registered");
         id
     }
@@ -234,7 +318,11 @@ impl WorkflowEngine {
 
     /// Remove a workflow definition.
     pub async fn remove_workflow(&self, id: WorkflowId) -> bool {
-        self.workflows.write().await.remove(&id).is_some()
+        let removed = self.workflows.write().await.remove(&id).is_some();
+        if removed {
+            self.persist().await;
+        }
+        removed
     }
 
     /// Maximum number of retained workflow runs. Oldest completed/failed
@@ -837,6 +925,79 @@ mod tests {
         let retrieved = engine.get_workflow(id).await;
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().name, "test-pipeline");
+    }
+
+    #[tokio::test]
+    async fn test_workflow_persistence_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workflows.json");
+
+        let id_a;
+        let id_b;
+        {
+            let engine = WorkflowEngine::with_persistence(&path);
+            id_a = engine.register(test_workflow()).await;
+            let mut wf_b = test_workflow();
+            wf_b.name = "second-pipeline".to_string();
+            id_b = engine.register(wf_b).await;
+        }
+        assert!(path.exists(), "workflows file should exist after register");
+
+        // Spawn a fresh blocking thread for `with_persistence` because it
+        // uses `blocking_write()` which panics if called from inside an
+        // async runtime context.
+        let path_for_reload = path.clone();
+        let reloaded =
+            tokio::task::spawn_blocking(move || WorkflowEngine::with_persistence(&path_for_reload))
+                .await
+                .unwrap();
+        let listed = reloaded.list_workflows().await;
+        assert_eq!(listed.len(), 2);
+        let names: Vec<String> = listed.iter().map(|w| w.name.clone()).collect();
+        assert!(names.contains(&"test-pipeline".to_string()));
+        assert!(names.contains(&"second-pipeline".to_string()));
+        assert!(reloaded.get_workflow(id_a).await.is_some());
+        assert!(reloaded.get_workflow(id_b).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_workflow_persistence_remove_survives_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workflows.json");
+        let id;
+        {
+            let engine = WorkflowEngine::with_persistence(&path);
+            id = engine.register(test_workflow()).await;
+            assert!(engine.remove_workflow(id).await);
+        }
+
+        let path_for_reload = path.clone();
+        let reloaded =
+            tokio::task::spawn_blocking(move || WorkflowEngine::with_persistence(&path_for_reload))
+                .await
+                .unwrap();
+        assert!(reloaded.get_workflow(id).await.is_none());
+        assert!(reloaded.list_workflows().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_workflow_persistence_corrupt_file_starts_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workflows.json");
+        std::fs::write(&path, "this is not valid JSON").unwrap();
+
+        let path_for_open = path.clone();
+        let engine =
+            tokio::task::spawn_blocking(move || WorkflowEngine::with_persistence(&path_for_open))
+                .await
+                .unwrap();
+        assert!(engine.list_workflows().await.is_empty());
+
+        // Registering overwrites the corrupt file with valid JSON.
+        engine.register(test_workflow()).await;
+        let data = std::fs::read_to_string(&path).unwrap();
+        let parsed: Vec<Workflow> = serde_json::from_str(&data).unwrap();
+        assert_eq!(parsed.len(), 1);
     }
 
     #[tokio::test]
