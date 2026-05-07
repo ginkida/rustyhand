@@ -650,11 +650,45 @@ impl RustyHandKernel {
                         ))
                     })?
                 } else {
-                    warn!(
-                        "No LLM provider API key found — starting without LLM. \
-                         Set an API key env var or run `rustyhand init`."
-                    );
-                    Arc::new(drivers::NullDriver) as Arc<dyn LlmDriver>
+                    // No real provider available. Two choices:
+                    //   1) NullDriver → every message fails with "configure a key" — daemon
+                    //      boots but the dashboard's chat is dead until the user sets a key.
+                    //   2) MockDriver → daemon boots in DEMO MODE; messages get a deterministic
+                    //      `[mock] <text>` reply so a fresh install can immediately exercise
+                    //      the full agent loop, audit log, workflow runs, etc. without any
+                    //      credentials.
+                    //
+                    // We pick (2) because "first 5 minutes after install" is too important
+                    // to gate on the user having a paid LLM key. The startup banner below
+                    // makes the demo mode unmistakable; the audit trail and dashboard both
+                    // surface the active provider as `mock`. Power users who want the old
+                    // hard-fail behaviour can opt into it explicitly with
+                    // `RUSTYHAND_DISABLE_DEMO_MODE=1`.
+                    let demo_disabled = std::env::var("RUSTYHAND_DISABLE_DEMO_MODE")
+                        .map(|v| !v.is_empty() && v != "0" && v != "false")
+                        .unwrap_or(false);
+                    if demo_disabled {
+                        warn!(
+                            "No LLM provider API key found and RUSTYHAND_DISABLE_DEMO_MODE \
+                             is set — starting without LLM. Set an API key env var to \
+                             enable real chat."
+                        );
+                        Arc::new(drivers::NullDriver) as Arc<dyn LlmDriver>
+                    } else {
+                        warn!(
+                            "================================================================\n\
+                             DEMO MODE — no API key found, falling back to the mock driver.\n\
+                             Every message will receive a deterministic `[mock] ...` reply\n\
+                             so you can try the agent loop, workflows, and audit trail\n\
+                             without configuring a provider. Set ANTHROPIC_API_KEY (or any\n\
+                             other supported provider's env var) and restart for real LLM\n\
+                             responses, or run `rustyhand init` for an interactive setup.\n\
+                             ================================================================"
+                        );
+                        config.default_model.provider = "mock".to_string();
+                        config.default_model.model = "mock-model".to_string();
+                        Arc::new(drivers::mock::MockDriver::new()) as Arc<dyn LlmDriver>
+                    }
                 }
             }
         };

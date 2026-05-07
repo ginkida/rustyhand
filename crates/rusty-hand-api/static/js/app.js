@@ -132,6 +132,8 @@ document.addEventListener('alpine:init', function() {
     agents: [],
     defaultProvider: '',
     defaultModel: '',
+    demoMode: false,
+    demoBannerDismissed: false,
     connected: false,
     booting: true,
     wsConnected: false,
@@ -371,6 +373,11 @@ document.addEventListener('alpine:init', function() {
         this._searchTimer = setTimeout(function() {
             self._runServerSearch(q);
         }, 250);
+    },
+
+    dismissDemoBanner() {
+      this.demoBannerDismissed = true;
+      try { localStorage.setItem('rh-demo-banner-dismissed', 'true'); } catch (e) { /* ignore */ }
     },
 
     async refreshAgents() {
@@ -689,6 +696,20 @@ function app() {
 
       // Check authentication before anything else
       await this.checkAuth();
+
+      // Pull demo-mode flag from /api/onboarding so the banner appears as
+      // early as possible on first paint instead of after agent refresh.
+      try {
+        var onboarding = await RustyHandAPI.get('/api/onboarding');
+        this.demoMode = !!onboarding.demo_mode;
+        if (onboarding.provider) this.defaultProvider = onboarding.provider;
+        if (onboarding.model) this.defaultModel = onboarding.model;
+      } catch (e) {
+        // Non-fatal — the banner just won't appear if onboarding can't be
+        // reached (e.g., transient network blip during page load).
+      }
+      this.demoBannerDismissed =
+        localStorage.getItem('rh-demo-banner-dismissed') === 'true';
 
       // Listen for OS theme changes (only matters when mode is 'system')
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {

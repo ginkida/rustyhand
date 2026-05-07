@@ -709,16 +709,32 @@ async fn auth_me_shape() {
     assert_eq!(body["source"].as_str(), Some("localhost"));
 }
 
-/// `GET /api/onboarding` returns `{api_key_set, agent_count}`. The
-/// dashboard onboarding wizard reads `data.api_key_set` to decide whether
-/// to show the welcome screen.
+/// `GET /api/onboarding` returns `{api_key_set, agent_count, provider,
+/// model, demo_mode}`. The dashboard reads `demo_mode` to render its
+/// "DEMO MODE" banner — that field appearing as `null` or being dropped
+/// would silently disable the banner.
 #[tokio::test]
 async fn onboarding_status_shape() {
     let server = require_server!(start_test_server());
     let body = get_json(&server.base_url, "/api/onboarding").await;
-    require_keys(&body, &["api_key_set", "agent_count"], "/api/onboarding");
+    require_keys(
+        &body,
+        &[
+            "api_key_set",
+            "agent_count",
+            "provider",
+            "model",
+            "demo_mode",
+        ],
+        "/api/onboarding",
+    );
     // Tests use no API key → must be reported as not-set.
     assert_eq!(body["api_key_set"].as_bool(), Some(false));
+    // The test fixture pins provider=ollama, so demo_mode is false even
+    // though no API key is set. The dashboard demo-mode banner only
+    // appears when the active provider is `mock`.
+    assert_eq!(body["demo_mode"].as_bool(), Some(false));
+    assert_eq!(body["provider"].as_str(), Some("ollama"));
 }
 
 /// `GET /api/budget/agents/{id}` returns flat fields the dashboard reads.

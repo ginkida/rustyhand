@@ -227,6 +227,29 @@
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
     </button>
 
+    <!-- Demo mode banner — visible whenever the kernel is running on the
+         deterministic mock LLM driver (no API key configured). One-line
+         actionable nudge with a dismiss button that persists in localStorage. -->
+    <div x-show="$store.app.demoMode &amp;&amp; !$store.app.demoBannerDismissed"
+         class="card demo-banner"
+         style="display:flex;align-items:center;gap:12px;border-left:3px solid var(--accent);background:var(--bg-elev);margin:8px 12px 0;padding:10px 14px;font-size:13px"
+         role="status">
+      <span style="font-weight:600;color:var(--accent)">DEMO MODE</span>
+      <span style="flex:1;color:var(--text-dim)">
+        Running on the deterministic mock driver. Every message gets a
+        <code style="background:var(--bg);padding:1px 4px;border-radius:3px">[mock] ...</code>
+        reply so you can try the full agent loop without a key.
+        <a href="#settings" @click="$store.app.navigate('settings'); return false" style="color:var(--accent);text-decoration:underline">
+          Set an API key
+        </a>
+        and restart to switch to real LLM responses.
+      </span>
+      <button @click="$store.app.dismissDemoBanner()"
+              class="btn btn-ghost"
+              style="padding:2px 8px;font-size:12px"
+              aria-label="Dismiss demo mode banner">×</button>
+    </div>
+
     <nav class="workspace-bar">
       <div class="workspace-bar-left">
         <span class="workspace-bar-crumb workspace-bar-current" x-text="currentPageMeta.title"></span>

@@ -2399,14 +2399,24 @@ pub async fn health_detail(State(state): State<Arc<AppState>>) -> impl IntoRespo
 ///
 /// Returns whether an API key is configured and the agent count,
 /// so the dashboard can decide whether to show the setup wizard.
+///
+/// Also surfaces `demo_mode` (true when the active provider is `mock`),
+/// `provider`, and `model` so the dashboard can display a "Demo mode"
+/// banner without having to call /api/status separately.
 pub async fn onboarding_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let api_key_set =
         !state.kernel.config.api_key.is_empty() && state.kernel.config.api_key != "not set";
     let agent_count = state.kernel.registry.count();
+    let provider = state.kernel.config.default_model.provider.clone();
+    let model = state.kernel.config.default_model.model.clone();
+    let demo_mode = provider == "mock";
 
     Json(serde_json::json!({
         "api_key_set": api_key_set,
         "agent_count": agent_count,
+        "provider": provider,
+        "model": model,
+        "demo_mode": demo_mode,
     }))
 }
 
