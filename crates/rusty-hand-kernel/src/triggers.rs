@@ -3,13 +3,19 @@
 //! Agents register triggers that describe which events should wake them.
 //! When a matching event arrives on the EventBus, the trigger system
 //! sends the event content as a message to the subscribing agent.
+//!
+//! Persistence: when constructed via [`TriggerEngine::with_persistence`],
+//! triggers are loaded from a JSON file at startup and re-saved (atomic
+//! `.tmp` + rename) after every mutation. Webhook-style triggers therefore
+//! survive daemon restart instead of being silently dropped.
 
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use rusty_hand_types::agent::AgentId;
 use rusty_hand_types::event::{Event, EventPayload, LifecycleEvent, SystemEvent};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
+use std::path::{Path, PathBuf};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 /// Unique identifier for a trigger.
@@ -85,14 +91,92 @@ pub struct TriggerEngine {
     triggers: DashMap<TriggerId, Trigger>,
     /// Index: agent_id → list of trigger IDs belonging to that agent.
     agent_triggers: DashMap<AgentId, Vec<TriggerId>>,
+    /// Optional persistence file. When set, every mutation (register, remove,
+    /// set_enabled, fire-count increment) saves the full trigger list to
+    /// `<path>` via atomic write.
+    persist_path: Option<PathBuf>,
 }
 
 impl TriggerEngine {
-    /// Create a new trigger engine.
+    /// Create a new in-memory trigger engine (no disk persistence).
     pub fn new() -> Self {
         Self {
             triggers: DashMap::new(),
             agent_triggers: DashMap::new(),
+            persist_path: None,
+        }
+    }
+
+    /// Create a trigger engine that loads from `path` on construction and
+    /// saves there on every mutation. If the file does not exist, the engine
+    /// starts empty. If the file exists but is unreadable or malformed, a
+    /// warning is logged and the engine starts empty (so a corrupt file
+    /// can't block kernel boot).
+    pub fn with_persistence(path: impl AsRef<Path>) -> Self {
+        let path = path.as_ref().to_path_buf();
+        let engine = Self {
+            triggers: DashMap::new(),
+            agent_triggers: DashMap::new(),
+            persist_path: Some(path.clone()),
+        };
+
+        if path.exists() {
+            match std::fs::read_to_string(&path) {
+                Ok(data) => match serde_json::from_str::<Vec<Trigger>>(&data) {
+                    Ok(loaded) => {
+                        let count = loaded.len();
+                        for t in loaded {
+                            let id = t.id;
+                            let agent_id = t.agent_id;
+                            engine.triggers.insert(id, t);
+                            engine.agent_triggers.entry(agent_id).or_default().push(id);
+                        }
+                        info!(count, path = %path.display(), "Loaded triggers from disk");
+                    }
+                    Err(e) => {
+                        warn!(
+                            path = %path.display(),
+                            error = %e,
+                            "Failed to parse triggers file — starting empty"
+                        );
+                    }
+                },
+                Err(e) => {
+                    warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "Failed to read triggers file — starting empty"
+                    );
+                }
+            }
+        }
+
+        engine
+    }
+
+    /// Persist the current trigger set to disk. No-op if no persist_path is
+    /// set. Logs (but does not return) any I/O errors so callers don't have
+    /// to plumb them through.
+    fn persist(&self) {
+        let path = match &self.persist_path {
+            Some(p) => p,
+            None => return,
+        };
+        let triggers: Vec<Trigger> = self.triggers.iter().map(|e| e.value().clone()).collect();
+        let data = match serde_json::to_string_pretty(&triggers) {
+            Ok(d) => d,
+            Err(e) => {
+                warn!(error = %e, "Failed to serialize triggers");
+                return;
+            }
+        };
+        let tmp = path.with_extension("json.tmp");
+        if let Err(e) = std::fs::write(&tmp, data.as_bytes()) {
+            warn!(path = %tmp.display(), error = %e, "Failed to write triggers temp file");
+            return;
+        }
+        if let Err(e) = std::fs::rename(&tmp, path) {
+            warn!(path = %path.display(), error = %e, "Failed to rename triggers file");
         }
     }
 
@@ -117,6 +201,7 @@ impl TriggerEngine {
         let id = trigger.id;
         self.triggers.insert(id, trigger);
         self.agent_triggers.entry(agent_id).or_default().push(id);
+        self.persist();
 
         info!(trigger_id = %id, agent_id = %agent_id, "Trigger registered");
         id
@@ -128,6 +213,7 @@ impl TriggerEngine {
             if let Some(mut list) = self.agent_triggers.get_mut(&trigger.agent_id) {
                 list.retain(|id| *id != trigger_id);
             }
+            self.persist();
             true
         } else {
             false
@@ -140,6 +226,7 @@ impl TriggerEngine {
             for id in trigger_ids {
                 self.triggers.remove(&id);
             }
+            self.persist();
         }
     }
 
@@ -147,6 +234,8 @@ impl TriggerEngine {
     pub fn set_enabled(&self, trigger_id: TriggerId, enabled: bool) -> bool {
         if let Some(mut t) = self.triggers.get_mut(&trigger_id) {
             t.enabled = enabled;
+            drop(t);
+            self.persist();
             true
         } else {
             false
@@ -175,6 +264,7 @@ impl TriggerEngine {
     pub fn evaluate(&self, event: &Event) -> Vec<(AgentId, String)> {
         let event_description = describe_event(event);
         let mut matches = Vec::new();
+        let mut mutated = false;
 
         for mut entry in self.triggers.iter_mut() {
             let trigger = entry.value_mut();
@@ -186,6 +276,7 @@ impl TriggerEngine {
             // Check max fires
             if trigger.max_fires > 0 && trigger.fire_count >= trigger.max_fires {
                 trigger.enabled = false;
+                mutated = true;
                 continue;
             }
 
@@ -195,6 +286,7 @@ impl TriggerEngine {
                     .replace("{{event}}", &event_description);
                 matches.push((trigger.agent_id, message));
                 trigger.fire_count += 1;
+                mutated = true;
 
                 debug!(
                     trigger_id = %trigger.id,
@@ -203,6 +295,13 @@ impl TriggerEngine {
                     "Trigger fired"
                 );
             }
+        }
+
+        // Persist fire-count and auto-disable updates so they survive a
+        // restart. A trigger that's reached max_fires must NOT re-fire on
+        // boot, and `fire_count` is user-visible (CLI / dashboard show it).
+        if mutated {
+            self.persist();
         }
 
         matches
@@ -482,6 +581,130 @@ mod tests {
 
         engine.remove_agent_triggers(agent_id);
         assert_eq!(engine.list_agent_triggers(agent_id).len(), 0);
+    }
+
+    #[test]
+    fn test_persistence_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("triggers.json");
+
+        let agent_a = AgentId::new();
+        let agent_b = AgentId::new();
+
+        // First lifetime: register two triggers, fire one of them.
+        let id_a;
+        let id_b;
+        let fire_count_a;
+        {
+            let engine = TriggerEngine::with_persistence(&path);
+            id_a = engine.register(
+                agent_a,
+                TriggerPattern::All,
+                "all: {{event}}".to_string(),
+                0,
+            );
+            id_b = engine.register(
+                agent_b,
+                TriggerPattern::Lifecycle,
+                "lifecycle: {{event}}".to_string(),
+                0,
+            );
+
+            let event = Event::new(
+                AgentId::new(),
+                EventTarget::Broadcast,
+                EventPayload::System(SystemEvent::HealthCheck {
+                    status: "ok".to_string(),
+                }),
+            );
+            engine.evaluate(&event); // matches All only — fires id_a
+            engine.evaluate(&event); // fires id_a again
+            fire_count_a = engine.get(id_a).unwrap().fire_count;
+            assert_eq!(fire_count_a, 2);
+        }
+
+        // File must exist after persistence.
+        assert!(path.exists(), "triggers file should exist after register");
+
+        // Second lifetime: a fresh engine reads them back, including fire_count.
+        let engine = TriggerEngine::with_persistence(&path);
+        assert_eq!(engine.list_all().len(), 2);
+        let restored_a = engine.get(id_a).expect("trigger A should reload");
+        let restored_b = engine.get(id_b).expect("trigger B should reload");
+        assert_eq!(restored_a.fire_count, fire_count_a);
+        assert_eq!(restored_b.fire_count, 0);
+        assert_eq!(restored_a.agent_id, agent_a);
+        assert_eq!(restored_b.agent_id, agent_b);
+
+        // The agent_triggers index must also be rebuilt.
+        let by_a = engine.list_agent_triggers(agent_a);
+        assert_eq!(by_a.len(), 1);
+        assert_eq!(by_a[0].id, id_a);
+    }
+
+    #[test]
+    fn test_persistence_remove_survives_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("triggers.json");
+        let agent = AgentId::new();
+
+        let engine = TriggerEngine::with_persistence(&path);
+        let id = engine.register(agent, TriggerPattern::All, "x".to_string(), 0);
+        assert!(engine.remove(id));
+        drop(engine);
+
+        let reloaded = TriggerEngine::with_persistence(&path);
+        assert!(reloaded.get(id).is_none());
+        assert!(reloaded.list_all().is_empty());
+    }
+
+    #[test]
+    fn test_persistence_max_fires_disabled_state_persists() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("triggers.json");
+        let agent = AgentId::new();
+        let id;
+        {
+            let engine = TriggerEngine::with_persistence(&path);
+            id = engine.register(agent, TriggerPattern::All, "x".to_string(), 1);
+            let event = Event::new(
+                AgentId::new(),
+                EventTarget::Broadcast,
+                EventPayload::System(SystemEvent::HealthCheck {
+                    status: "ok".to_string(),
+                }),
+            );
+            engine.evaluate(&event); // fires once
+            engine.evaluate(&event); // hits max_fires, sets enabled=false
+            assert!(!engine.get(id).unwrap().enabled);
+        }
+
+        // After restart the trigger must remain disabled — otherwise a
+        // restart would silently let max_fires=1 triggers fire a second time.
+        let reloaded = TriggerEngine::with_persistence(&path);
+        let restored = reloaded.get(id).expect("trigger should reload");
+        assert!(!restored.enabled);
+        assert_eq!(restored.fire_count, 1);
+    }
+
+    #[test]
+    fn test_persistence_corrupt_file_starts_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("triggers.json");
+        std::fs::write(&path, "this is not valid JSON").unwrap();
+
+        // Corrupt file should not panic or refuse to construct — engine
+        // starts empty so the kernel can still boot.
+        let engine = TriggerEngine::with_persistence(&path);
+        assert!(engine.list_all().is_empty());
+
+        // After registering a fresh trigger, the corrupt file is overwritten
+        // with valid JSON.
+        let agent = AgentId::new();
+        engine.register(agent, TriggerPattern::All, "x".to_string(), 0);
+        let data = std::fs::read_to_string(&path).unwrap();
+        let parsed: Vec<Trigger> = serde_json::from_str(&data).unwrap();
+        assert_eq!(parsed.len(), 1);
     }
 
     #[test]
