@@ -2663,9 +2663,24 @@ decay_rate = 0.05
     }
 
     if !any_key_set {
+        // Pre-v0.7.33 this was a hard failure ("No LLM provider API keys
+        // found!" + all_ok = false). With Demo Mode (v0.7.33+) the daemon
+        // boots fine on the mock driver when no key is set — that's a
+        // documented, supported state, not a misconfiguration. Doctor now
+        // reports it as informational unless the user explicitly disabled
+        // demo mode via RUSTYHAND_DISABLE_DEMO_MODE.
+        let demo_disabled = std::env::var("RUSTYHAND_DISABLE_DEMO_MODE")
+            .map(|v| !v.is_empty() && v != "0" && v != "false")
+            .unwrap_or(false);
         if !json {
             println!();
-            ui::check_fail("No LLM provider API keys found!");
+            if demo_disabled {
+                ui::check_fail("No LLM provider API keys found and RUSTYHAND_DISABLE_DEMO_MODE=1!");
+            } else {
+                ui::check_warn(
+                    "No LLM provider API keys found — daemon will boot in DEMO MODE (mocked replies).",
+                );
+            }
             ui::blank();
             ui::section("Getting an API key");
             ui::suggest_cmd("Anthropic:", "https://console.anthropic.com (premium)");
@@ -2677,8 +2692,17 @@ decay_rate = 0.05
             ui::suggest_cmd("Ollama:", "https://ollama.com              (local, free)");
             ui::blank();
             ui::hint("Or run: rustyhand init");
+            if !demo_disabled {
+                ui::hint(
+                    "(Or just `rustyhand start` to try the dashboard right now in demo mode.)",
+                );
+            }
         }
-        all_ok = false;
+        // Only mark doctor as failed when demo mode is disabled. Otherwise
+        // a missing key is an expected, supported state.
+        if demo_disabled {
+            all_ok = false;
+        }
     }
 
     // --- Check 10: Channel token format validation ---
