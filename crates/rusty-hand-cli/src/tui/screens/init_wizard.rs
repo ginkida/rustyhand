@@ -83,6 +83,20 @@ const PROVIDERS: &[ProviderInfo] = &[
         needs_key: false,
         hint: "local",
     },
+    // Mock driver: the deterministic in-process echo provider added in
+    // v0.7.33. Lets a user pick "Demo Mode" as a deliberate choice (vs.
+    // the kernel-level fallback that kicks in automatically when no key
+    // is found) — useful for users who have an API key set but want to
+    // explore the dashboard offline first. needs_key=false because
+    // there's nothing to set; the env_var is a placeholder.
+    ProviderInfo {
+        name: "mock",
+        display: "Demo Mode",
+        env_var: "MOCK_API_KEY",
+        default_model: "mock-model",
+        needs_key: false,
+        hint: "no setup — mocked replies, full UI works",
+    },
 ];
 
 // ── Public result type ─────────────────────────────────────────────────────
