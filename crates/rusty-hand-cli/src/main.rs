@@ -1569,8 +1569,21 @@ fn detect_best_provider() -> (&'static str, &'static str, &'static str) {
     ui::hint("Get an Anthropic key: https://console.anthropic.com");
     ui::hint("Or a Kimi Code key: https://platform.moonshot.ai/console/code");
     ui::hint("Or run Ollama locally: https://ollama.com");
-    // Sensible fallback — Ollama needs no key, so it never errors on missing credentials.
-    ("ollama", "OLLAMA_API_KEY", "llama3.2")
+    ui::blank();
+    ui::hint("Falling back to DEMO MODE (mock driver — replies are stubbed but");
+    ui::hint("the dashboard, audit log, workflows, and triggers all work).");
+    // Pre-v0.7.33 the fallback here was "ollama" with the comment "Ollama
+    // needs no key, so it never errors on missing credentials." That was
+    // technically true (no key needed) but pragmatically wrong: ollama
+    // also needs a running ollama server on localhost:11434, which most
+    // users don't have. Booting against a non-existent server produced
+    // connection errors on every message.
+    //
+    // With v0.7.33's mock driver, "mock" is now a valid in-process
+    // provider that always works. It's the right default when no key is
+    // detected — the user gets a working dashboard immediately, sees
+    // exactly what the system can do, and can swap in a real key later.
+    ("mock", "MOCK_API_KEY", "mock-model")
 }
 
 /// Static list of supported providers: (id, env_var, default_model, display_name).
