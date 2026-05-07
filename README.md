@@ -6,7 +6,7 @@
 <h3 align="center">The Agent Operating System</h3>
 
 <p align="center">
-  Open-source Agent OS built in Rust. 117K LOC. 10 crates. 1,400+ tests. Zero clippy warnings.<br/>
+  Open-source Agent OS built in Rust. 124K LOC. 10 crates. 1,575 tests. Zero clippy warnings.<br/>
   <strong>One binary. Autonomous Telegram agent. Agents that actually work for you.</strong>
 </p>
 
@@ -19,36 +19,35 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT" />
-  <img src="https://img.shields.io/badge/version-0.7.10-green?style=flat-square" alt="v0.7.10" />
-  <img src="https://img.shields.io/badge/tests-1,481%20passing-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/version-0.7.33-green?style=flat-square" alt="v0.7.33" />
+  <img src="https://img.shields.io/badge/tests-1,575%20passing-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/clippy-0%20warnings-brightgreen?style=flat-square" alt="Clippy" />
 </p>
 
 ---
 
-> **v0.7.0 — Lean provider catalog + first-class Kimi Code (April 2026)**
+> **v0.7.33 — Demo Mode: works without an API key (May 2026)**
 >
-> **Provider catalog shrunk from 27 → 7.** RustyHand now ships with Anthropic,
-> **Kimi (Moonshot)**, DeepSeek, Zhipu GLM, MiniMax, OpenRouter, and Ollama —
-> driven by 2 wire protocols (Anthropic Messages API + OpenAI-compatible Chat
-> Completions). **Kimi Code** (`api.kimi.com/coding`) is a first-class coding
-> provider alongside Anthropic, wired through `AnthropicDriver` because Kimi
-> speaks Anthropic's wire format natively — same `x-api-key` + `anthropic-version`
-> headers, same tool/thinking/streaming support.
+> Clone → `cargo run --release start` → open the dashboard → talk to an agent.
+> **No API key required.** When no provider key is found in the environment,
+> RustyHand falls back to a deterministic mock driver so the full agent loop,
+> audit trail, workflows, triggers, and cron jobs all run end-to-end on a
+> fresh install. Every message gets a `[mock] ...` reply so it's obvious
+> when you're in demo mode; set `ANTHROPIC_API_KEY` (or any of 26 other
+> supported providers) and restart for real LLM responses.
 >
-> Removed providers (OpenAI, Gemini, Groq, xAI, Copilot, Mistral, Together,
-> Fireworks, Perplexity, Cohere, AI21, Cerebras, SambaNova, HuggingFace,
-> Replicate, vLLM, LM Studio, Moonshot legacy, Qwen, Qianfan, Bedrock) are
-> reachable via **OpenRouter** with one key.
->
-> Also fixed: Anthropic driver now tolerates `stop_reason: null` (Kimi
-> returns this on truncated responses). OpenAI embeddings remain available
-> as an embedding-only upstream even though OpenAI LLM is gone.
->
-> **Breaking**: configs with `provider = "openai" | "gemini" | "groq" | ...`
-> will error on boot with `Unknown provider`. Migrate to `openrouter` + a
-> passthrough model id (e.g. `openai/gpt-4o`) or pick a kept provider.
-> [Report issues here.](https://github.com/ginkida/rustyhand/issues)
+> Also new since v0.7.27:
+> - **Audit log persists** — Merkle hash chain at `~/.rustyhand/data/audit.jsonl`,
+>   replayed and validated on boot.
+> - **Triggers and workflows persist** — webhook triggers and pipeline
+>   definitions survive daemon restart, including subtle state like
+>   `max_fires` auto-disable and trigger fire-counts.
+> - **31 API response-shape contract tests** — every endpoint the dashboard
+>   or CLI reads is pinned to its JSON shape, so a server-side rename fails
+>   CI loudly instead of producing a silently-empty widget.
+> - **5 mock-driver e2e tests** — full HTTP → kernel → driver → result
+>   pipeline runs in CI without burning real LLM credits.
+> - **wasmtime 42 → 44** for [RUSTSEC-2026-0114](https://rustsec.org/advisories/RUSTSEC-2026-0114).
 
 ---
 
@@ -161,6 +160,24 @@ All configuration can be set via `RUSTYHAND_*` environment variables — see [Do
 ---
 
 ## Quick Start
+
+### Option Zero: Try it in 30 seconds, no API key
+
+The fastest possible first run, no credentials, no configuration:
+
+```bash
+git clone https://github.com/ginkida/rustyhand
+cd rustyhand
+cargo run --release -- start
+# In another tab: open http://localhost:4200
+```
+
+The dashboard banner will read **"DEMO MODE — running on the deterministic
+mock driver."** Spawn an agent, send a message, watch the agent loop run,
+session grow, audit log fill up. Every reply is `[mock] <your message>` —
+unmistakably demo, but the full pipeline (sessions, persistence, workflows,
+cron jobs) is real. Set `ANTHROPIC_API_KEY` (or any of 26 other supported
+providers' env vars) and restart for real LLM responses.
 
 ### Option A: Docker (fastest)
 
