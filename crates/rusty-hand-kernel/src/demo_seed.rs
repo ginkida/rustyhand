@@ -74,20 +74,36 @@ pub(crate) fn seed_if_demo_mode(kernel: &RustyHandKernel) {
     }
 
     // Marker last — only after the welcome agent (the must-have) succeeded.
-    if let Err(e) = std::fs::write(&marker, b"") {
-        warn!(
-            error = %e,
-            "Could not write demo-seeded marker — demo resources may be re-created on \
-             next restart"
+    // Track whether the marker write succeeded so we can adjust the final
+    // info-level message: a failed marker write means the next boot will
+    // re-seed (creating duplicate resources), so we shouldn't tell the
+    // operator "they will not respawn."
+    let marker_written = match std::fs::write(&marker, b"") {
+        Ok(()) => true,
+        Err(e) => {
+            warn!(
+                error = %e,
+                "Could not write demo-seeded marker — the next boot will re-seed and \
+                 create duplicate resources unless you fix the file permissions"
+            );
+            false
+        }
+    };
+
+    if marker_written {
+        info!(
+            agent_id = %agent_id,
+            "Demo Mode: seeded `rusty` agent + `demo-pipeline` workflow + sample trigger + \
+             disabled `demo-daily-ping` cron job (delete any of them if unwanted; they will \
+             not respawn on next boot)"
+        );
+    } else {
+        info!(
+            agent_id = %agent_id,
+            "Demo Mode: seeded resources (warning: marker file could not be written, so \
+             the next boot WILL re-seed and produce duplicates)"
         );
     }
-
-    info!(
-        agent_id = %agent_id,
-        "Demo Mode: seeded `rusty` agent + `demo-pipeline` workflow + sample trigger + \
-         disabled `demo-daily-ping` cron job (delete any of them if unwanted; they will \
-         not respawn on next boot)"
-    );
 }
 
 fn welcome_agent_manifest() -> rusty_hand_types::agent::AgentManifest {
