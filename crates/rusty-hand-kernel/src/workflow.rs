@@ -306,6 +306,71 @@ impl WorkflowEngine {
         id
     }
 
+    /// Sync-context variant of [`register`] for use during kernel boot or
+    /// other synchronous setup paths. Uses `try_write` instead of
+    /// `blocking_write` so it works whether or not we're inside a tokio
+    /// runtime (kernel boot is wrapped in `rt.block_on(...)` in the
+    /// production daemon and in `#[tokio::test]` for integration tests —
+    /// both make `blocking_write` panic with "Cannot block the current
+    /// thread from within a runtime").
+    ///
+    /// `try_write` is sound here because the kernel boot path is
+    /// single-threaded — there are no other tasks contending for the
+    /// workflows lock during seeding. The only contention scenario is
+    /// pathological (a concurrent register racing the boot path) and we'd
+    /// rather log + skip than block.
+    pub fn register_blocking(&self, workflow: Workflow) -> WorkflowId {
+        let id = workflow.id;
+        match self.workflows.try_write() {
+            Ok(mut guard) => {
+                guard.insert(id, workflow);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "Workflow lock contended during sync register — skipping"
+                );
+                return id;
+            }
+        }
+        self.persist_blocking();
+        info!(workflow_id = %id, "Workflow registered (sync)");
+        id
+    }
+
+    /// Sync variant of [`persist`] for use from sync setup paths.
+    fn persist_blocking(&self) {
+        let path = match &self.persist_path {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        let workflows: Vec<Workflow> = match self.workflows.try_read() {
+            Ok(guard) => guard.values().cloned().collect(),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "Workflow lock contended during sync persist — skipping write"
+                );
+                return;
+            }
+        };
+        let data = match serde_json::to_string_pretty(&workflows) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to serialize workflows");
+                return;
+            }
+        };
+        let tmp = path.with_extension("json.tmp");
+        if let Err(e) = std::fs::write(&tmp, data.as_bytes()) {
+            tracing::warn!(path = %tmp.display(), error = %e, "Failed to write workflows temp file");
+            return;
+        }
+        if let Err(e) = std::fs::rename(&tmp, &path) {
+            tracing::warn!(path = %path.display(), error = %e, "Failed to rename workflows file");
+        }
+    }
+
     /// List all registered workflows.
     pub async fn list_workflows(&self) -> Vec<Workflow> {
         self.workflows.read().await.values().cloned().collect()

@@ -1157,6 +1157,55 @@ impl RustyHandKernel {
                 };
                 match kernel.spawn_agent(demo_manifest) {
                     Ok(id) => {
+                        // Pre-install a sample 2-step workflow that uses Rusty
+                        // so the Workflows page is non-empty on first visit
+                        // and the user can see what a multi-stage pipeline
+                        // looks like without typing anything. Failure here is
+                        // non-fatal — the welcome agent is the must-have, the
+                        // sample workflow is just a bonus.
+                        let sample_workflow = crate::workflow::Workflow {
+                            id: crate::workflow::WorkflowId::new(),
+                            name: "demo-pipeline".to_string(),
+                            description:
+                                "Sample 2-step pipeline showing how output from one agent feeds \
+                                 into the next. Try running it from the Workflows page."
+                                    .to_string(),
+                            steps: vec![
+                                crate::workflow::WorkflowStep {
+                                    name: "summarize".to_string(),
+                                    agent: crate::workflow::StepAgent::ByName {
+                                        name: "rusty".to_string(),
+                                    },
+                                    prompt_template: "Summarize this in one sentence: {{input}}"
+                                        .to_string(),
+                                    mode: crate::workflow::StepMode::Sequential,
+                                    timeout_secs: 30,
+                                    error_mode: crate::workflow::ErrorMode::Fail,
+                                    output_var: None,
+                                },
+                                crate::workflow::WorkflowStep {
+                                    name: "translate".to_string(),
+                                    agent: crate::workflow::StepAgent::ByName {
+                                        name: "rusty".to_string(),
+                                    },
+                                    prompt_template: "Translate this summary to French: {{input}}"
+                                        .to_string(),
+                                    mode: crate::workflow::StepMode::Sequential,
+                                    timeout_secs: 30,
+                                    error_mode: crate::workflow::ErrorMode::Fail,
+                                    output_var: None,
+                                },
+                            ],
+                            created_at: chrono::Utc::now(),
+                        };
+                        // Register the sample workflow synchronously. The
+                        // kernel boot path is sync, but WorkflowEngine's
+                        // public register() is async. We use the
+                        // blocking variant which mirrors what
+                        // with_persistence() already does in its sync
+                        // constructor — same blocking_write pattern.
+                        kernel.workflows.register_blocking(sample_workflow);
+
                         if let Err(e) = std::fs::write(&marker, b"") {
                             tracing::warn!(
                                 error = %e,
@@ -1166,8 +1215,8 @@ impl RustyHandKernel {
                         }
                         info!(
                             agent_id = %id,
-                            "Demo Mode: spawned welcome agent `rusty` (delete it if unwanted; \
-                             it will not respawn)"
+                            "Demo Mode: spawned welcome agent `rusty` and `demo-pipeline` \
+                             workflow (delete them if unwanted; they will not respawn)"
                         );
                     }
                     Err(e) => {

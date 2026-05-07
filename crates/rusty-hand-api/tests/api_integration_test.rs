@@ -1765,6 +1765,29 @@ async fn test_demo_mode_auto_spawns_welcome_agent() {
         response.contains("[mock]") && response.contains("what can you do"),
         "demo welcome agent should reply through the mock driver, got: {response}"
     );
+
+    // Demo Mode also pre-installs a sample workflow that uses Rusty,
+    // so the Workflows page is non-empty on first visit. /api/workflows
+    // returns a bare array (per the shape contract) — find the sample
+    // by its name.
+    let resp = client
+        .get(format!("{}/api/workflows", server.base_url))
+        .send()
+        .await
+        .unwrap();
+    let workflows: serde_json::Value = resp.json().await.unwrap();
+    let arr = workflows
+        .as_array()
+        .expect("/api/workflows returns a bare array");
+    let demo = arr
+        .iter()
+        .find(|w| w["name"].as_str() == Some("demo-pipeline"))
+        .expect("demo mode should pre-install `demo-pipeline` workflow");
+    assert_eq!(
+        demo["steps"].as_u64(),
+        Some(2),
+        "demo-pipeline should be a 2-step workflow"
+    );
 }
 
 /// End-to-end cron run that fires a workflow (the third CronAction variant).
