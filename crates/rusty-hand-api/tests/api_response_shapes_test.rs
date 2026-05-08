@@ -242,13 +242,29 @@ async fn workflows_endpoint_returns_bare_array() {
 }
 
 /// `GET /api/cron/jobs` returns `{jobs, total}`. The dashboard automation
-/// page reads `data.jobs` and the CLI reads `body.jobs`.
+/// page reads `data.jobs` and the CLI reads `body.jobs`. Also asserts
+/// `?agent_id=` filter actually filters — the dashboard's per-agent
+/// activity tab and the CLI `cron list --agent` flag both depend on it.
 #[tokio::test]
 async fn cron_jobs_envelope() {
     let server = require_server!(start_test_server());
     let body = get_json(&server.base_url, "/api/cron/jobs").await;
     require_keys(&body, &["jobs", "total"], "/api/cron/jobs");
     body["jobs"].as_array().expect("jobs is array");
+
+    // Filter on a UUID that cannot match anything seeded — verify the
+    // response is empty rather than the unfiltered full list. (A
+    // regression that ignored agent_id would silently return every job.)
+    let body = get_json(
+        &server.base_url,
+        "/api/cron/jobs?agent_id=00000000-0000-0000-0000-000000000000",
+    )
+    .await;
+    let jobs = body["jobs"].as_array().expect("jobs is array");
+    assert!(
+        jobs.is_empty(),
+        "filter on a non-existent agent_id must return an empty list, got: {body}"
+    );
 }
 
 /// `GET /api/approvals` envelope; entries always include `status: "pending"`
