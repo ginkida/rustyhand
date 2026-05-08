@@ -6,7 +6,7 @@
 <h3 align="center">The Agent Operating System</h3>
 
 <p align="center">
-  Open-source Agent OS built in Rust. 124K LOC. 10 crates. 1,575 tests. Zero clippy warnings.<br/>
+  Open-source Agent OS built in Rust. 124K LOC. 10 crates. 1,577 tests. Zero clippy warnings.<br/>
   <strong>One binary. Autonomous Telegram agent. Agents that actually work for you.</strong>
 </p>
 
@@ -19,14 +19,14 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT" />
-  <img src="https://img.shields.io/badge/version-0.7.39-green?style=flat-square" alt="v0.7.39" />
+  <img src="https://img.shields.io/badge/version-0.7.41-green?style=flat-square" alt="v0.7.41" />
   <img src="https://img.shields.io/badge/tests-1,577%20passing-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/clippy-0%20warnings-brightgreen?style=flat-square" alt="Clippy" />
 </p>
 
 ---
 
-> **v0.7.33–v0.7.39 — Demo Mode + persistence + product polish (May 2026)**
+> **v0.7.33–v0.7.41 — Demo Mode + persistence + product polish (May 2026)**
 >
 > Clone → `cargo run --release start` → open the dashboard → talk to an agent.
 > **No API key required.** When no provider key is found in the environment,

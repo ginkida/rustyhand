@@ -566,6 +566,25 @@ mod tests {
         }
     }
 
+    /// Regression: `mock` must NEVER appear in PROBE_ORDER. The Demo Mode
+    /// fallback is intentionally a *kernel-level* decision (when no real
+    /// provider key is found), not an env-var-driven auto-detect. If
+    /// someone accidentally added `("mock", "MOCK_API_KEY", "mock-model")`
+    /// to PROBE_ORDER, then setting `MOCK_API_KEY=anything` in the
+    /// environment would silently route every agent through the echo
+    /// driver — a confusing footgun. Pin that mock is a deliberate
+    /// opt-in via config or kernel fallback only.
+    #[test]
+    fn mock_provider_not_in_probe_order() {
+        for &(provider, _, _) in PROBE_ORDER {
+            assert_ne!(
+                provider, "mock",
+                "PROBE_ORDER must not include `mock` — Demo Mode is a \
+                 kernel-level fallback, not an env-driven detection target"
+            );
+        }
+    }
+
     /// Regression: pre-fix, kernel fallback init paths warned noisily on
     /// every legacy provider name (gemini/groq/openai). The new
     /// `is_known_provider` predicate lets callers gracefully skip those
