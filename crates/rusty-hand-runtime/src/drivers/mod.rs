@@ -124,6 +124,9 @@ fn pick_api_key(explicit: &Option<String>, env_var: &str) -> Option<String> {
 /// - `zhipu` (alias `glm`) — Zhipu AI GLM-4.6
 /// - `openrouter` — OpenRouter (universal gateway)
 /// - `ollama` — Ollama (local)
+/// - `mock` — Demo Mode in-process echo driver (no key, no network). Selected
+///   automatically by the kernel when no API key is found, or explicitly via
+///   `default_model.provider = "mock"` in config.toml.
 /// - Any custom provider with `base_url` set uses OpenAI-compatible format
 pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmError> {
     let provider = config.provider.as_str();
@@ -196,8 +199,8 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
         status: 0,
         message: format!(
             "Unknown provider '{}'. Supported: anthropic, kimi, deepseek, minimax, zhipu \
-             (alias glm), openrouter, ollama. Or set base_url for a custom OpenAI-compatible \
-             endpoint.",
+             (alias glm), openrouter, ollama, mock (Demo Mode — in-process echo, no key needed). \
+             Or set base_url for a custom OpenAI-compatible endpoint.",
             provider
         ),
     })
