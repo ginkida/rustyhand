@@ -596,6 +596,28 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
             supports_streaming: true,
             aliases: vec![],
         },
+        // ══════════════════════════════════════════════════════════════
+        // Mock — Demo Mode in-process echo driver (v0.7.33+)
+        // ══════════════════════════════════════════════════════════════
+        // Listed here so /api/models, the dashboard model picker, and
+        // `rustyhand models list` all show it as a valid choice. Cost is
+        // zero (no upstream); supports_tools = false because MockDriver
+        // doesn't emit tool_calls; context window is generous since the
+        // driver doesn't actually enforce it.
+        ModelCatalogEntry {
+            id: "mock-model".into(),
+            display_name: "Demo Mode (mock echo)".into(),
+            provider: "mock".into(),
+            tier: ModelTier::Local,
+            context_window: 1_000_000,
+            max_output_tokens: 1_024,
+            input_cost_per_m: 0.0,
+            output_cost_per_m: 0.0,
+            supports_tools: false,
+            supports_vision: false,
+            supports_streaming: false,
+            aliases: vec!["mock".into(), "demo".into()],
+        },
     ]
 }
 
@@ -786,11 +808,24 @@ mod tests {
     }
 
     #[test]
-    fn test_ollama_is_local_tier() {
+    fn test_local_tier_is_only_offline_providers() {
+        // Local tier originally meant "ollama models only." Since v0.7.33
+        // the in-process `mock` driver also belongs there — both run
+        // entirely on the user's machine without an upstream LLM.
         let catalog = ModelCatalog::new();
         let local = catalog.models_by_tier(ModelTier::Local);
         assert!(!local.is_empty());
-        assert!(local.iter().all(|m| m.provider == "ollama"));
+        for m in &local {
+            assert!(
+                m.provider == "ollama" || m.provider == "mock",
+                "Local-tier model has unexpected provider: {} ({})",
+                m.id,
+                m.provider
+            );
+        }
+        // At least one ollama and one mock should be in the local tier.
+        assert!(local.iter().any(|m| m.provider == "ollama"));
+        assert!(local.iter().any(|m| m.provider == "mock"));
     }
 
     #[test]
