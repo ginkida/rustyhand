@@ -421,6 +421,7 @@ function settingsPage() {
       if (t === 'smart') return 'tier-smart';
       if (t === 'balanced') return 'tier-balanced';
       if (t === 'fast') return 'tier-fast';
+      if (t === 'local') return 'tier-local';
       return '';
     },
 

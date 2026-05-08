@@ -2265,6 +2265,7 @@ mark.search-highlight {
 .tier-smart { background: rgba(59,130,246,0.12); color: var(--info); }
 .tier-balanced { background: rgba(74,222,128,0.12); color: var(--success); }
 .tier-fast { background: rgba(250,204,21,0.15); color: var(--warning); }
+.tier-local { background: rgba(148,163,184,0.15); color: var(--text-dim); }
 
 /* ── Auth status badges ── */
 .auth-configured { background: rgba(74,222,128,0.12); color: var(--success); }
