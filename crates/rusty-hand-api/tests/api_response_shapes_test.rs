@@ -224,6 +224,48 @@ async fn agents_envelope_contains_flat_model_fields() {
     assert_eq!(agent["model_thinking_enabled"].as_bool(), Some(false));
 }
 
+/// `GET /api/agents` honours `?offset=` and `?limit=` query params and
+/// reports them back in the envelope. Without this assertion, a regression
+/// that drops `?limit=` and returns the full list (or one that swaps
+/// offset/limit silently) would still pass the shape-only check above
+/// but break the dashboard's prev/next pagination UI.
+#[tokio::test]
+async fn agents_pagination_offset_and_limit() {
+    let server = require_server!(start_test_server());
+    // Spawn three agents so we can take page slices smaller than total.
+    for i in 1..=3 {
+        let m = TEST_MANIFEST.replace("shape-test-agent", &format!("page-test-agent-{i}"));
+        let resp = reqwest::Client::new()
+            .post(format!("{}/api/agents", server.base_url))
+            .json(&serde_json::json!({"manifest_toml": m}))
+            .send()
+            .await
+            .expect("spawn page-test agent");
+        assert!(resp.status().is_success());
+    }
+
+    let body = get_json(&server.base_url, "/api/agents?offset=0&limit=2").await;
+    let agents = body["agents"].as_array().expect("agents is array");
+    assert_eq!(agents.len(), 2, "expected limit=2 to cap the slice");
+    assert_eq!(body["offset"].as_u64(), Some(0));
+    assert_eq!(body["limit"].as_u64(), Some(2));
+    let total_first = body["total"].as_u64().expect("total");
+    assert!(
+        total_first >= 3,
+        "total should reflect all spawned agents, got {total_first}"
+    );
+
+    // Second page: offset=2 should skip the first two and return the rest.
+    let body = get_json(&server.base_url, "/api/agents?offset=2&limit=2").await;
+    let agents = body["agents"].as_array().expect("agents is array");
+    assert!(
+        !agents.is_empty(),
+        "second page should still have at least one agent given total >= 3"
+    );
+    assert_eq!(body["offset"].as_u64(), Some(2));
+    assert_eq!(body["limit"].as_u64(), Some(2));
+}
+
 /// `GET /api/triggers` returns a bare array (not wrapped).
 #[tokio::test]
 async fn triggers_endpoint_returns_bare_array() {
