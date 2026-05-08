@@ -25,7 +25,11 @@ impl MediaEngine {
     }
 
     /// Describe an image using a vision-capable LLM.
-    /// Auto-cascade: Anthropic -> OpenAI -> Gemini (based on API key availability).
+    ///
+    /// Pre-v0.7.0 this auto-cascaded through Anthropic → OpenAI → Gemini.
+    /// OpenAI and Gemini were removed as direct providers in v0.7.0; reach
+    /// those via OpenRouter instead. Currently only Anthropic is detected
+    /// directly via env var.
     pub async fn describe_image(
         &self,
         attachment: &MediaAttachment,
@@ -36,9 +40,16 @@ impl MediaEngine {
         }
 
         // Determine which provider to use
-        let provider = self.config.image_provider.as_deref()
+        let provider = self
+            .config
+            .image_provider
+            .as_deref()
             .or_else(|| detect_vision_provider())
-            .ok_or("No vision-capable LLM provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY")?;
+            .ok_or(
+                "No vision-capable LLM provider configured. Set ANTHROPIC_API_KEY \
+                    (or use OpenRouter to reach OpenAI/Gemini vision models, both of \
+                    which were removed as direct providers in v0.7.0)",
+            )?;
 
         // For now, return a structured result indicating the provider.
         // Actual API call would go here using reqwest.
@@ -241,15 +252,16 @@ impl MediaEngine {
 }
 
 /// Detect which vision provider is available based on environment variables.
+///
+/// Returns provider IDs that are also valid for `create_driver()`. Pre-v0.7.0
+/// this also returned "openai" and "gemini" — but those providers were
+/// removed in v0.7.0, so auto-detecting them would just produce an
+/// "Unknown provider" error downstream. Reach those models via OpenRouter
+/// instead. Currently `anthropic` is the only direct provider in the
+/// catalog with confirmed vision support.
 fn detect_vision_provider() -> Option<&'static str> {
     if std::env::var("ANTHROPIC_API_KEY").is_ok() {
         return Some("anthropic");
-    }
-    if std::env::var("OPENAI_API_KEY").is_ok() {
-        return Some("openai");
-    }
-    if std::env::var("GEMINI_API_KEY").is_ok() || std::env::var("GOOGLE_API_KEY").is_ok() {
-        return Some("gemini");
     }
     None
 }
