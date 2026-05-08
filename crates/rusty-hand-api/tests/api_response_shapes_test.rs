@@ -552,6 +552,8 @@ async fn models_envelope_and_entry_shape() {
 /// `GET /api/sessions` returns the paginated envelope with `agent_name`
 /// joined onto each session entry. The CLI `cmd_sessions` reads
 /// `s["session_id"]`, `s["agent_name"]`, `s["message_count"]`, `s["updated_at"]`.
+/// Also asserts `?agent_id=` and `?agent=` filters actually filter, not
+/// just return 200 — both are documented forms the CLI uses.
 #[tokio::test]
 async fn sessions_endpoint_envelope() {
     let server = require_server!(start_test_server());
@@ -574,6 +576,31 @@ async fn sessions_endpoint_envelope() {
             "/api/sessions[0]",
         );
     }
+
+    // Verify the filter parameter is honoured. Use a UUID prefix that
+    // can't possibly match anything seeded — the response should have
+    // an empty sessions array, not the full list. Pre-test, a regression
+    // that ignored agent_id silently returned every session and only
+    // looked correct if you happened to test against a live demo with
+    // exactly one agent.
+    let body = get_json(
+        &server.base_url,
+        "/api/sessions?agent_id=00000000-0000-0000-0000-000000000000",
+    )
+    .await;
+    let arr = body["sessions"].as_array().expect("sessions is array");
+    assert!(
+        arr.is_empty(),
+        "filter on a non-existent agent_id must return an empty list, got: {body}"
+    );
+    // The short-form alias `?agent=` is also documented for CLI use; same
+    // semantics — must filter.
+    let body = get_json(&server.base_url, "/api/sessions?agent=does-not-exist").await;
+    let arr = body["sessions"].as_array().expect("sessions is array");
+    assert!(
+        arr.is_empty(),
+        "filter on a non-existent agent name must return an empty list, got: {body}"
+    );
 }
 
 /// `GET /api/agents/{id}/metrics` returns counters the dashboard activity
