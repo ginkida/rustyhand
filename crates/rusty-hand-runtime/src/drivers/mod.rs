@@ -203,7 +203,14 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
     })
 }
 
-/// Placeholder driver returned when no LLM provider is configured.
+/// Hard-fail placeholder driver, opt-in via `RUSTYHAND_DISABLE_DEMO_MODE=1`.
+///
+/// Pre-v0.7.33 this was the kernel's default fallback when no API key was
+/// found. Since v0.7.33 the default fallback is [`mock::MockDriver`] (Demo
+/// Mode), which actually replies to messages with deterministic stubs so a
+/// fresh install can exercise the full system end-to-end without
+/// credentials. NullDriver is now opt-in for users who explicitly want the
+/// old hard-fail behaviour (e.g. CI that asserts "no key → no replies").
 ///
 /// Returns a clear error message on any completion request, allowing the
 /// kernel to boot and serve the dashboard while prompting the user to
