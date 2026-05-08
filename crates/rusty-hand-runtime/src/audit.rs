@@ -452,6 +452,29 @@ mod tests {
     }
 
     #[test]
+    fn test_audit_open_handles_empty_file() {
+        // A pre-created empty file (e.g. from `touch` or a crash mid-write
+        // that flushed nothing) must not break boot. The constructor
+        // should treat zero bytes as "no entries to replay" and return a
+        // working log ready to record fresh entries.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+        std::fs::write(&path, b"").unwrap();
+
+        let log = AuditLog::open(&path).unwrap();
+        assert_eq!(log.len(), 0);
+        assert_eq!(log.tip_hash(), "0".repeat(64));
+
+        // First record should write to the now-existing-but-empty file.
+        log.record("agent-1", AuditAction::AgentSpawn, "boot", "ok");
+        assert_eq!(log.len(), 1);
+
+        // Reopen and confirm the entry survives.
+        let reloaded = AuditLog::open(&path).unwrap();
+        assert_eq!(reloaded.len(), 1);
+    }
+
+    #[test]
     fn test_audit_open_skips_corrupt_trailing_lines() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("audit.jsonl");
