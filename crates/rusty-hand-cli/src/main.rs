@@ -1586,10 +1586,16 @@ fn detect_best_provider() -> (&'static str, &'static str, &'static str) {
     ("mock", "MOCK_API_KEY", "mock-model")
 }
 
-/// Static list of supported providers: (id, env_var, default_model, display_name).
+/// Static list of providers worth auto-detecting from env vars: (id, env_var,
+/// default_model, display_name).
 ///
-/// Order matters — this drives auto-detect priority in `detect_provider()`.
-/// v0.7.0 shipped seven providers; see drivers/mod.rs for the canonical list.
+/// Order matters — this drives auto-detect priority in
+/// [`detect_best_provider`]. The list deliberately omits two known
+/// providers: `ollama` (no API key — it's auto-detected by network probe
+/// elsewhere, not env var) and `mock` (the v0.7.33 demo-mode fallback —
+/// kernel-level, never auto-detected). For the canonical full list see
+/// `runtime/src/drivers/mod.rs::known_providers()` and `model_catalog.rs::
+/// builtin_providers()`.
 fn provider_list() -> Vec<(&'static str, &'static str, &'static str, &'static str)> {
     vec![
         (
