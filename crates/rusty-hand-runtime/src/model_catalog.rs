@@ -252,6 +252,20 @@ fn builtin_providers() -> Vec<ProviderInfo> {
             auth_status: AuthStatus::NotRequired,
             model_count: 0,
         },
+        // Mock driver — the deterministic in-process echo provider added
+        // in v0.7.33. Listed here so the dashboard's settings/provider
+        // pages, the /api/providers endpoint, and `rustyhand models
+        // providers` all surface it as a valid choice. No key, no base
+        // URL needed — all calls are handled in-process.
+        ProviderInfo {
+            id: "mock".into(),
+            display_name: "Demo Mode (mock)".into(),
+            api_key_env: "MOCK_API_KEY".into(),
+            base_url: "in-process".into(),
+            key_required: false,
+            auth_status: AuthStatus::NotRequired,
+            model_count: 1,
+        },
     ]
 }
 
@@ -592,7 +606,9 @@ mod tests {
     #[test]
     fn test_catalog_has_expected_providers() {
         let catalog = ModelCatalog::new();
-        assert_eq!(catalog.list_providers().len(), 7);
+        // 7 real providers + the v0.7.33 in-process `mock` provider
+        // (Demo Mode echo driver).
+        assert_eq!(catalog.list_providers().len(), 8);
         for id in [
             "anthropic",
             "kimi",
@@ -601,6 +617,7 @@ mod tests {
             "zhipu",
             "openrouter",
             "ollama",
+            "mock",
         ] {
             assert!(catalog.get_provider(id).is_some(), "missing provider: {id}");
         }
