@@ -429,6 +429,32 @@ async fn audit_verify_envelope() {
     );
 }
 
+/// `GET /api/audit/verify` populated case — the inverse of the empty-log
+/// test above. After at least one event has been recorded (e.g. by
+/// spawning an agent), verify must report entries > 0 and NO `warning`
+/// field, so the dashboard can render the green "CHAIN VALID — N
+/// entries verified" badge instead of the empty-log NO ENTRIES variant.
+#[tokio::test]
+async fn audit_verify_populated_state_drops_warning() {
+    let server = require_server!(start_test_server());
+    spawn_test_agent(&server).await; // produces audit entries
+
+    let body = get_json(&server.base_url, "/api/audit/verify").await;
+    assert_eq!(body["valid"].as_bool(), Some(true));
+    let entries = body["entries"].as_u64().expect("entries is a number");
+    assert!(
+        entries > 0,
+        "spawning an agent should have produced at least one audit entry"
+    );
+    // The warning field is the dashboard's signal to render the
+    // NO-ENTRIES variant; once we have entries it must be absent (or
+    // explicitly null) so the dashboard renders CHAIN VALID instead.
+    assert!(
+        body.get("warning").map(|v| v.is_null()).unwrap_or(true),
+        "populated audit log must not surface a `warning` field, got: {body}"
+    );
+}
+
 /// `GET /api/skills` returns `{skills, total}`. Each skill has `name`,
 /// `runtime`, and `enabled`. The skills.js page filters on `s.enabled !== false`.
 #[tokio::test]
