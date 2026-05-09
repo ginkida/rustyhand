@@ -227,7 +227,9 @@ impl LlmDriver for NullDriver {
             status: 0,
             message: "No LLM provider configured. Set ANTHROPIC_API_KEY, KIMI_API_KEY, \
                       DEEPSEEK_API_KEY, MINIMAX_API_KEY, ZHIPU_API_KEY, or OPENROUTER_API_KEY, \
-                      or run `rustyhand init` to choose a provider."
+                      or run `rustyhand init` to choose a provider. Alternatively, unset \
+                      RUSTYHAND_DISABLE_DEMO_MODE to fall back to the in-process mock \
+                      driver (Demo Mode)."
                 .to_string(),
         })
     }
