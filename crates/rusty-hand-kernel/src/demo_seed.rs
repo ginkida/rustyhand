@@ -183,3 +183,79 @@ fn sample_cron_job(agent_id: rusty_hand_types::agent::AgentId) -> CronJob {
         next_run: None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusty_hand_types::config::{DefaultModelConfig, KernelConfig};
+
+    /// Build a mock-provider config pointed at a tempdir. Caller passes
+    /// the tempdir's path so they can pre-create marker files on it
+    /// before booting the kernel.
+    fn mock_config(tmp: &std::path::Path) -> KernelConfig {
+        let mut config = KernelConfig {
+            home_dir: tmp.to_path_buf(),
+            data_dir: tmp.join("data"),
+            default_model: DefaultModelConfig {
+                provider: "mock".to_string(),
+                model: "mock-model".to_string(),
+                api_key_env: "MOCK_API_KEY".to_string(),
+                base_url: None,
+            },
+            ..KernelConfig::default()
+        };
+        config.network_enabled = false;
+        config.pairing.enabled = false;
+        config
+    }
+
+    /// If `.rustyhand_demo_seeded` already exists when the kernel boots,
+    /// the seeder must not run — even though we're in demo mode and the
+    /// registry is empty. Otherwise a user who deleted `rusty` would see
+    /// it respawn on every restart.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn marker_file_prevents_seeding() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Pre-create the marker so the seeder considers seeding "already done".
+        let marker = tmp.path().join(".rustyhand_demo_seeded");
+        std::fs::create_dir_all(tmp.path()).unwrap();
+        std::fs::write(&marker, b"").unwrap();
+
+        let kernel = RustyHandKernel::boot_with_config(mock_config(tmp.path()))
+            .expect("kernel should boot in mock mode");
+        // The agent registry must remain empty — no welcome agent was
+        // spawned because the marker said "already seeded."
+        assert_eq!(
+            kernel.registry.list().len(),
+            0,
+            "marker file must prevent demo seeding even when registry is empty"
+        );
+        kernel.shutdown();
+    }
+
+    /// Without the marker, an empty mock-mode boot must seed exactly one
+    /// `rusty` agent. This is the happy path — pinned here as a unit test
+    /// in addition to the api integration test, so a regression is caught
+    /// at the kernel layer (faster CI signal than spinning the full HTTP
+    /// stack).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn seeds_when_no_marker_and_empty_registry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let kernel = RustyHandKernel::boot_with_config(mock_config(tmp.path()))
+            .expect("kernel should boot in mock mode");
+
+        let agents = kernel.registry.list();
+        assert_eq!(agents.len(), 1, "expected exactly one seeded agent");
+        assert_eq!(agents[0].name, "rusty");
+
+        // The marker must exist after a successful seed, so that next
+        // boot won't re-seed (covered by marker_file_prevents_seeding).
+        let marker = tmp.path().join(".rustyhand_demo_seeded");
+        assert!(
+            marker.exists(),
+            "marker must be written after successful seeding"
+        );
+
+        kernel.shutdown();
+    }
+}
