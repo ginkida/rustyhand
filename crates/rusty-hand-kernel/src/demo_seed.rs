@@ -258,4 +258,39 @@ mod tests {
 
         kernel.shutdown();
     }
+
+    /// Negative case: a non-mock provider must NOT trigger demo seeding,
+    /// even with an empty registry and no marker file. A user with a
+    /// real ANTHROPIC_API_KEY booting a fresh install should see zero
+    /// agents — not a `rusty` echo agent they didn't ask for. This pins
+    /// the `provider != "mock"` early-return in seed_if_demo_mode.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn does_not_seed_for_non_mock_provider() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut config = mock_config(tmp.path());
+        // Use ollama: the only other provider that doesn't require an API
+        // key in env, so kernel boot succeeds without test fixture for
+        // a real key.
+        config.default_model.provider = "ollama".to_string();
+        config.default_model.model = "test-model".to_string();
+        config.default_model.api_key_env = "OLLAMA_API_KEY".to_string();
+
+        let kernel = RustyHandKernel::boot_with_config(config)
+            .expect("kernel should boot with non-mock provider");
+        assert_eq!(
+            kernel.registry.list().len(),
+            0,
+            "non-mock provider must NOT trigger demo seeding"
+        );
+
+        // Marker file must also not have been written, since seeding
+        // didn't run.
+        let marker = tmp.path().join(".rustyhand_demo_seeded");
+        assert!(
+            !marker.exists(),
+            "marker must not be written when seeding didn't run"
+        );
+
+        kernel.shutdown();
+    }
 }
