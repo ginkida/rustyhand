@@ -218,8 +218,14 @@ async fn dashboard_wires_production_features() {
     let (_, body) = fetch_dashboard().await;
     let markers = [
         // Iter 13: agent edit tabs
-        ("AgentConfigForm", "Agent config inline editor (drawer Config tab)"),
-        ("AgentIdentityForm", "Agent identity inline editor (drawer Identity tab)"),
+        (
+            "AgentConfigForm",
+            "Agent config inline editor (drawer Config tab)",
+        ),
+        (
+            "AgentIdentityForm",
+            "Agent identity inline editor (drawer Identity tab)",
+        ),
         ("/api/agents/${agent.id}/config", "PATCH agent config"),
         ("/api/agents/${agent.id}/identity", "PATCH agent identity"),
         ("/api/agents/${agent.id}/model", "PUT agent model"),
@@ -237,8 +243,14 @@ async fn dashboard_wires_production_features() {
         ("MemoryPage", "Memory browser page"),
         ("setApiKey", "API key persistence helper"),
         ("/api/auth/me", "Auth probe endpoint"),
-        ("/api/sessions/${encodeURIComponent(id)}", "Session detail / delete"),
-        ("/api/sessions/${encodeURIComponent(id)}/label", "Session label set"),
+        (
+            "/api/sessions/${encodeURIComponent(id)}",
+            "Session detail / delete",
+        ),
+        (
+            "/api/sessions/${encodeURIComponent(id)}/label",
+            "Session label set",
+        ),
         ("/api/memory/export", "Memory backup"),
         ("/api/memory/import", "Memory restore"),
         // Iter 18: true cypher endpoint + workflow DnD
@@ -281,23 +293,42 @@ async fn dashboard_wires_write_paths() {
         ("downloadBlob", "Blob download helper"),
         ("rowsToCsv", "CSV serializer"),
         // Write-paths
-        ("/api/agents/${encodeURIComponent(id)}/restart",
-            "Agent restart wiring"),
-        ("/api/providers/${encodeURIComponent(name)}/key",
-            "Provider key set/delete"),
-        ("/api/providers/${encodeURIComponent(name)}/test",
-            "Provider test endpoint"),
-        ("/api/cron/jobs/${encodeURIComponent(id)}/enable",
-            "Cron toggle"),
-        ("/api/cron/jobs/${encodeURIComponent(id)}/run",
-            "Cron run-now"),
-        ("/api/workflows/${encodeURIComponent(active.id)}/run",
-            "Workflow run-now"),
-        ("/api/workflows/${encodeURIComponent(active.id)}/runs",
-            "Workflow runs history"),
-        ("/api/channels/${encodeURIComponent(channel.name)}/configure",
-            "Channel configure"),
-        ("/api/channels/${encodeURIComponent(name)}/test", "Channel test"),
+        (
+            "/api/agents/${encodeURIComponent(id)}/restart",
+            "Agent restart wiring",
+        ),
+        (
+            "/api/providers/${encodeURIComponent(name)}/key",
+            "Provider key set/delete",
+        ),
+        (
+            "/api/providers/${encodeURIComponent(name)}/test",
+            "Provider test endpoint",
+        ),
+        (
+            "/api/cron/jobs/${encodeURIComponent(id)}/enable",
+            "Cron toggle",
+        ),
+        (
+            "/api/cron/jobs/${encodeURIComponent(id)}/run",
+            "Cron run-now",
+        ),
+        (
+            "/api/workflows/${encodeURIComponent(active.id)}/run",
+            "Workflow run-now",
+        ),
+        (
+            "/api/workflows/${encodeURIComponent(active.id)}/runs",
+            "Workflow runs history",
+        ),
+        (
+            "/api/channels/${encodeURIComponent(channel.name)}/configure",
+            "Channel configure",
+        ),
+        (
+            "/api/channels/${encodeURIComponent(name)}/test",
+            "Channel test",
+        ),
         ("/api/channels/reload", "Channel reload"),
         ("/api/skills/install-custom", "Custom skill install"),
         ("/api/skills/uninstall", "Skill uninstall"),
