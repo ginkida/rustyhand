@@ -3361,6 +3361,63 @@ pub async fn list_tools() -> impl IntoResponse {
 // Knowledge graph endpoint
 // ---------------------------------------------------------------------------
 
+/// Shared core: execute a GraphPattern against the kernel memory and shape
+/// the match list into `{nodes, edges, total_nodes, total_edges}`. Used by
+/// both GET /api/knowledge (full-graph fallback) and POST /api/knowledge/query.
+async fn execute_knowledge_query(
+    state: &AppState,
+    pattern: rusty_hand_types::memory::GraphPattern,
+) -> serde_json::Value {
+    match state.kernel.memory.query_graph(pattern).await {
+        Ok(matches) => {
+            let mut nodes: Vec<serde_json::Value> = Vec::new();
+            let mut edges: Vec<serde_json::Value> = Vec::new();
+            let mut seen_nodes = std::collections::HashSet::new();
+
+            for m in &matches {
+                if seen_nodes.insert(m.source.id.clone()) {
+                    nodes.push(serde_json::json!({
+                        "id": m.source.id,
+                        "type": m.source.entity_type,
+                        "name": m.source.name,
+                        "properties": m.source.properties,
+                    }));
+                }
+                if seen_nodes.insert(m.target.id.clone()) {
+                    nodes.push(serde_json::json!({
+                        "id": m.target.id,
+                        "type": m.target.entity_type,
+                        "name": m.target.name,
+                        "properties": m.target.properties,
+                    }));
+                }
+                edges.push(serde_json::json!({
+                    "source": m.source.id,
+                    "target": m.target.id,
+                    "type": serde_json::to_string(&m.relation.relation).unwrap_or_default(),
+                    "confidence": m.relation.confidence,
+                    "properties": m.relation.properties,
+                }));
+            }
+
+            serde_json::json!({
+                "nodes": nodes,
+                "edges": edges,
+                "total_nodes": nodes.len(),
+                "total_edges": edges.len(),
+            })
+        }
+        Err(e) => {
+            tracing::warn!("Knowledge graph query failed: {e}");
+            serde_json::json!({
+                "nodes": [],
+                "edges": [],
+                "error": "Knowledge graph query failed",
+            })
+        }
+    }
+}
+
 /// GET /api/knowledge — Get knowledge graph (all entities and relations).
 pub async fn knowledge_graph(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     use rusty_hand_types::memory::GraphPattern;
@@ -3372,58 +3429,69 @@ pub async fn knowledge_graph(State(state): State<Arc<AppState>>) -> impl IntoRes
         target: None,
         max_depth: 10,
     };
+    Json(execute_knowledge_query(&state, pattern).await)
+}
 
-    match state.kernel.memory.query_graph(pattern).await {
-        Ok(matches) => {
-            let mut nodes: Vec<serde_json::Value> = Vec::new();
-            let mut edges: Vec<serde_json::Value> = Vec::new();
-            let mut seen_nodes = std::collections::HashSet::new();
+/// POST /api/knowledge/query — Filtered knowledge-graph query.
+///
+/// Request body shape: `{source?, relation?, target?, max_depth?}`.
+/// - `source`/`target` filter by entity ID/name substring (whatever the
+///   memory backend supports — currently exact match).
+/// - `relation` is a snake_case `RelationType` variant (e.g. `"works_at"`,
+///   `"located_in"`).
+/// - `max_depth` caps traversal (default 10).
+///
+/// Returns the same envelope as GET /api/knowledge: `{nodes, edges,
+/// total_nodes, total_edges}` so frontend code can swap one for the other
+/// without re-shaping. Unknown / unparseable filter values return 400.
+pub async fn knowledge_query(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    use rusty_hand_types::memory::{GraphPattern, RelationType};
 
-            for m in &matches {
-                // Source entity
-                if seen_nodes.insert(m.source.id.clone()) {
-                    nodes.push(serde_json::json!({
-                        "id": m.source.id,
-                        "type": m.source.entity_type,
-                        "name": m.source.name,
-                        "properties": m.source.properties,
-                    }));
+    let source = body
+        .get("source")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty());
+    let target = body
+        .get("target")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty());
+    let max_depth = body
+        .get("max_depth")
+        .and_then(|v| v.as_u64())
+        .map(|d| d.min(20) as u32)
+        .unwrap_or(10);
+    let relation = match body.get("relation").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => {
+            // Round-trip the string through serde to get a validated variant.
+            let json = serde_json::Value::String(s.to_string());
+            match serde_json::from_value::<RelationType>(json) {
+                Ok(r) => Some(r),
+                Err(_) => {
+                    return (
+                        axum::http::StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({
+                            "error": format!("Unknown relation '{s}'. Use one of the RelationType snake_case variants."),
+                        })),
+                    )
+                        .into_response();
                 }
-                // Target entity
-                if seen_nodes.insert(m.target.id.clone()) {
-                    nodes.push(serde_json::json!({
-                        "id": m.target.id,
-                        "type": m.target.entity_type,
-                        "name": m.target.name,
-                        "properties": m.target.properties,
-                    }));
-                }
-                // Relation (uses source/target from the entity match)
-                edges.push(serde_json::json!({
-                    "source": m.source.id,
-                    "target": m.target.id,
-                    "type": serde_json::to_string(&m.relation.relation).unwrap_or_default(),
-                    "confidence": m.relation.confidence,
-                    "properties": m.relation.properties,
-                }));
             }
+        }
+        _ => None,
+    };
 
-            Json(serde_json::json!({
-                "nodes": nodes,
-                "edges": edges,
-                "total_nodes": nodes.len(),
-                "total_edges": edges.len(),
-            }))
-        }
-        Err(e) => {
-            tracing::warn!("Knowledge graph query failed: {e}");
-            Json(serde_json::json!({
-                "nodes": [],
-                "edges": [],
-                "error": "Knowledge graph query failed",
-            }))
-        }
-    }
+    let pattern = GraphPattern {
+        source,
+        relation,
+        target,
+        max_depth,
+    };
+    Json(execute_knowledge_query(&state, pattern).await).into_response()
 }
 
 // ---------------------------------------------------------------------------

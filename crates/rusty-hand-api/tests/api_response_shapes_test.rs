@@ -621,6 +621,66 @@ async fn knowledge_graph_shape() {
     body["edges"].as_array().expect("edges is array");
 }
 
+/// `POST /api/knowledge/query` accepts `{source?, relation?, target?, max_depth?}`
+/// and returns the same envelope as the GET endpoint. The KnowledgePage
+/// uses this when the user types a `key:value` mini-cypher query.
+/// Bogus `relation` values must return 400 (not silently match nothing),
+/// so misspellings are loud.
+#[tokio::test]
+async fn knowledge_query_endpoint_shape_and_validation() {
+    let server = require_server!(start_test_server());
+
+    // Empty body — pattern matches everything, same shape as GET.
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/api/knowledge/query", server.base_url))
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .expect("empty-pattern POST");
+    assert!(resp.status().is_success(), "empty pattern should be 200");
+    let body: Value = resp.json().await.expect("json body");
+    require_keys(
+        &body,
+        &["nodes", "edges", "total_nodes", "total_edges"],
+        "/api/knowledge/query (empty pattern)",
+    );
+
+    // Filtered: pass a real RelationType. Even with an empty graph the
+    // shape must hold.
+    let resp = client
+        .post(format!("{}/api/knowledge/query", server.base_url))
+        .json(&serde_json::json!({
+            "source": "alice",
+            "relation": "works_at",
+            "max_depth": 3,
+        }))
+        .send()
+        .await
+        .expect("filtered POST");
+    assert!(resp.status().is_success(), "valid pattern should be 200");
+    let body: Value = resp.json().await.expect("json body");
+    require_keys(
+        &body,
+        &["nodes", "edges"],
+        "/api/knowledge/query (filtered)",
+    );
+
+    // Unknown relation must be rejected. Silently accepting a misspelled
+    // variant would mask user errors (returns no rows for a typo).
+    let resp = client
+        .post(format!("{}/api/knowledge/query", server.base_url))
+        .json(&serde_json::json!({ "relation": "bogus_relation" }))
+        .send()
+        .await
+        .expect("bogus relation POST");
+    assert_eq!(
+        resp.status(),
+        reqwest::StatusCode::BAD_REQUEST,
+        "unknown relation must yield 400, not silent empty result"
+    );
+}
+
 /// `GET /api/models` returns `{models, total, available_count}`.
 #[tokio::test]
 async fn models_envelope_and_entry_shape() {

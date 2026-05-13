@@ -395,6 +395,10 @@ pub async fn build_router(
             "/api/knowledge",
             axum::routing::get(routes::knowledge_graph),
         )
+        .route(
+            "/api/knowledge/query",
+            axum::routing::post(routes::knowledge_query),
+        )
         // Config endpoints
         .route("/api/config", axum::routing::get(routes::get_config))
         .route(

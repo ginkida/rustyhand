@@ -74,62 +74,46 @@ pub async fn webchat_page() -> impl IntoResponse {
     )
 }
 
-/// The embedded HTML/CSS/JS for the RustyHand Dashboard.
+/// The embedded HTML/CSS/JS for the RustyHand Control Panel.
 ///
-/// Assembled at compile time from organized static files.
-/// All vendor libraries (Alpine.js, marked.js, highlight.js) are bundled
-/// locally — no CDN dependency. Alpine.js is included LAST because it
-/// immediately processes x-data directives and fires alpine:init on load.
+/// Single-binary deploy: React 18 (UMD), ReactDOM 18 (UMD), the panel CSS,
+/// and the precompiled JSX modules are all stitched together at compile time.
+/// JSX is precompiled into plain JS by tooling outside the build (esbuild)
+/// so we don't pay the ~3MB Babel-standalone runtime cost.
+///
+/// Load order matters:
+/// 1. React + ReactDOM globals must exist before any panel script runs.
+/// 2. `data.js` exposes `window.RH_DATA` (mock fallback fixtures).
+/// 3. `api.js` registers `useApi` / `usePolling` / `normalizeAgent` etc.
+///    on `window` — pages call these to fetch live kernel data.
+/// 4. `icons.js` registers shared visual primitives on `window`.
+/// 5. `tweaks-panel.js` registers the tweaks helpers on `window`.
+/// 6. `pages.js` registers per-route components on `window`.
+/// 7. `app.js` is last — it mounts `<App/>` into `#root`.
 const WEBCHAT_HTML: &str = concat!(
     include_str!("../static/index_head.html"),
     "<style>\n",
-    include_str!("../static/css/theme.css"),
-    "\n",
-    include_str!("../static/css/layout.css"),
-    "\n",
-    include_str!("../static/css/components.css"),
-    "\n",
-    include_str!("../static/vendor/github-dark.min.css"),
+    include_str!("../static/css/panel.css"),
     "\n</style>\n",
     include_str!("../static/index_body.html"),
-    // Vendor libs: marked + highlight first (used by app.js)
     "<script>\n",
-    include_str!("../static/vendor/marked.min.js"),
+    include_str!("../static/vendor/react.production.min.js"),
     "\n</script>\n",
     "<script>\n",
-    include_str!("../static/vendor/highlight.min.js"),
+    include_str!("../static/vendor/react-dom.production.min.js"),
     "\n</script>\n",
-    // App code
     "<script>\n",
-    include_str!("../static/js/api.js"),
+    include_str!("../static/js/panel/data.js"),
     "\n",
-    include_str!("../static/js/app.js"),
+    include_str!("../static/js/panel/api.js"),
     "\n",
-    include_str!("../static/js/pages/chat.js"),
+    include_str!("../static/js/panel/icons.js"),
     "\n",
-    include_str!("../static/js/pages/agents.js"),
+    include_str!("../static/js/panel/tweaks-panel.js"),
     "\n",
-    include_str!("../static/js/pages/workflows.js"),
+    include_str!("../static/js/panel/pages.js"),
     "\n",
-    include_str!("../static/js/pages/workflow-builder.js"),
-    "\n",
-    include_str!("../static/js/pages/channels.js"),
-    "\n",
-    include_str!("../static/js/pages/skills.js"),
-    "\n",
-    include_str!("../static/js/pages/automation.js"),
-    "\n",
-    include_str!("../static/js/pages/settings.js"),
-    "\n",
-    include_str!("../static/js/pages/approvals.js"),
-    "\n",
-    include_str!("../static/js/pages/analytics.js"),
-    "\n",
-    include_str!("../static/js/pages/knowledge.js"),
-    "\n</script>\n",
-    // Alpine.js MUST be last — it processes x-data and fires alpine:init
-    "<script>\n",
-    include_str!("../static/vendor/alpine.min.js"),
+    include_str!("../static/js/panel/app.js"),
     "\n</script>\n",
     "</body></html>"
 );
