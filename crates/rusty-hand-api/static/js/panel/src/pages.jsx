@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.54";
+  const version = (health && health.version) || "0.7.55";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -430,6 +430,7 @@ function AgentsPage({ openAgent }) {
   const [showSpawn, setShowSpawn] = useState(false);
   const [rowMenu, setRowMenu] = useState(null);
   const [selected, setSelected] = useState(() => new Set());
+  const [showDiff, setShowDiff] = useState(false);
   const [grouped, setGrouped] = useState(true);
   const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
   // Per-page density override. Persists to localStorage so an operator
@@ -631,6 +632,11 @@ function AgentsPage({ openAgent }) {
         <div className="bulk-bar">
           <span className="mono" style={{fontSize:12}}>{selected.size} selected</span>
           <button className="btn sm" onClick={bulkRestart}><I.refresh/> Restart</button>
+          {selected.size === 2 && (
+            <button className="btn sm" onClick={() => setShowDiff(true)} title="Compare the two selected agents">
+              <I.copy/> Diff
+            </button>
+          )}
           <button className="btn sm danger" onClick={bulkKill}><I.close/> Kill</button>
           <button className="btn sm ghost" onClick={() => setSelected(new Set())} style={{marginLeft:"auto"}}>Clear</button>
         </div>
@@ -683,6 +689,126 @@ function AgentsPage({ openAgent }) {
       </div>
 
       {showSpawn && <SpawnAgentModal onClose={() => setShowSpawn(false)} onSpawned={() => { setShowSpawn(false); refresh(); }}/>}
+      {showDiff && selected.size === 2 && (
+        <AgentDiffModal
+          agents={[...selected].map(id => agents.find(a => a.id === id)).filter(Boolean)}
+          onClose={() => setShowDiff(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Side-by-side diff of two agents' agent.toml manifests. Fetches both
+// in parallel, then runs a tiny line-level diff (LCS-free, just marks
+// lines that don't match between the two files at the same index). Good
+// enough for spotting tool/skill/model drift between siblings.
+function AgentDiffModal({ agents, onClose }) {
+  const [a, b] = agents;
+  const [contentA, setContentA] = useState(null);
+  const [contentB, setContentB] = useState(null);
+  const [err, setErr] = useState(null);
+  useEscapeKey(onClose);
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [ra, rb] = await Promise.all([
+          rhFetch(`/api/agents/${encodeURIComponent(a.id)}/files/agent.toml`),
+          rhFetch(`/api/agents/${encodeURIComponent(b.id)}/files/agent.toml`),
+        ]);
+        if (cancelled) return;
+        setContentA(typeof ra === "string" ? ra : (ra && ra.content) || "");
+        setContentB(typeof rb === "string" ? rb : (rb && rb.content) || "");
+      } catch (e) {
+        if (!cancelled) setErr(String(e.message || e));
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [a.id, b.id]);
+  const linesA = (contentA || "").split("\n");
+  const linesB = (contentB || "").split("\n");
+  const setB = new Set(linesB);
+  const setA = new Set(linesA);
+  // Stats: lines present in exactly one side.
+  const onlyA = linesA.filter(l => l.trim() && !setB.has(l)).length;
+  const onlyB = linesB.filter(l => l.trim() && !setA.has(l)).length;
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal lg" onClick={e => e.stopPropagation()} style={{maxWidth:1100, width:"95%"}}>
+        <div className="modal-head">
+          <div>
+            <h3 className="modal-title">Diff: {a.name} ↔ {b.name}</h3>
+            <p className="modal-sub mono" style={{fontSize:11}}>
+              {contentA == null || contentB == null ? "loading…" : (
+                <>
+                  <span style={{color:"oklch(0.66 0.18 25)"}}>−{onlyA}</span> only in {a.name} ·{" "}
+                  <span style={{color:"oklch(0.66 0.15 155)"}}>+{onlyB}</span> only in {b.name}
+                </>
+              )}
+            </p>
+          </div>
+          <button className="btn ghost" onClick={onClose}><I.close/></button>
+        </div>
+        {err && (
+          <div className="banner" style={{borderColor:"oklch(0.66 0.18 25 / .35)", margin:"8px 16px"}}>
+            <span className="dot err"/><span className="banner-title">LOAD FAILED</span>
+            <span className="banner-body mono" style={{fontSize:11}}>{err}</span>
+          </div>
+        )}
+        {!err && (contentA == null || contentB == null) && (
+          <div className="muted mono" style={{padding:24, fontSize:12, textAlign:"center"}}>loading manifests…</div>
+        )}
+        {!err && contentA != null && contentB != null && (
+          <div className="grid-12" style={{margin:"0 16px 16px"}}>
+            <div className="col-6">
+              <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>
+                {a.name} <span className="dim" style={{marginLeft:6}}>{linesA.length} lines</span>
+              </div>
+              <pre className="mono" style={{
+                fontSize:11.5, lineHeight:1.5, maxHeight:520, overflow:"auto",
+                background:"var(--bg-2)", padding:"10px 12px", borderRadius:6, margin:0,
+              }}>
+                {linesA.map((l, i) => {
+                  const inB = setB.has(l);
+                  return (
+                    <div key={i} style={{
+                      background: !inB && l.trim() ? "oklch(0.66 0.18 25 / .12)" : "transparent",
+                      borderLeft: !inB && l.trim() ? "2px solid oklch(0.66 0.18 25 / .7)" : "2px solid transparent",
+                      padding:"0 6px",
+                      whiteSpace:"pre-wrap",
+                      wordBreak:"break-word",
+                    }}>{l || " "}</div>
+                  );
+                })}
+              </pre>
+            </div>
+            <div className="col-6">
+              <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>
+                {b.name} <span className="dim" style={{marginLeft:6}}>{linesB.length} lines</span>
+              </div>
+              <pre className="mono" style={{
+                fontSize:11.5, lineHeight:1.5, maxHeight:520, overflow:"auto",
+                background:"var(--bg-2)", padding:"10px 12px", borderRadius:6, margin:0,
+              }}>
+                {linesB.map((l, i) => {
+                  const inA = setA.has(l);
+                  return (
+                    <div key={i} style={{
+                      background: !inA && l.trim() ? "oklch(0.66 0.15 155 / .12)" : "transparent",
+                      borderLeft: !inA && l.trim() ? "2px solid oklch(0.66 0.15 155 / .7)" : "2px solid transparent",
+                      padding:"0 6px",
+                      whiteSpace:"pre-wrap",
+                      wordBreak:"break-word",
+                    }}>{l || " "}</div>
+                  );
+                })}
+              </pre>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1968,22 +2094,38 @@ function WorkflowsPage() {
 
   // The real path is GET /api/workflows/{id}/runs (path param, NOT a
   // ?workflow_id= query — the handler reads it as Path<String>).
-  // Poll because workflow runs can complete while the page is open.
-  const [runsResp, , refreshRuns] = usePolling(active ? `/api/workflows/${encodeURIComponent(active.id)}/runs` : null, 8000);
+  // Poll faster when we're awaiting a freshly-kicked run so a long-
+  // running workflow updates its step count visibly; slower at rest.
+  const [liveRun, setLiveRun] = useState(false);
+  const [runsResp, , refreshRuns] = usePolling(
+    active ? `/api/workflows/${encodeURIComponent(active.id)}/runs` : null,
+    liveRun ? 1500 : 8000,
+  );
   const runs = Array.isArray(runsResp) ? runsResp : (runsResp && runsResp.runs) || [];
 
   const runWith = async (input) => {
     if (!active) return;
+    setShowRunInput(false);
+    setLiveRun(true);
+    const startedAt = Date.now();
     try {
-      await rhFetch(`/api/workflows/${encodeURIComponent(active.id)}/run`, {
+      const r = await rhFetch(`/api/workflows/${encodeURIComponent(active.id)}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ input }),
       });
-      setShowRunInput(false);
-      refreshRuns();
+      const dur = ((Date.now() - startedAt) / 1000).toFixed(2);
+      toastOk(`Run completed in ${dur}s`);
+      // Refresh once, then open the inspector on the new run so the
+      // operator sees per-step output without scrolling the list.
+      await refreshRuns();
+      if (r && r.run_id) {
+        setInspectingRun({ run_id: r.run_id, id: r.run_id, output: r.output });
+      }
     } catch (e) {
       toastErr(`run failed: ${e.message || e}`);
+    } finally {
+      setLiveRun(false);
     }
   };
   const runNow = () => setShowRunInput(true);
@@ -2049,9 +2191,16 @@ function WorkflowsPage() {
                   <div className="dim mono" style={{fontSize:11}}>id={active.id}{active.description ? ` · ${active.description}` : ""}</div>
                 </div>
                 <div className="row gap-6">
+                  {liveRun && (
+                    <span className="badge live" title="A run is in flight — list polls at 1.5s">
+                      <span className="dot live"/>running
+                    </span>
+                  )}
                   <button className="btn sm" onClick={refreshRuns}><I.refresh/></button>
                   <button className="btn sm" onClick={() => exportWorkflowYaml(active)} title="Download workflow as YAML"><I.download/> YAML</button>
-                  <button className="btn sm primary" onClick={runNow}><I.play/> Run now</button>
+                  <button className="btn sm primary" onClick={runNow} disabled={liveRun}>
+                    <I.play/> {liveRun ? "Running…" : "Run now"}
+                  </button>
                 </div>
               </div>
               <WorkflowDAG workflow={active}/>
@@ -4554,7 +4703,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.54";
+  const version = (health && health.version) || "0.7.55";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 

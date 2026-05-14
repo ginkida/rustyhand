@@ -22,7 +22,7 @@ function OverviewPage({ go }) {
     refreshApprovals();
   };
   const approvalRows = approvalsResp && approvalsResp.approvals || D.approvals;
-  const version = health && health.version || "0.7.54";
+  const version = health && health.version || "0.7.55";
   const uptime = health && health.uptime_seconds ? formatUptime(health.uptime_seconds) : null;
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(Banner, { go, onboarding }), /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Overview"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "System pulse \xB7 kernel ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v", version), uptime && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 uptime ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, uptime)), " ", "\xB7 schema ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v8"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null), " Refresh"), /* @__PURE__ */ React.createElement("button", { className: "btn primary" }, /* @__PURE__ */ React.createElement(I.plus, null), " New agent"))), /* @__PURE__ */ React.createElement("div", { className: "tiles" }, /* @__PURE__ */ React.createElement(Tile, { label: "Agents running", value: `${live}`, foot: `of ${totalAgents} total`, spark: sparkOf(agents.map((_, i) => live + (i % 3 - 1)), 12) }), /* @__PURE__ */ React.createElement(Tile, { label: "Cost \xB7 today", value: `$${(cost24 || 0).toFixed(2)}`, foot: usage ? "from /api/usage/daily" : "loading\u2026", spark: days.slice(-12).map((d) => d.cost_usd || 0) }), /* @__PURE__ */ React.createElement(Tile, { label: "Audit entries", value: audit && audit.total != null ? audit.total.toLocaleString() : "\u2014", foot: audit && audit.tip_hash ? `tip ${String(audit.tip_hash).slice(0, 8)}` : "loading\u2026", spark: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] }), /* @__PURE__ */ React.createElement(Tile, { label: "Errors \xB7 agents", value: `${errors}`, foot: errors ? `${errors} crashed agent(s)` : "all green", spark: [0, 0, 1, 0, 0, 0, 0, 0, errors, 0, 0, 0], deltaCls: "up", warn: errors > 0 })), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 col" }, /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Live activity"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: refreshAudit }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost" }, /* @__PURE__ */ React.createElement(I.download, null), " Export"))), /* @__PURE__ */ React.createElement(ActivityFeed, { entries: audit && audit.entries })), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Approvals \xB7 waiting"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("approvals") }, "Open queue"))), approvalRows.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, "No approvals waiting.") : /* @__PURE__ */ React.createElement(ApprovalsTable, { rows: approvalRows.slice(0, 3), compact: true, onChange: refreshApprovals }))), /* @__PURE__ */ React.createElement("div", { className: "col-4 col" }, onboarding && onboarding.demo_mode && /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Demo seed"), /* @__PURE__ */ React.createElement("span", { className: "badge demo" }, /* @__PURE__ */ React.createElement("span", { className: "dot demo" }), "active")), /* @__PURE__ */ React.createElement("div", { className: "col gap-8" }, /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.agents, null), title: "rusty", sub: "welcome agent \xB7 chat-ready", onClick: () => go("chat") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.workflows, null), title: "demo-pipeline", sub: "2-step sample workflow \xB7 click to run", onClick: () => go("workflows") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.event, null), title: "sample trigger", sub: "agent-spawn on webhook", onClick: () => go("automation") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.cron, null), title: "demo-daily-ping", sub: "cron 0 9 * * * \xB7 disabled", onClick: () => go("automation") }))), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Providers"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("settings") }, "Manage")), /* @__PURE__ */ React.createElement(ProvidersList, { providers: providersResp && providersResp.providers })), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Audit chain"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("audit") }, "View")), /* @__PURE__ */ React.createElement("div", { className: "col gap-4" }, /* @__PURE__ */ React.createElement(AuditSummary, { audit }))))));
 }
@@ -192,6 +192,7 @@ function AgentsPage({ openAgent }) {
   const [showSpawn, setShowSpawn] = useState(false);
   const [rowMenu, setRowMenu] = useState(null);
   const [selected, setSelected] = useState(() => /* @__PURE__ */ new Set());
+  const [showDiff, setShowDiff] = useState(false);
   const [grouped, setGrouped] = useState(true);
   const [collapsedGroups, setCollapsedGroups] = useState(() => /* @__PURE__ */ new Set());
   const [compact, setCompactState] = useState(() => {
@@ -347,7 +348,7 @@ function AgentsPage({ openAgent }) {
     if (ok > 0) toastOk(`Restarted ${ok} agent${ok === 1 ? "" : "s"}${fail ? ` (${fail} failed)` : ""}`);
     refresh();
   };
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Agents ", /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 14 } }, "\xB7 ", agents.length)), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Manifests live in ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "agents/<name>/agent.toml"), ". Hot-reloaded on save.")), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => setShowSpawn(true) }, /* @__PURE__ */ React.createElement(I.copy, null), " Templates"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setShowSpawn(true) }, /* @__PURE__ */ React.createElement(I.plus, null), " Spawn agent"))), fetchErr && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "API ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body" }, "Failed to load agents from kernel: ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, fetchErr))), /* @__PURE__ */ React.createElement("div", { className: "filter-bar" }, /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: filter === "all" ? "on" : "", onClick: () => setFilter("all") }, "All \xB7 ", agents.length), /* @__PURE__ */ React.createElement("button", { className: filter === "running" ? "on" : "", onClick: () => setFilter("running") }, "Live \xB7 ", agents.filter((a) => a.state === "running").length), /* @__PURE__ */ React.createElement("button", { className: filter === "error" ? "on" : "", onClick: () => setFilter("error") }, "Errors \xB7 ", agents.filter((a) => a.state === "error").length), /* @__PURE__ */ React.createElement("button", { className: filter === "idle" ? "on" : "", onClick: () => setFilter("idle") }, "Idle \xB7 ", agents.filter((a) => a.state === "idle").length)), /* @__PURE__ */ React.createElement("div", { className: "search-field" }, /* @__PURE__ */ React.createElement(I.search, null), /* @__PURE__ */ React.createElement("input", { placeholder: "Find agent, group, model\u2026", value: q, onChange: (e) => setQ(e.target.value) }), /* @__PURE__ */ React.createElement("span", { className: "kbd" }, "\u2318K")), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => setGrouped((g) => !g), title: grouped ? "Show flat list" : "Group by team" }, grouped ? "Flat" : "Group"), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => setCompact((c) => !c), title: compact ? "Comfortable rows" : "Dense rows" }, compact ? "Compact" : "Cosy")), selected.size > 0 && /* @__PURE__ */ React.createElement("div", { className: "bulk-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 12 } }, selected.size, " selected"), /* @__PURE__ */ React.createElement("button", { className: "btn sm", onClick: bulkRestart }, /* @__PURE__ */ React.createElement(I.refresh, null), " Restart"), /* @__PURE__ */ React.createElement("button", { className: "btn sm danger", onClick: bulkKill }, /* @__PURE__ */ React.createElement(I.close, null), " Kill"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => setSelected(/* @__PURE__ */ new Set()), style: { marginLeft: "auto" } }, "Clear")), /* @__PURE__ */ React.createElement("div", { className: "card flush", "data-density": compact ? "compact" : "" }, /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { style: { width: 30 } }, /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Agents ", /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 14 } }, "\xB7 ", agents.length)), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Manifests live in ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "agents/<name>/agent.toml"), ". Hot-reloaded on save.")), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => setShowSpawn(true) }, /* @__PURE__ */ React.createElement(I.copy, null), " Templates"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setShowSpawn(true) }, /* @__PURE__ */ React.createElement(I.plus, null), " Spawn agent"))), fetchErr && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "API ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body" }, "Failed to load agents from kernel: ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, fetchErr))), /* @__PURE__ */ React.createElement("div", { className: "filter-bar" }, /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: filter === "all" ? "on" : "", onClick: () => setFilter("all") }, "All \xB7 ", agents.length), /* @__PURE__ */ React.createElement("button", { className: filter === "running" ? "on" : "", onClick: () => setFilter("running") }, "Live \xB7 ", agents.filter((a) => a.state === "running").length), /* @__PURE__ */ React.createElement("button", { className: filter === "error" ? "on" : "", onClick: () => setFilter("error") }, "Errors \xB7 ", agents.filter((a) => a.state === "error").length), /* @__PURE__ */ React.createElement("button", { className: filter === "idle" ? "on" : "", onClick: () => setFilter("idle") }, "Idle \xB7 ", agents.filter((a) => a.state === "idle").length)), /* @__PURE__ */ React.createElement("div", { className: "search-field" }, /* @__PURE__ */ React.createElement(I.search, null), /* @__PURE__ */ React.createElement("input", { placeholder: "Find agent, group, model\u2026", value: q, onChange: (e) => setQ(e.target.value) }), /* @__PURE__ */ React.createElement("span", { className: "kbd" }, "\u2318K")), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => setGrouped((g) => !g), title: grouped ? "Show flat list" : "Group by team" }, grouped ? "Flat" : "Group"), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => setCompact((c) => !c), title: compact ? "Comfortable rows" : "Dense rows" }, compact ? "Compact" : "Cosy")), selected.size > 0 && /* @__PURE__ */ React.createElement("div", { className: "bulk-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 12 } }, selected.size, " selected"), /* @__PURE__ */ React.createElement("button", { className: "btn sm", onClick: bulkRestart }, /* @__PURE__ */ React.createElement(I.refresh, null), " Restart"), selected.size === 2 && /* @__PURE__ */ React.createElement("button", { className: "btn sm", onClick: () => setShowDiff(true), title: "Compare the two selected agents" }, /* @__PURE__ */ React.createElement(I.copy, null), " Diff"), /* @__PURE__ */ React.createElement("button", { className: "btn sm danger", onClick: bulkKill }, /* @__PURE__ */ React.createElement(I.close, null), " Kill"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => setSelected(/* @__PURE__ */ new Set()), style: { marginLeft: "auto" } }, "Clear")), /* @__PURE__ */ React.createElement("div", { className: "card flush", "data-density": compact ? "compact" : "" }, /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { style: { width: 30 } }, /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "checkbox",
@@ -394,7 +395,83 @@ function AgentsPage({ openAgent }) {
   })))), showSpawn && /* @__PURE__ */ React.createElement(SpawnAgentModal, { onClose: () => setShowSpawn(false), onSpawned: () => {
     setShowSpawn(false);
     refresh();
-  } }));
+  } }), showDiff && selected.size === 2 && /* @__PURE__ */ React.createElement(
+    AgentDiffModal,
+    {
+      agents: [...selected].map((id) => agents.find((a) => a.id === id)).filter(Boolean),
+      onClose: () => setShowDiff(false)
+    }
+  ));
+}
+function AgentDiffModal({ agents, onClose }) {
+  const [a, b] = agents;
+  const [contentA, setContentA] = useState(null);
+  const [contentB, setContentB] = useState(null);
+  const [err, setErr] = useState(null);
+  useEscapeKey(onClose);
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [ra, rb] = await Promise.all([
+          rhFetch(`/api/agents/${encodeURIComponent(a.id)}/files/agent.toml`),
+          rhFetch(`/api/agents/${encodeURIComponent(b.id)}/files/agent.toml`)
+        ]);
+        if (cancelled) return;
+        setContentA(typeof ra === "string" ? ra : ra && ra.content || "");
+        setContentB(typeof rb === "string" ? rb : rb && rb.content || "");
+      } catch (e) {
+        if (!cancelled) setErr(String(e.message || e));
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [a.id, b.id]);
+  const linesA = (contentA || "").split("\n");
+  const linesB = (contentB || "").split("\n");
+  const setB = new Set(linesB);
+  const setA = new Set(linesA);
+  const onlyA = linesA.filter((l) => l.trim() && !setB.has(l)).length;
+  const onlyB = linesB.filter((l) => l.trim() && !setA.has(l)).length;
+  return /* @__PURE__ */ React.createElement("div", { className: "modal-back", onClick: onClose }, /* @__PURE__ */ React.createElement("div", { className: "modal lg", onClick: (e) => e.stopPropagation(), style: { maxWidth: 1100, width: "95%" } }, /* @__PURE__ */ React.createElement("div", { className: "modal-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { className: "modal-title" }, "Diff: ", a.name, " \u2194 ", b.name), /* @__PURE__ */ React.createElement("p", { className: "modal-sub mono", style: { fontSize: 11 } }, contentA == null || contentB == null ? "loading\u2026" : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { style: { color: "oklch(0.66 0.18 25)" } }, "\u2212", onlyA), " only in ", a.name, " \xB7", " ", /* @__PURE__ */ React.createElement("span", { style: { color: "oklch(0.66 0.15 155)" } }, "+", onlyB), " only in ", b.name))), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: onClose }, /* @__PURE__ */ React.createElement(I.close, null))), err && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)", margin: "8px 16px" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "LOAD FAILED"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, err)), !err && (contentA == null || contentB == null) && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: 24, fontSize: 12, textAlign: "center" } }, "loading manifests\u2026"), !err && contentA != null && contentB != null && /* @__PURE__ */ React.createElement("div", { className: "grid-12", style: { margin: "0 16px 16px" } }, /* @__PURE__ */ React.createElement("div", { className: "col-6" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, a.name, " ", /* @__PURE__ */ React.createElement("span", { className: "dim", style: { marginLeft: 6 } }, linesA.length, " lines")), /* @__PURE__ */ React.createElement("pre", { className: "mono", style: {
+    fontSize: 11.5,
+    lineHeight: 1.5,
+    maxHeight: 520,
+    overflow: "auto",
+    background: "var(--bg-2)",
+    padding: "10px 12px",
+    borderRadius: 6,
+    margin: 0
+  } }, linesA.map((l, i) => {
+    const inB = setB.has(l);
+    return /* @__PURE__ */ React.createElement("div", { key: i, style: {
+      background: !inB && l.trim() ? "oklch(0.66 0.18 25 / .12)" : "transparent",
+      borderLeft: !inB && l.trim() ? "2px solid oklch(0.66 0.18 25 / .7)" : "2px solid transparent",
+      padding: "0 6px",
+      whiteSpace: "pre-wrap",
+      wordBreak: "break-word"
+    } }, l || " ");
+  }))), /* @__PURE__ */ React.createElement("div", { className: "col-6" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, b.name, " ", /* @__PURE__ */ React.createElement("span", { className: "dim", style: { marginLeft: 6 } }, linesB.length, " lines")), /* @__PURE__ */ React.createElement("pre", { className: "mono", style: {
+    fontSize: 11.5,
+    lineHeight: 1.5,
+    maxHeight: 520,
+    overflow: "auto",
+    background: "var(--bg-2)",
+    padding: "10px 12px",
+    borderRadius: 6,
+    margin: 0
+  } }, linesB.map((l, i) => {
+    const inA = setA.has(l);
+    return /* @__PURE__ */ React.createElement("div", { key: i, style: {
+      background: !inA && l.trim() ? "oklch(0.66 0.15 155 / .12)" : "transparent",
+      borderLeft: !inA && l.trim() ? "2px solid oklch(0.66 0.15 155 / .7)" : "2px solid transparent",
+      padding: "0 6px",
+      whiteSpace: "pre-wrap",
+      wordBreak: "break-word"
+    } }, l || " ");
+  }))))));
 }
 function AgentRow({ agent, selected, onSelect, openAgent, rowMenu, setRowMenu, restart, kill, fork, showGroup }) {
   const a = agent;
@@ -1127,20 +1204,33 @@ function WorkflowsPage() {
       window.removeEventListener("rh:hotkey:refresh", onRefresh);
     };
   }, [refreshList]);
-  const [runsResp, , refreshRuns] = usePolling(active ? `/api/workflows/${encodeURIComponent(active.id)}/runs` : null, 8e3);
+  const [liveRun, setLiveRun] = useState(false);
+  const [runsResp, , refreshRuns] = usePolling(
+    active ? `/api/workflows/${encodeURIComponent(active.id)}/runs` : null,
+    liveRun ? 1500 : 8e3
+  );
   const runs = Array.isArray(runsResp) ? runsResp : runsResp && runsResp.runs || [];
   const runWith = async (input) => {
     if (!active) return;
+    setShowRunInput(false);
+    setLiveRun(true);
+    const startedAt = Date.now();
     try {
-      await rhFetch(`/api/workflows/${encodeURIComponent(active.id)}/run`, {
+      const r = await rhFetch(`/api/workflows/${encodeURIComponent(active.id)}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ input })
       });
-      setShowRunInput(false);
-      refreshRuns();
+      const dur = ((Date.now() - startedAt) / 1e3).toFixed(2);
+      toastOk(`Run completed in ${dur}s`);
+      await refreshRuns();
+      if (r && r.run_id) {
+        setInspectingRun({ run_id: r.run_id, id: r.run_id, output: r.output });
+      }
     } catch (e) {
       toastErr(`run failed: ${e.message || e}`);
+    } finally {
+      setLiveRun(false);
     }
   };
   const runNow = () => setShowRunInput(true);
@@ -1162,7 +1252,7 @@ function WorkflowsPage() {
       /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 12.5 } }, w.name || w.id), /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 10.5 } }, stepCount, " steps", w.kind ? ` \xB7 ${w.kind}` : "")),
       /* @__PURE__ */ React.createElement("div", { className: "col", style: { alignItems: "flex-end", gap: 2 } }, /* @__PURE__ */ React.createElement("span", { className: "mono nums", style: { fontSize: 12 } }, w.runs_24h != null ? w.runs_24h : "\u2014"), /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 10.5 } }, "runs \xB7 24h"))
     );
-  })))), /* @__PURE__ */ React.createElement("div", { className: "col-8 col" }, active && /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-title", style: { fontSize: 15, marginBottom: 2 } }, active.name || active.id), /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, "id=", active.id, active.description ? ` \xB7 ${active.description}` : "")), /* @__PURE__ */ React.createElement("div", { className: "row gap-6" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm", onClick: refreshRuns }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn sm", onClick: () => exportWorkflowYaml(active), title: "Download workflow as YAML" }, /* @__PURE__ */ React.createElement(I.download, null), " YAML"), /* @__PURE__ */ React.createElement("button", { className: "btn sm primary", onClick: runNow }, /* @__PURE__ */ React.createElement(I.play, null), " Run now"))), /* @__PURE__ */ React.createElement(WorkflowDAG, { workflow: active }), /* @__PURE__ */ React.createElement("div", { className: "row gap-12 mt-16" }, /* @__PURE__ */ React.createElement(Stat, { label: "Steps", value: Array.isArray(active.steps) ? active.steps.length : active.steps || 0 }), /* @__PURE__ */ React.createElement(Stat, { label: "Runs (recent)", value: runs.length }), /* @__PURE__ */ React.createElement(Stat, { label: "p50", value: active.p50_ms ? `${active.p50_ms}ms` : "\u2014" }), /* @__PURE__ */ React.createElement(Stat, { label: "OK rate", value: active.ok != null ? `${active.ok}%` : "\u2014" }), /* @__PURE__ */ React.createElement(Stat, { label: "Updated", value: relativeTime(active.updated_at) }))), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Recent runs")), /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Run"), /* @__PURE__ */ React.createElement("th", null, "Trigger"), /* @__PURE__ */ React.createElement("th", null, "Started"), /* @__PURE__ */ React.createElement("th", null, "Duration"), /* @__PURE__ */ React.createElement("th", null, "Status"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Tokens"))), /* @__PURE__ */ React.createElement("tbody", null, runs.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 6, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, !active ? "Select a workflow." : "No runs yet.")), runs.map((r) => {
+  })))), /* @__PURE__ */ React.createElement("div", { className: "col-8 col" }, active && /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-title", style: { fontSize: 15, marginBottom: 2 } }, active.name || active.id), /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, "id=", active.id, active.description ? ` \xB7 ${active.description}` : "")), /* @__PURE__ */ React.createElement("div", { className: "row gap-6" }, liveRun && /* @__PURE__ */ React.createElement("span", { className: "badge live", title: "A run is in flight \u2014 list polls at 1.5s" }, /* @__PURE__ */ React.createElement("span", { className: "dot live" }), "running"), /* @__PURE__ */ React.createElement("button", { className: "btn sm", onClick: refreshRuns }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn sm", onClick: () => exportWorkflowYaml(active), title: "Download workflow as YAML" }, /* @__PURE__ */ React.createElement(I.download, null), " YAML"), /* @__PURE__ */ React.createElement("button", { className: "btn sm primary", onClick: runNow, disabled: liveRun }, /* @__PURE__ */ React.createElement(I.play, null), " ", liveRun ? "Running\u2026" : "Run now"))), /* @__PURE__ */ React.createElement(WorkflowDAG, { workflow: active }), /* @__PURE__ */ React.createElement("div", { className: "row gap-12 mt-16" }, /* @__PURE__ */ React.createElement(Stat, { label: "Steps", value: Array.isArray(active.steps) ? active.steps.length : active.steps || 0 }), /* @__PURE__ */ React.createElement(Stat, { label: "Runs (recent)", value: runs.length }), /* @__PURE__ */ React.createElement(Stat, { label: "p50", value: active.p50_ms ? `${active.p50_ms}ms` : "\u2014" }), /* @__PURE__ */ React.createElement(Stat, { label: "OK rate", value: active.ok != null ? `${active.ok}%` : "\u2014" }), /* @__PURE__ */ React.createElement(Stat, { label: "Updated", value: relativeTime(active.updated_at) }))), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Recent runs")), /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Run"), /* @__PURE__ */ React.createElement("th", null, "Trigger"), /* @__PURE__ */ React.createElement("th", null, "Started"), /* @__PURE__ */ React.createElement("th", null, "Duration"), /* @__PURE__ */ React.createElement("th", null, "Status"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Tokens"))), /* @__PURE__ */ React.createElement("tbody", null, runs.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 6, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, !active ? "Select a workflow." : "No runs yet.")), runs.map((r) => {
     const id = r.id || r.run_id || "\u2014";
     const trig = r.trigger || r.source || "manual";
     const t = formatTime(r.started_at || r.created_at);
@@ -2578,7 +2668,7 @@ function SettingsPage() {
   const users = usersResp && usersResp.users || [];
   const apiListen = config && (config.api_listen || config.api && config.api.listen) || "\u2014";
   const proxy = config && (config.proxy_url || config.proxy && config.proxy.url) || null;
-  const version = health && health.version || "0.7.54";
+  const version = health && health.version || "0.7.55";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "\u2014";
   const agentCount = health && health.agent_count != null ? health.agent_count : "\u2014";
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Settings"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Config at ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "~/.rustyhand/config.toml"), " \xB7 50+ fields with serde defaults \xB7 live from ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/config")))), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "LLM providers"), /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 11 } }, providers.length, " loaded \xB7 auto-probe at boot")), /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Provider"), /* @__PURE__ */ React.createElement("th", null, "Env var"), /* @__PURE__ */ React.createElement("th", null, "State"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Models"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, !providersResp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 5, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), providers.map((p) => {

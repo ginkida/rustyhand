@@ -419,6 +419,15 @@ async fn dashboard_wires_write_paths() {
         ("usePinnedNav", "Sidebar pinning hook"),
         ("bulkExport", "Memory bulk export"),
         ("bulkDelete", "Memory bulk delete"),
+        // Iter 53-55: agent diff + workflow live run + narrow layout
+        ("AgentDiffModal", "Agent vs agent manifest diff"),
+        (
+            "/api/agents/${encodeURIComponent(a.id)}/files/agent.toml",
+            "Agent manifest fetch (for diff)",
+        ),
+        ("liveRun", "Workflow live-run polling toggle"),
+        ("max-width: 1100px", "Sidebar icon-rail breakpoint"),
+        ("max-width: 720px", "Mobile single-column breakpoint"),
     ];
     for (needle, what) in markers {
         assert!(
