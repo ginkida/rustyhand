@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.60";
+  const version = (health && health.version) || "0.7.61";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -1162,8 +1162,43 @@ function AgentDrawer({ agent, onClose }) {
 // once that endpoint surfaces per-bucket history, but useful as-is for
 // an at-a-glance read.
 function AgentActivityCharts({ agent, budget, turns }) {
-  const [metricsResp] = useApi(agent ? `/api/agents/${agent.id}/metrics` : null);
+  // Poll metrics every 5s so the live sparkline below has data to plot.
+  // usePolling stops on null path; the drawer unmount clears the
+  // interval so the kernel doesn't keep getting pinged after close.
+  const [metricsResp] = usePolling(agent ? `/api/agents/${agent.id}/metrics` : null, 5000);
   const metrics = metricsResp || {};
+  // Per-agent ring buffer of metric samples for the live sparkline. We
+  // track absolute total_tokens and message_count and render the deltas
+  // so the chart shows what the agent did since the drawer opened, not
+  // its lifetime total.
+  const [history, setHistory] = React.useState([]);
+  React.useEffect(() => {
+    if (!metricsResp || metricsResp.total_tokens == null) return;
+    setHistory(prev => {
+      const next = [...prev, {
+        t: Date.now(),
+        tokens: Number(metricsResp.total_tokens || 0),
+        msgs: Number(metricsResp.message_count || 0),
+      }];
+      return next.length > 60 ? next.slice(next.length - 60) : next;
+    });
+  }, [metricsResp && metricsResp.total_tokens, metricsResp && metricsResp.message_count]);
+  // Reset when the drawer opens for a different agent.
+  React.useEffect(() => { setHistory([]); }, [agent && agent.id]);
+  // Convert absolute snapshots to per-tick deltas. Each sample becomes
+  // (tokens_added_since_prev, msgs_added_since_prev).
+  const deltas = React.useMemo(() => {
+    if (history.length < 2) return [];
+    const out = [];
+    for (let i = 1; i < history.length; i++) {
+      out.push({
+        t: history[i].t,
+        tokens: Math.max(0, history[i].tokens - history[i - 1].tokens),
+        msgs: Math.max(0, history[i].msgs - history[i - 1].msgs),
+      });
+    }
+    return out;
+  }, [history]);
   const hourly = budget && budget.hourly ? budget.hourly : { spend: 0, limit: 0 };
   const daily = budget && budget.daily ? budget.daily : { spend: 0, limit: 0 };
   const monthly = budget && budget.monthly ? budget.monthly : { spend: 0, limit: 0 };
@@ -1234,6 +1269,57 @@ function AgentActivityCharts({ agent, budget, turns }) {
           <dt>last activity</dt><dd className="mono dim">{metrics.last_activity ? relativeTime(metrics.last_activity) : "—"}</dd>
         </div>
       )}
+      <div className="muted mono mt-12 mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>
+        Live throughput <span className="dim" style={{marginLeft:6, fontSize:10}}>(per 5s tick · since drawer opened)</span>
+      </div>
+      <div className="card" style={{padding:10}}>
+        {deltas.length === 0 && (
+          <div className="dim" style={{fontSize:11.5, padding:"6px 0"}}>collecting samples…</div>
+        )}
+        {deltas.length > 0 && (
+          <AgentLiveSpark deltas={deltas}/>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Inline SVG sparkline of agent's recent throughput. Plots tokens/tick
+// as a filled area + msgs/tick as a thin overlay line. Auto-scales to
+// the visible range so a long quiet stretch doesn't flatten everything.
+function AgentLiveSpark({ deltas }) {
+  if (!deltas || deltas.length === 0) return null;
+  const W = 320, H = 56, PAD = 4;
+  const tokens = deltas.map(d => d.tokens);
+  const msgs = deltas.map(d => d.msgs);
+  const maxTokens = Math.max(1, ...tokens);
+  const maxMsgs = Math.max(1, ...msgs);
+  const xStep = (W - 2 * PAD) / Math.max(1, deltas.length - 1);
+  const tokenPath = deltas.map((d, i) => {
+    const x = PAD + i * xStep;
+    const y = H - PAD - (d.tokens / maxTokens) * (H - 2 * PAD);
+    return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const tokenArea = `${tokenPath} L${(W - PAD).toFixed(1)},${H - PAD} L${PAD},${H - PAD} Z`;
+  const msgPath = deltas.map((d, i) => {
+    const x = PAD + i * xStep;
+    const y = H - PAD - (d.msgs / maxMsgs) * (H - 2 * PAD);
+    return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const totalTokens = tokens.reduce((s, x) => s + x, 0);
+  const totalMsgs = msgs.reduce((s, x) => s + x, 0);
+  return (
+    <div>
+      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+        <path d={tokenArea} fill="oklch(0.665 0.165 50 / .2)"/>
+        <path d={tokenPath} fill="none" stroke="var(--rust)" strokeWidth="1.5"/>
+        <path d={msgPath} fill="none" stroke="var(--violet)" strokeWidth="1" strokeDasharray="2 2"/>
+      </svg>
+      <div className="row gap-12 mt-4 dim mono" style={{fontSize:10.5}}>
+        <span><span style={{color:"var(--rust)"}}>●</span> tokens · {totalTokens.toLocaleString()} ({maxTokens}/tick peak)</span>
+        <span><span style={{color:"var(--violet)"}}>●</span> msgs · {totalMsgs} ({maxMsgs}/tick peak)</span>
+        <span style={{marginLeft:"auto"}}>{deltas.length} samples</span>
+      </div>
     </div>
   );
 }
@@ -2148,6 +2234,7 @@ function WorkflowsPage() {
   const [showImport, setShowImport] = useState(false);
   const [showRunInput, setShowRunInput] = useState(false);
   const [inspectingRun, setInspectingRun] = useState(null);
+  const [showEditYaml, setShowEditYaml] = useState(false);
 
   React.useEffect(() => {
     const onNew = (e) => { if (e.detail && e.detail.page === "workflows") setShowCreate(true); };
@@ -2266,6 +2353,7 @@ function WorkflowsPage() {
                   )}
                   <button className="btn sm" onClick={refreshRuns}><I.refresh/></button>
                   <button className="btn sm" onClick={() => exportWorkflowYaml(active)} title="Download workflow as YAML"><I.download/> YAML</button>
+                  <button className="btn sm" onClick={() => setShowEditYaml(true)} title="Edit workflow YAML inline (delete + recreate)"><I.copy/> Edit YAML</button>
                   <button className="btn sm ghost"
                           title="Delete this workflow (run history is preserved)"
                           onClick={async () => {
@@ -2359,6 +2447,127 @@ function WorkflowsPage() {
       {showImport && <WorkflowImportModal onClose={() => setShowImport(false)} onImported={(id) => { setShowImport(false); if (id) setActiveId(id); refreshList(); }}/>}
       {showRunInput && active && <WorkflowRunModal workflow={active} onClose={() => setShowRunInput(false)} onRun={runWith}/>}
       {inspectingRun && <WorkflowRunInspector run={inspectingRun} onClose={() => setInspectingRun(null)}/>}
+      {showEditYaml && active && (
+        <WorkflowEditYamlModal
+          workflow={active}
+          onClose={() => setShowEditYaml(false)}
+          onSaved={(newId) => { setShowEditYaml(false); if (newId) setActiveId(newId); refreshList(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Inline YAML editor for a workflow. The API doesn't expose a PUT/PATCH
+// for workflows, so "save" is implemented as DELETE + import-yaml: the
+// run history of the deleted definition is preserved (it lives in a
+// separate run-id map on the kernel), but the workflow gets a new id.
+// We surface that explicitly to the operator.
+function WorkflowEditYamlModal({ workflow, onClose, onSaved }) {
+  useEscapeKey(onClose);
+  // Build the same JSON shape exportWorkflowYaml does, then YAML-ify it
+  // for the editor. We reuse the helper's logic by calling toYaml().
+  const initialYaml = React.useMemo(() => {
+    if (!workflow) return "";
+    const out = {
+      name: workflow.name,
+      description: workflow.description || "",
+      steps: Array.isArray(workflow.steps) ? workflow.steps.map((s) => {
+        const step = { name: s.name };
+        if (s.agent && s.agent.id) step.agent_id = s.agent.id;
+        else if (s.agent && s.agent.name) step.agent_name = s.agent.name;
+        else if (s.agent_id) step.agent_id = s.agent_id;
+        else if (s.agent_name) step.agent_name = s.agent_name;
+        step.prompt = s.prompt_template || s.prompt || "{{input}}";
+        if (s.mode) {
+          if (typeof s.mode === "string") step.mode = s.mode;
+          else if (s.mode.Conditional) { step.mode = "conditional"; step.condition = s.mode.Conditional.condition; }
+          else if (s.mode.Loop) { step.mode = "loop"; step.max_iterations = s.mode.Loop.max_iterations; step.until = s.mode.Loop.until; }
+          else step.mode = "sequential";
+        }
+        if (s.timeout_secs && s.timeout_secs !== 120) step.timeout_secs = s.timeout_secs;
+        if (s.error_mode) {
+          if (typeof s.error_mode === "string" && s.error_mode !== "fail") step.error_mode = s.error_mode;
+          else if (s.error_mode && s.error_mode.Retry) { step.error_mode = "retry"; step.max_retries = s.error_mode.Retry.max_retries; }
+        }
+        if (s.output_var) step.output_var = s.output_var;
+        return step;
+      }) : [],
+    };
+    return toYaml(out);
+  }, [workflow]);
+  const [yamlText, setYamlText] = useState(initialYaml);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const save = async () => {
+    if (!yamlText.trim()) { setErr("YAML cannot be empty"); return; }
+    setBusy(true); setErr(null);
+    try {
+      // Import first — if the YAML is bad, we haven't deleted yet, so
+      // the user can fix and retry without losing the existing workflow.
+      const importResp = await rhFetch("/api/workflows/import-yaml", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ yaml: yamlText }),
+      });
+      const newId = importResp && (importResp.id || importResp.workflow_id);
+      // Then delete the old one. If delete fails, both exist for a
+      // moment — toast warns the user so they can clean up.
+      try {
+        await rhFetch(`/api/workflows/${encodeURIComponent(workflow.id)}`, { method: "DELETE" });
+      } catch (deleteErr) {
+        toastErr(`Saved as new workflow (id=${String(newId).slice(0,8)}) but failed to delete the old one: ${deleteErr.message || deleteErr}`);
+        onSaved(newId);
+        return;
+      }
+      toastOk(`Workflow saved — new id ${String(newId).slice(0, 8)} (old definition deleted, run history kept)`);
+      onSaved(newId);
+    } catch (e) {
+      setErr(String(e.message || e));
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal wide" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <b className="mono">Edit workflow YAML</b>
+            <div className="dim mono" style={{fontSize:11, marginTop:2}}>{workflow.name || workflow.id}</div>
+          </div>
+          <button className="icon-btn" onClick={onClose}><I.close/></button>
+        </div>
+        <div className="modal-body">
+          <div className="banner mb-12" style={{borderColor:"oklch(0.78 0.14 88 / .35)"}}>
+            <span className="dot warn"/>
+            <span className="banner-title">SAVE = DELETE + RECREATE</span>
+            <span className="banner-body" style={{fontSize:11}}>
+              The API doesn't expose a workflow update endpoint. Saving will create a new
+              workflow from this YAML and then delete the current one. The new workflow
+              gets a fresh id; past run history stays accessible by run-id.
+            </span>
+          </div>
+          <textarea
+            className="modal-field modal-textarea mono"
+            style={{minHeight:340, fontFamily:"var(--ff-mono)", fontSize:12, lineHeight:1.5}}
+            value={yamlText}
+            onChange={e => setYamlText(e.target.value)}
+            spellCheck={false}
+          />
+          {err && (
+            <div className="banner mt-12" style={{borderColor:"oklch(0.66 0.18 25 / .35)"}}>
+              <span className="dot err"/><span className="banner-title">ERROR</span>
+              <span className="banner-body mono" style={{fontSize:11}}>{err}</span>
+            </div>
+          )}
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+          <button className="btn ghost" onClick={() => setYamlText(initialYaml)} disabled={busy}>Reset</button>
+          <button className="btn primary" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -5288,7 +5497,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.60";
+  const version = (health && health.version) || "0.7.61";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 

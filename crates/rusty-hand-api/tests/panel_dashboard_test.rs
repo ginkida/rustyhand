@@ -454,6 +454,10 @@ async fn dashboard_wires_write_paths() {
         ("forceReverify", "Audit force re-verify handler"),
         ("QUICK_ACTIONS", "Palette quick-action list"),
         ("rh:hotkey:new", "Palette quick-action dispatch"),
+        // Iter 77-78: agent live metrics chart + workflow YAML inline editor
+        ("AgentLiveSpark", "Per-agent live throughput sparkline"),
+        ("WorkflowEditYamlModal", "Workflow YAML inline editor"),
+        ("SAVE = DELETE + RECREATE", "Edit YAML modal warning banner"),
     ];
     for (needle, what) in markers {
         assert!(
