@@ -125,6 +125,19 @@ function hueFromId(id) {
   return Math.abs(h) % 360;
 }
 
+// formatUptimeShort(seconds) — "3d 4h", "2h 15m", "42m", "12s".
+// Used in the sidebar status row where horizontal space is tight.
+function formatUptimeShort(s) {
+  if (s == null) return null;
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m`;
+  return `${Math.floor(s)}s`;
+}
+
 function relativeTime(iso) {
   if (!iso) return "—";
   const ts = Date.parse(iso);
@@ -154,39 +167,86 @@ function normalizeAgent(a) {
 }
 
 // useAgentWs(agentId, onEvent) — open a WebSocket to /api/agents/{id}/ws,
-// dispatch parsed JSON events to `onEvent`, and expose a `send(content)`
-// helper. The WS is kept open across the lifetime of the hook (i.e. the
-// component instance). Reconnect is intentionally NOT implemented here —
-// the panel re-keys the chat component on agent switch, which remounts
-// the hook and opens a fresh socket.
+// dispatch parsed JSON events to `onEvent`, and expose `send(content)`.
+//
+// Reconnects automatically with exponential backoff (1s, 2s, 4s, 8s,
+// 16s, capped at 30s) until the agent changes or the component
+// unmounts. Surfaces `connected` + `reconnecting` flags so the UI can
+// show a clear state. Stops attempts when the document is hidden to
+// avoid a flurry of failed connects in background tabs.
 function useAgentWs(agentId, onEvent) {
   const [connected, setConnected] = React.useState(false);
+  const [reconnecting, setReconnecting] = React.useState(false);
   const wsRef = React.useRef(null);
-  // Keep the latest onEvent in a ref so closure changes don't churn the WS.
   const handlerRef = React.useRef(onEvent);
   handlerRef.current = onEvent;
+  const attemptRef = React.useRef(0);
 
   React.useEffect(() => {
     if (!agentId) return;
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    // WS upgrades cannot carry custom headers, so the server also accepts
-    // the bearer token via a `?token=` query string.
-    const key = getApiKey();
-    const tokenQs = key ? `?token=${encodeURIComponent(key)}` : "";
-    const url = `${proto}//${window.location.host}/api/agents/${encodeURIComponent(agentId)}/ws${tokenQs}`;
-    let ws;
-    try { ws = new WebSocket(url); } catch (e) { console.warn("ws open failed", e); return; }
-    wsRef.current = ws;
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
-    ws.onerror = () => setConnected(false);
-    ws.onmessage = (e) => {
-      let msg;
-      try { msg = JSON.parse(e.data); } catch (_) { return; }
-      if (handlerRef.current) handlerRef.current(msg);
+    let aborted = false;
+    let retryTimer = null;
+    attemptRef.current = 0;
+
+    const connect = () => {
+      if (aborted) return;
+      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const key = getApiKey();
+      const tokenQs = key ? `?token=${encodeURIComponent(key)}` : "";
+      const url = `${proto}//${window.location.host}/api/agents/${encodeURIComponent(agentId)}/ws${tokenQs}`;
+      let ws;
+      try { ws = new WebSocket(url); }
+      catch (e) { console.warn("ws open failed", e); scheduleRetry(); return; }
+      wsRef.current = ws;
+      ws.onopen = () => {
+        if (aborted) { try { ws.close(); } catch (_) {} return; }
+        attemptRef.current = 0;
+        setConnected(true);
+        setReconnecting(false);
+      };
+      ws.onclose = () => {
+        setConnected(false);
+        if (!aborted) scheduleRetry();
+      };
+      ws.onerror = () => setConnected(false);
+      ws.onmessage = (e) => {
+        let msg;
+        try { msg = JSON.parse(e.data); } catch (_) { return; }
+        if (handlerRef.current) handlerRef.current(msg);
+      };
     };
+
+    const scheduleRetry = () => {
+      if (aborted) return;
+      // Only reconnect while visible — background tabs would burn
+      // attempts and immediately exhaust the cap. We still attempt
+      // once the document becomes visible (listener below).
+      if (document.hidden) {
+        setReconnecting(false);
+        return;
+      }
+      const attempt = attemptRef.current++;
+      const delay = Math.min(30000, 1000 * Math.pow(2, attempt));
+      setReconnecting(true);
+      retryTimer = setTimeout(connect, delay);
+    };
+
+    const onVis = () => {
+      if (!document.hidden && !wsRef.current) {
+        // Document came back; restart from a clean attempt counter so
+        // the first foreground retry is immediate.
+        attemptRef.current = 0;
+        connect();
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+
+    connect();
     return () => {
-      try { ws.close(); } catch (_) {}
+      aborted = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      document.removeEventListener("visibilitychange", onVis);
+      try { wsRef.current && wsRef.current.close(); } catch (_) {}
       wsRef.current = null;
     };
   }, [agentId]);
@@ -198,7 +258,7 @@ function useAgentWs(agentId, onEvent) {
     return true;
   }, []);
 
-  return { connected, send };
+  return { connected, reconnecting, send };
 }
 
 // renderMarkdown — convert a plain-text string with a handful of markdown
@@ -306,6 +366,198 @@ function renderInline(text, keyBase) {
   }
   if (cursor < text.length) out.push(text.slice(cursor));
   return out;
+}
+
+// Styled confirmation dialog. Replaces the browser's `confirm()` (which
+// is jarring, theme-less, and on some browsers blocks the main thread).
+// Use the imperative helper `confirmDialog({...})` which returns a
+// Promise<boolean> so existing call sites can swap `confirm(msg)` for
+// `await confirmDialog({ title, message })` with minimal restructuring.
+//
+// State lives in module scope (same pattern as toasts) so any caller
+// can dispatch without prop drilling.
+const __CONFIRMS = { items: [], subs: new Set(), nextId: 1 };
+function confirmDialog(opts) {
+  return new Promise((resolve) => {
+    const id = __CONFIRMS.nextId++;
+    const entry = {
+      id,
+      title: (opts && opts.title) || "Confirm",
+      message: (opts && opts.message) || "",
+      confirmLabel: (opts && opts.confirmLabel) || "OK",
+      cancelLabel: (opts && opts.cancelLabel) || "Cancel",
+      danger: !!(opts && opts.danger),
+      resolve,
+    };
+    __CONFIRMS.items = __CONFIRMS.items.concat([entry]);
+    __CONFIRMS.subs.forEach((fn) => fn(__CONFIRMS.items));
+  });
+}
+function ConfirmHost() {
+  const [items, setItems] = React.useState(__CONFIRMS.items);
+  React.useEffect(() => {
+    __CONFIRMS.subs.add(setItems);
+    return () => { __CONFIRMS.subs.delete(setItems); };
+  }, []);
+  const dismiss = (id, value) => {
+    const it = __CONFIRMS.items.find((x) => x.id === id);
+    if (it) it.resolve(value);
+    __CONFIRMS.items = __CONFIRMS.items.filter((x) => x.id !== id);
+    __CONFIRMS.subs.forEach((fn) => fn(__CONFIRMS.items));
+  };
+  // Only one dialog at a time; the rest queue.
+  const cur = items[0];
+  // Escape cancels, Enter confirms — wire here so the imperative API
+  // doesn't need callers to think about keyboard.
+  React.useEffect(() => {
+    if (!cur) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") dismiss(cur.id, false);
+      else if (e.key === "Enter" && !e.target.matches?.("textarea")) dismiss(cur.id, true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [cur && cur.id]);
+  if (!cur) return null;
+  return (
+    <div className="modal-back" onClick={() => dismiss(cur.id, false)}>
+      <div className="modal" style={{maxWidth:460}} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <b className="mono">{cur.title}</b>
+        </div>
+        <div className="modal-body">
+          <div style={{fontSize:13, color:"var(--fg-2)", whiteSpace:"pre-wrap"}}>{cur.message}</div>
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={() => dismiss(cur.id, false)}>{cur.cancelLabel}</button>
+          <button className={"btn " + (cur.danger ? "danger" : "primary")} autoFocus onClick={() => dismiss(cur.id, true)}>
+            {cur.confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Skeleton primitives — placeholders shaped like the real content so
+// loading states don't shove the layout around. The shimmer animation
+// is CSS-only; see `panel.css`. Use `<Skel/>` for a single bar,
+// `<SkelRow n=…/>` for a table-row placeholder, `<SkelCard/>` for a
+// card-sized rectangle.
+function Skel({ w, h, radius }) {
+  return <span className="skel" style={{
+    display: "inline-block",
+    width: typeof w === "number" ? `${w}px` : (w || "100%"),
+    height: typeof h === "number" ? `${h}px` : (h || "10px"),
+    borderRadius: radius != null ? radius : 4,
+    verticalAlign: "middle",
+  }}/>;
+}
+function SkelRow({ cols }) {
+  // cols can be an array of widths (number/string) or just a count.
+  const widths = Array.isArray(cols)
+    ? cols
+    : Array.from({ length: cols || 4 }, () => `${30 + Math.floor(Math.random() * 50)}%`);
+  return (
+    <tr>
+      {widths.map((w, i) => (
+        <td key={i}><Skel w={w} h={10}/></td>
+      ))}
+    </tr>
+  );
+}
+function SkelCard({ height }) {
+  return (
+    <div className="card">
+      <Skel w={120} h={11}/>
+      <div style={{marginTop:10}}><Skel w="60%" h={18}/></div>
+      <div style={{marginTop:10}}><Skel w="40%" h={10}/></div>
+      <div style={{marginTop:14}}><Skel w="100%" h={height || 40} radius={6}/></div>
+    </div>
+  );
+}
+
+// useAsyncAction(fn) — returns `[run, busy]`. Wraps an async callback so
+// the button can `disabled={busy}` and show a spinner; prevents
+// double-submit. Errors propagate to the caller (toast / banner).
+function useAsyncAction(fn) {
+  const [busy, setBusy] = React.useState(false);
+  const run = React.useCallback(async (...args) => {
+    if (busy) return;
+    setBusy(true);
+    try { return await fn(...args); }
+    finally { setBusy(false); }
+  }, [fn, busy]);
+  return [run, busy];
+}
+
+// useHashRoute() — hash-based routing returning `{page, params, navigate}`.
+//
+// Routes look like `#/agents`, `#/chat`, `#/agents/{uuid}` (opens the
+// drawer), `#/audit?n=100` (query string supported). Plain `#` (no path)
+// maps to overview. The hook syncs both ways: setting `route.navigate(...)`
+// writes to `location.hash`, and the browser's back button / popstate
+// updates state.
+//
+// We deliberately keep this hand-rolled — pulling in react-router would
+// add ~30 KB to a bundle that's otherwise dependency-free.
+function parseHash(hash) {
+  const raw = (hash || "").replace(/^#\/?/, "");
+  if (!raw) return { page: "overview", params: {}, query: {} };
+  const [path, qs] = raw.split("?");
+  const parts = path.split("/").filter(Boolean);
+  const page = parts[0] || "overview";
+  const params = {};
+  // Per-page sub-route conventions:
+  //   /agents/{id}        -> drawer for that agent
+  //   /chat/{agentId}     -> chat with that agent active
+  //   /workflows/{id}     -> select that workflow in the list
+  //   /audit/{hashPrefix} -> highlight that audit entry (future)
+  if (parts.length >= 2) params.id = parts[1];
+  const query = {};
+  if (qs) {
+    for (const pair of qs.split("&")) {
+      const [k, v] = pair.split("=");
+      if (k) query[decodeURIComponent(k)] = v ? decodeURIComponent(v) : "";
+    }
+  }
+  return { page, params, query };
+}
+function buildHash(page, params, query) {
+  let h = "#/" + page;
+  if (params && params.id) h += "/" + encodeURIComponent(params.id);
+  if (query && Object.keys(query).length) {
+    const qs = Object.entries(query)
+      .filter(([, v]) => v !== undefined && v !== null && v !== "")
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join("&");
+    if (qs) h += "?" + qs;
+  }
+  return h;
+}
+function useHashRoute() {
+  const [route, setRoute] = React.useState(() => parseHash(window.location.hash));
+  React.useEffect(() => {
+    const onHash = () => setRoute(parseHash(window.location.hash));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const navigate = React.useCallback((page, params, query) => {
+    const next = buildHash(page, params, query);
+    if (window.location.hash !== next) {
+      // Use replaceState for same-page param updates (drawer open/close)
+      // so the back button doesn't accumulate noise; pushState for cross-
+      // page navigation so back works as expected.
+      const cur = parseHash(window.location.hash);
+      if (cur.page === page && (!params || !params.id) && (!cur.params || !cur.params.id)) {
+        window.history.replaceState(null, "", next);
+        setRoute(parseHash(next));
+      } else {
+        window.location.hash = next;
+      }
+    }
+  }, []);
+  return { ...route, navigate };
 }
 
 // usePagination(prefix, pageSize) — small hook that returns a tuple
@@ -472,9 +724,11 @@ function rowsToCsv(rows, columns) {
 }
 
 Object.assign(window, {
-  rhFetch, useApi, usePolling, useAgentWs, usePagination, useEscapeKey,
-  mapAgentState, hueFromId, relativeTime, normalizeAgent,
+  rhFetch, useApi, usePolling, useAgentWs, usePagination, useEscapeKey, useHashRoute, useAsyncAction,
+  mapAgentState, hueFromId, relativeTime, formatUptimeShort, normalizeAgent,
   renderMarkdown, downloadBlob, rowsToCsv,
   getApiKey, setApiKey, clearApiKey,
   toast, toastOk, toastWarn, toastErr, dismissToast, ToastHost, ErrorBoundary,
+  Skel, SkelRow, SkelCard,
+  confirmDialog, ConfirmHost,
 });

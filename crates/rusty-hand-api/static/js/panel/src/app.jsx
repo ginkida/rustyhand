@@ -42,13 +42,22 @@ const NAV = [
 ];
 
 function Sidebar({ page, go }) {
+  // Live sidebar status: kernel uptime/version + pending approvals count
+  // refresh every 10-20s without visiting the page. Cheap polls, big UX
+  // win — operators see urgent items without clicking around.
+  const [health] = usePolling("/api/health/detail", 20000);
+  const [onb] = usePolling("/api/onboarding", 30000);
+  const [approvalsResp] = usePolling("/api/approvals", 10000);
+  const approvalsCount = (approvalsResp && Array.isArray(approvalsResp.approvals))
+    ? approvalsResp.approvals.length : null;
+  const uptime = (health && health.uptime_seconds != null) ? formatUptimeShort(health.uptime_seconds) : null;
   return (
     <nav className="sidebar">
       <div className="sb-brand">
         <div className="sb-mark">RH</div>
         <div>
           <div className="sb-title">Rusty Hand</div>
-          <div className="sb-sub">v0.7.47 · schema v8</div>
+          <div className="sb-sub">v0.7.48 · schema v8</div>
         </div>
       </div>
 
@@ -56,31 +65,46 @@ function Sidebar({ page, go }) {
         {NAV.map((it, i) => {
           if (it.kind === "section") return <div key={i} className="sb-section-label" style={{marginTop: i === 0 ? 4 : 10}}>{it.label}</div>;
           const active = page === it.id;
+          // Live override of the static approvals count from NAV.
+          const liveCount = it.id === "approvals" && approvalsCount != null ? approvalsCount : it.count;
+          const liveBadge = it.id === "approvals" && approvalsCount > 0 ? "warn" : it.badge;
+          // Render as <a> so middle-click + Cmd-click + "open in new tab"
+          // work like a real link. The hashchange listener picks up the
+          // navigation; we still preventDefault + call go(...) on plain
+          // left-click for instant route-update without scroll-to-top.
           return (
-            <div key={it.id} className={"sb-item " + (active ? "active" : "")} onClick={() => go(it.id)}>
+            <a key={it.id} href={`#/${it.id}`}
+               className={"sb-item " + (active ? "active" : "")}
+               onClick={(e) => {
+                 if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                 e.preventDefault();
+                 go(it.id);
+               }}>
               <span className="sb-icon">{it.icon}</span>
               <span>{it.label}</span>
-              {it.count != null && <span className="sb-count" style={it.badge === "warn" ? {color:"var(--amber)", borderColor:"oklch(0.78 0.14 88 / .35)"} : {}}>{it.count}</span>}
-            </div>
+              {liveCount != null && <span className="sb-count" style={liveBadge === "warn" ? {color:"var(--amber)", borderColor:"oklch(0.78 0.14 88 / .35)"} : {}}>{liveCount}</span>}
+            </a>
           );
         })}
       </div>
 
       <div className="sb-status">
         <div className="sb-status-row">
-          <span className="dot live"/>
-          <span>kernel live</span>
-          <span style={{marginLeft:"auto"}}>3d 4h</span>
+          <span className={"dot " + (health ? "live" : "warn")}/>
+          <span>{health ? "kernel live" : "checking…"}</span>
+          <span style={{marginLeft:"auto"}}>{uptime || "—"}</span>
         </div>
+        {onb && onb.demo_mode && (
+          <div className="sb-status-row">
+            <span className="dot demo"/>
+            <span>demo mode</span>
+            <span style={{marginLeft:"auto"}}>{onb.provider || "mock"}</span>
+          </div>
+        )}
         <div className="sb-status-row">
-          <span className="dot demo"/>
-          <span>demo mode</span>
-          <span style={{marginLeft:"auto"}}>mock</span>
-        </div>
-        <div className="sb-status-row">
-          <span className="badge live" style={{padding:"1px 5px"}}>WS</span>
-          <span>127.0.0.1:4200</span>
-          <span style={{marginLeft:"auto"}}>42ms</span>
+          <span className="badge live" style={{padding:"1px 5px"}}>v</span>
+          <span>{(health && health.version) ? health.version : "—"}</span>
+          <span style={{marginLeft:"auto"}}>{health && health.agent_count != null ? `${health.agent_count} agents` : ""}</span>
         </div>
       </div>
     </nav>
@@ -132,54 +156,139 @@ function Topbar({ page, onOpenPalette }) {
 // Cmd+K command palette: lists pages + every loaded agent. Filters by
 // substring on label / id / model. Returning agent picks open the drawer
 // (handled by App via onPick).
+// Command palette (⌘K). Searches across pages, agents, workflows,
+// sessions, and audit-hash prefixes. Recent picks are remembered in
+// localStorage and bubble to the top when the query is empty, so the
+// palette doubles as a "jump back to where you were" affordance.
+const __PALETTE_RECENT_KEY = "rh.panel.paletteRecent";
+function loadRecentPicks() {
+  try {
+    const raw = localStorage.getItem(__PALETTE_RECENT_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) { return []; }
+}
+function pushRecentPick(row) {
+  try {
+    const cur = loadRecentPicks();
+    const key = `${row.kind}:${row.id}`;
+    const filtered = cur.filter((r) => `${r.kind}:${r.id}` !== key);
+    const next = [{ kind: row.kind, id: row.id, label: row.label, sub: row.sub }, ...filtered].slice(0, 12);
+    localStorage.setItem(__PALETTE_RECENT_KEY, JSON.stringify(next));
+  } catch (e) {}
+}
+
 function CommandPalette({ open, onClose, go, openAgent }) {
   const [q, setQ] = useState("");
+  const [highlight, setHighlight] = useState(0);
+  // All datasets fetched lazily on first open; usePolling stops when path is null.
   const [agentsResp] = useApi(open ? "/api/agents?limit=200" : null);
+  const [wfResp] = useApi(open ? "/api/workflows" : null);
+  const [sessionsResp] = useApi(open ? "/api/sessions?limit=200" : null);
+  const [auditResp] = useApi(open ? "/api/audit/recent?n=200" : null);
   const inputRef = useRef(null);
   useEffect(() => {
     if (open) {
       setQ("");
+      setHighlight(0);
       setTimeout(() => inputRef.current && inputRef.current.focus(), 30);
     }
   }, [open]);
-  if (!open) return null;
-  const agents = (agentsResp && agentsResp.agents) || [];
-  const ql = q.toLowerCase();
-  const pageRows = NAV.filter(n => !n.kind && (!q || n.label.toLowerCase().includes(ql)))
-    .map(n => ({ kind: "page", id: n.id, label: n.label, sub: "page" }));
-  const agentRows = agents
-    .filter(a => !q || a.name.toLowerCase().includes(ql) || (a.model_name || "").toLowerCase().includes(ql) || (a.id || "").toLowerCase().includes(ql))
-    .slice(0, 20)
-    .map(a => ({ kind: "agent", id: a.id, label: a.name, sub: `${a.model_name || ""} · ${String(a.id).slice(0, 8)}` }));
-  const rows = pageRows.concat(agentRows);
+
+  // Build row list. When q is empty we show recents + pages; once the
+  // user types, every dataset participates.
+  const allRows = React.useMemo(() => {
+    if (!open) return [];
+    const ql = q.toLowerCase().trim();
+    const agents = (agentsResp && agentsResp.agents) || [];
+    const workflows = Array.isArray(wfResp) ? wfResp : (wfResp && wfResp.workflows) || [];
+    const sessions = (sessionsResp && sessionsResp.sessions) || [];
+    const audit = (auditResp && auditResp.entries) || [];
+
+    const matches = (s) => !ql || (s || "").toLowerCase().includes(ql);
+
+    const pageRows = NAV.filter((n) => !n.kind && matches(n.label))
+      .map((n) => ({ kind: "page", id: n.id, label: n.label, sub: "page" }));
+    const agentRows = agents
+      .filter((a) => matches(a.name) || matches(a.model_name) || matches(a.id))
+      .slice(0, 12)
+      .map((a) => ({ kind: "agent", id: a.id, label: a.name, sub: `${a.model_name || ""} · ${String(a.id).slice(0, 8)}` }));
+    const wfRows = workflows
+      .filter((w) => matches(w.name) || matches(w.description) || matches(w.id))
+      .slice(0, 10)
+      .map((w) => ({ kind: "workflow", id: w.id, label: w.name || w.id, sub: w.description ? String(w.description).slice(0, 60) : "workflow" }));
+    const sessionRows = sessions
+      .filter((s) => matches(s.label) || matches(s.agent_name) || matches(s.session_id))
+      .slice(0, 10)
+      .map((s) => ({ kind: "session", id: s.session_id, label: s.label || String(s.session_id).slice(0, 8), sub: `${s.agent_name || ""} · ${s.message_count || 0} msg` }));
+    const auditRows = ql && ql.length >= 3
+      ? audit
+          .filter((e) => (e.hash || "").toLowerCase().startsWith(ql) || matches(e.action) || matches(e.agent_name))
+          .slice(0, 10)
+          .map((e) => ({ kind: "audit", id: e.hash || String(e.seq), label: e.action || "(action)", sub: `${e.agent_name || "kernel"} · ${String(e.hash || "").slice(0, 8)}` }))
+      : [];
+
+    if (!ql) {
+      // No query → recents (de-duped against pages), then pages, then
+      // suggestions ("Spawn agent", "Open chat") to make the palette
+      // feel useful on first open.
+      const recent = loadRecentPicks().filter((r) => r.kind !== "audit"); // audit hashes drift
+      return recent.concat(pageRows.filter((p) => !recent.some((r) => r.kind === "page" && r.id === p.id)));
+    }
+    return pageRows.concat(agentRows, wfRows, sessionRows, auditRows);
+  }, [open, q, agentsResp, wfResp, sessionsResp, auditResp]);
+
+  React.useEffect(() => { setHighlight(0); }, [q]);
 
   const pick = (row) => {
-    if (row.kind === "page") { go(row.id); onClose(); return; }
-    if (row.kind === "agent") {
-      // Normalize to the shape the drawer expects.
-      const a = agents.find(x => x.id === row.id);
+    if (!row) return;
+    pushRecentPick(row);
+    if (row.kind === "page") go(row.id);
+    else if (row.kind === "agent") {
+      const a = ((agentsResp && agentsResp.agents) || []).find((x) => x.id === row.id);
       if (a) openAgent(normalizeAgent(a));
-      onClose();
-    }
+    } else if (row.kind === "workflow") go("workflows");
+    else if (row.kind === "session") go("memory");
+    else if (row.kind === "audit") go("audit");
+    onClose();
+  };
+
+  if (!open) return null;
+  const rows = allRows;
+
+  const onKeyDown = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); pick(rows[highlight] || rows[0]); }
+    else if (e.key === "Escape") onClose();
+    else if (e.key === "ArrowDown") { e.preventDefault(); setHighlight((h) => Math.min(rows.length - 1, h + 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setHighlight((h) => Math.max(0, h - 1)); }
   };
 
   return (
     <div className="modal-back" onClick={onClose}>
-      <div className="modal palette" onClick={e => e.stopPropagation()}>
+      <div className="modal palette" onClick={(e) => e.stopPropagation()}>
         <div className="palette-input">
           <I.search/>
-          <input ref={inputRef} placeholder="Type to filter pages and agents…"
-                 value={q} onChange={e => setQ(e.target.value)}
-                 onKeyDown={e => { if (e.key === "Enter" && rows[0]) pick(rows[0]); if (e.key === "Escape") onClose(); }}/>
+          <input ref={inputRef}
+                 placeholder="Search pages, agents, workflows, sessions, audit hash…"
+                 value={q}
+                 onChange={(e) => setQ(e.target.value)}
+                 onKeyDown={onKeyDown}/>
           <span className="kbd">esc</span>
         </div>
         <div className="palette-body">
           {rows.length === 0 && <div className="muted mono" style={{padding:"12px", fontSize:11.5}}>No matches.</div>}
+          {!q && rows.length > 0 && (
+            <div className="dim mono" style={{padding:"6px 12px", fontSize:10, letterSpacing:".12em", textTransform:"uppercase"}}>
+              {loadRecentPicks().length > 0 ? "Recent + pages" : "Pages"}
+            </div>
+          )}
           {rows.map((row, i) => (
-            <button key={`${row.kind}-${row.id}`} className="palette-row" onClick={() => pick(row)}>
-              <span className="mono" style={{fontSize:9.5, letterSpacing:".15em", textTransform:"uppercase", color:"var(--fg-4)", width:48}}>{row.kind}</span>
+            <button key={`${row.kind}-${row.id}`}
+                    className={"palette-row" + (i === highlight ? " active" : "")}
+                    onMouseEnter={() => setHighlight(i)}
+                    onClick={() => pick(row)}>
+              <span className="mono" style={{fontSize:9.5, letterSpacing:".15em", textTransform:"uppercase", color:"var(--fg-4)", width:60}}>{row.kind}</span>
               <span className="mono" style={{fontSize:12.5}}>{row.label}</span>
-              <span className="dim mono" style={{fontSize:11, marginLeft:"auto"}}>{row.sub}</span>
+              <span className="dim mono" style={{fontSize:11, marginLeft:"auto", maxWidth:280, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{row.sub}</span>
             </button>
           ))}
         </div>
@@ -269,11 +378,68 @@ function LoginScreen({ onLogin }) {
   );
 }
 
+// Per-page ErrorBoundary: a render error in one page no longer kicks the
+// whole shell to the recovery screen — other pages stay reachable via the
+// sidebar. We key on `pageId` so navigating to a fresh page resets state
+// even if the previous page crashed.
+class PageErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { err: null, key: props.pageId }; }
+  static getDerivedStateFromProps(props, state) {
+    return props.pageId !== state.key ? { err: null, key: props.pageId } : null;
+  }
+  static getDerivedStateFromError(err) { return { err }; }
+  componentDidCatch(err, info) {
+    // eslint-disable-next-line no-console
+    console.error(`[panel] page "${this.props.pageId}" crashed`, err, info);
+  }
+  render() {
+    if (this.state.err) {
+      const e = this.state.err;
+      return (
+        <div style={{padding:"32px 8px"}}>
+          <div className="card" style={{maxWidth:640, margin:"0 auto"}}>
+            <div className="row gap-12 mb-12">
+              <div className="auth-mark">!</div>
+              <div>
+                <div className="mono" style={{fontSize:14}}>This page crashed</div>
+                <div className="dim" style={{fontSize:12}}>The rest of the panel is still working. Try a different page or reset this one.</div>
+              </div>
+            </div>
+            <pre className="codebox" style={{maxHeight:200, fontSize:11}}>{String(e && (e.stack || e.message || e))}</pre>
+            <div className="row gap-8 mt-12">
+              <button className="btn" onClick={() => this.setState({ err: null })}>Reset page</button>
+              <button className="btn primary" onClick={() => window.location.reload()}>Reload</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function App() {
-  const [page, setPage] = useState("overview");
-  const [drawerAgent, setDrawerAgent] = useState(null);
+  // Hash-based router replaces local `page` state so URLs are
+  // bookmarkable and the back button works. `route.params.id` selects
+  // an agent for the drawer when present (#/agents/{uuid}).
+  const route = useHashRoute();
+  const page = route.page;
+  const setPage = React.useCallback((p) => route.navigate(p, {}), [route]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [t, setTweak] = useTweaks(TWEAKS_DEFAULTS);
+
+  // The drawer is route-driven. When `#/agents/{uuid}` is in the URL,
+  // we fetch that single agent and hand it to `<AgentDrawer/>`. On
+  // close we navigate back to `#/agents`.
+  const drawerId = (page === "agents" && route.params.id) ? route.params.id : null;
+  const [drawerResp] = useApi(drawerId ? `/api/agents/${drawerId}` : null);
+  const drawerAgent = drawerId && drawerResp
+    ? (drawerResp.id ? normalizeAgent(drawerResp) : null)
+    : null;
+  const openAgent = React.useCallback((agent) => {
+    if (agent && agent.id) route.navigate("agents", { id: agent.id });
+  }, [route]);
+  const closeDrawer = React.useCallback(() => route.navigate("agents", {}), [route]);
 
   // Apply tweaks to :root
   useEffect(() => {
@@ -302,11 +468,11 @@ function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [setPage]);
 
   let pageEl;
   if (page === "overview") pageEl = <OverviewPage go={setPage}/>;
-  else if (page === "agents") pageEl = <AgentsPage openAgent={setDrawerAgent}/>;
+  else if (page === "agents") pageEl = <AgentsPage openAgent={openAgent}/>;
   else if (page === "chat") pageEl = <ChatPage/>;
   else if (page === "workflows") pageEl = <WorkflowsPage/>;
   else if (page === "automation") pageEl = <AutomationPage/>;
@@ -329,12 +495,12 @@ function App() {
       <div className="main">
         <Topbar page={page} onOpenPalette={() => setPaletteOpen(true)}/>
         <div className="content" style={{position:"relative"}}>
-          {pageEl}
-          <AgentDrawer agent={drawerAgent} onClose={() => setDrawerAgent(null)}/>
+          <PageErrorBoundary pageId={page}>{pageEl}</PageErrorBoundary>
+          <AgentDrawer agent={drawerAgent} onClose={closeDrawer}/>
         </div>
       </div>
 
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} go={setPage} openAgent={setDrawerAgent}/>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} go={setPage} openAgent={openAgent}/>
 
       <TweaksPanel>
         <TweakSection label="Theme"/>
@@ -358,5 +524,6 @@ ReactDOM.createRoot(document.getElementById("root")).render(
   <ErrorBoundary>
     <AuthGate><App/></AuthGate>
     <ToastHost/>
+    <ConfirmHost/>
   </ErrorBoundary>
 );

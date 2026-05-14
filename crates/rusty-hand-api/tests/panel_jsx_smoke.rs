@@ -116,6 +116,11 @@ const need = [
   'McpPage', 'NetworkPage', 'BindingsPage',
   // Iter 22: pagination + keyboard helpers
   'usePagination', 'useEscapeKey',
+  // Iter 24-28: routing, skeletons, async helpers, confirm, recent picks
+  'useHashRoute', 'useAsyncAction',
+  'Skel', 'SkelRow', 'SkelCard',
+  'confirmDialog', 'ConfirmHost',
+  'formatUptimeShort',
 ];
 const missing = need.filter((n) => global[n] === undefined);
 if (missing.length) {{

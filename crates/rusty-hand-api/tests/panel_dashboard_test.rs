@@ -109,6 +109,17 @@ async fn dashboard_includes_all_panel_modules() {
         ("usePagination", "api.js must expose usePagination"),
         ("useEscapeKey", "api.js must expose useEscapeKey"),
         ("Pagination", "pages.js must expose Pagination component"),
+        ("useHashRoute", "api.js must expose useHashRoute"),
+        ("useAsyncAction", "api.js must expose useAsyncAction"),
+        (
+            "PageErrorBoundary",
+            "app.js must expose per-page ErrorBoundary",
+        ),
+        ("ConfirmHost", "api.js must expose ConfirmHost"),
+        ("confirmDialog", "api.js must expose confirmDialog"),
+        ("Skel", "api.js must expose Skel"),
+        ("SkelRow", "api.js must expose SkelRow"),
+        ("loadRecentPicks", "palette must expose recent-picks helper"),
     ];
     for (needle, msg) in markers {
         assert!(body.contains(needle), "{msg} (missing `{needle}`)");

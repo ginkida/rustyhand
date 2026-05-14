@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.47";
+  const version = (health && health.version) || "0.7.48";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -400,7 +400,7 @@ function AgentsPage({ openAgent }) {
   });
 
   const killAgent = async (id) => {
-    if (!confirm(`Kill agent ${id}?`)) return;
+    if (!(await confirmDialog({ title: "Kill agent", message: `Kill agent ${id}?`, danger: true, confirmLabel: "Kill" }))) return;
     try {
       await rhFetch(`/api/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
       refresh();
@@ -456,6 +456,9 @@ function AgentsPage({ openAgent }) {
             <th className="right">Msgs</th><th className="right">Cost · 24h</th><th>Last activity</th><th>Updated</th><th></th>
           </tr></thead>
           <tbody>
+            {!resp && Array.from({length:5}).map((_,i) => (
+              <SkelRow key={`s-${i}`} cols={[160, 80, 140, 90, 60, 60, 240, 50, 24]}/>
+            ))}
             {filtered.map(a => (
               <tr key={a.id} style={{cursor:"pointer"}} onClick={() => openAgent(a)}>
                 <td>
@@ -1225,8 +1228,17 @@ function WorkflowsPage() {
           <div className="card flush">
             <div className="card-head"><span>All workflows</span><span className="mono">{workflows.length}</span></div>
             <div>
-              {!wfList && <div className="muted mono" style={{padding:"12px 14px", fontSize:12}}>loading…</div>}
-              {wfList && workflows.length === 0 && <div className="muted mono" style={{padding:"12px 14px", fontSize:12}}>No workflows yet.</div>}
+              {!wfList && Array.from({length:3}).map((_,i) => (
+                <div key={`s-${i}`} style={{padding:"10px 14px", borderBottom:"1px solid var(--border)"}}>
+                  <Skel w="50%" h={10}/><div style={{marginTop:6}}><Skel w="30%" h={9}/></div>
+                </div>
+              ))}
+              {wfList && workflows.length === 0 && (
+                <div style={{padding:"24px 14px", textAlign:"center"}}>
+                  <div className="dim" style={{fontSize:12, marginBottom:8}}>No workflows yet.</div>
+                  <button className="btn primary sm" onClick={() => setShowCreate(true)}><I.plus/> Create your first workflow</button>
+                </div>
+              )}
               {workflows.map(w => {
                 const stepCount = Array.isArray(w.steps) ? w.steps.length : (w.steps || 0);
                 return (
@@ -1741,7 +1753,12 @@ function AutomationPage() {
             </tr></thead>
             <tbody>
               {!cronResp && (<tr><td colSpan={7} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>)}
-              {cronResp && cron.length === 0 && (<tr><td colSpan={7} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>No cron jobs yet.</td></tr>)}
+              {cronResp && cron.length === 0 && (
+                <tr><td colSpan={7} style={{padding:"24px 14px", textAlign:"center"}}>
+                  <div className="dim" style={{fontSize:12, marginBottom:8}}>No cron jobs yet.</div>
+                  <button className="btn primary sm" onClick={() => setShowCreate(true)}><I.plus/> Schedule your first job</button>
+                </td></tr>
+              )}
               {cron.map(c => {
                 const actionLabel = c.action_label || c.action_summary
                   || (c.action && (c.action.kind || c.action.type || JSON.stringify(c.action).slice(0, 60)))
@@ -1773,7 +1790,12 @@ function AutomationPage() {
             </tr></thead>
             <tbody>
               {!trigResp && (<tr><td colSpan={7} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>)}
-              {trigResp && triggers.length === 0 && (<tr><td colSpan={7} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>No triggers configured.</td></tr>)}
+              {trigResp && triggers.length === 0 && (
+                <tr><td colSpan={7} style={{padding:"24px 14px", textAlign:"center"}}>
+                  <div className="dim" style={{fontSize:12, marginBottom:8}}>No triggers configured.</div>
+                  <button className="btn primary sm" onClick={() => setShowCreate(true)}><I.plus/> Add your first trigger</button>
+                </td></tr>
+              )}
               {triggers.map(t => {
                 const kind = (t.kind || t.type || "—").toString();
                 const target = t.target || t.agent_id || t.workflow_id || "—";
@@ -2024,7 +2046,7 @@ function ChannelsPage() {
     catch (e) { toastErr(`reload failed: ${e.message || e}`); }
   };
   const removeChannel = async (name) => {
-    if (!confirm(`Disconnect ${name}?`)) return;
+    if (!(await confirmDialog({ title: "Disconnect", message: `Disconnect ${name}?`, danger: true, confirmLabel: "Disconnect" }))) return;
     try { await rhFetch(`/api/channels/${encodeURIComponent(name)}/configure`, { method: "DELETE" }); refresh(); }
     catch (e) { toastErr(`disconnect failed: ${e.message || e}`); }
   };
@@ -2549,7 +2571,7 @@ function SkillsPage() {
   const [rowMenu, setRowMenu] = useState(null);
 
   const uninstall = async (name) => {
-    if (!confirm(`Uninstall skill ${name}?`)) return;
+    if (!(await confirmDialog({ title: "Uninstall skill", message: `Uninstall skill ${name}?`, danger: true, confirmLabel: "Uninstall" }))) return;
     try {
       await rhFetch("/api/skills/uninstall", {
         method: "POST",
@@ -2579,7 +2601,15 @@ function SkillsPage() {
           <thead><tr><th>Skill</th><th>Origin</th><th>Runtime</th><th>Version</th><th>Enabled</th><th></th></tr></thead>
           <tbody>
             {!skillsResp && (<tr><td colSpan={6} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>)}
-            {skillsResp && skills.length === 0 && (<tr><td colSpan={6} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>No skills installed.</td></tr>)}
+            {skillsResp && skills.length === 0 && (
+              <tr><td colSpan={6} style={{padding:"24px 14px", textAlign:"center"}}>
+                <div className="dim" style={{fontSize:12, marginBottom:8}}>No skills installed yet — bundled tools work without registration.</div>
+                <span className="row gap-6" style={{justifyContent:"center"}}>
+                  <button className="btn sm" onClick={() => setShowCustom(true)}><I.plus/> Custom</button>
+                  <button className="btn primary sm" onClick={() => setShowClawHub(true)}><I.plus/> Browse ClawHub</button>
+                </span>
+              </td></tr>
+            )}
             {skills.map(s => {
               const origin = (s.source || s.origin || (s.privileged ? "privileged" : "builtin")).toString().toLowerCase();
               const cat = s.category || s.runtime || s.type || "—";
@@ -2873,7 +2903,15 @@ function AuditPage() {
       <div className="card flush mt-16">
         <div className="card-head"><span>Chain · most recent</span><span className="mono dim">descending</span></div>
         <div>
-          {!audit && <div className="muted mono" style={{padding:"16px 14px", fontSize:12}}>loading…</div>}
+          {!audit && Array.from({length:6}).map((_,i) => (
+            <div key={`sa-${i}`} className="merkle-row">
+              <div className="chain"/>
+              <Skel w={50} h={10}/>
+              <span><Skel w="50%" h={10}/><div style={{marginTop:4}}><Skel w="70%" h={9}/></div></span>
+              <Skel w={70} h={10}/>
+              <Skel w={50} h={10}/>
+            </div>
+          ))}
           {audit && entries.length === 0 && <div className="muted mono" style={{padding:"16px 14px", fontSize:12}}>No audit entries yet.</div>}
           {entries.map((a) => {
             const hash = a.hash ? String(a.hash).slice(0, 12) : "—";
@@ -2910,7 +2948,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.47";
+  const version = (health && health.version) || "0.7.48";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 
@@ -3015,7 +3053,7 @@ function ProviderKeyModal({ provider, onClose, onSaved }) {
     finally { setBusy(false); }
   };
   const clear = async () => {
-    if (!confirm(`Delete API key for ${name}?`)) return;
+    if (!(await confirmDialog({ title: "Delete API key", message: `Delete API key for ${name}?`, danger: true, confirmLabel: "Delete" }))) return;
     setBusy(true); setErr(null);
     try {
       await rhFetch(`/api/providers/${encodeURIComponent(name)}/key`, { method: "DELETE" });
@@ -3086,7 +3124,7 @@ function MemoryPage() {
   const fileInputRef = useRef(null);
 
   const remove = async (id) => {
-    if (!confirm(`Delete session ${String(id).slice(0, 8)}? This cannot be undone.`)) return;
+    if (!(await confirmDialog({ title: "Delete session", message: `Delete session ${String(id).slice(0, 8)}? This cannot be undone.`, danger: true, confirmLabel: "Delete" }))) return;
     try { await rhFetch(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }); refresh(); }
     catch (e) { toastErr(`delete failed: ${e.message || e}`); }
   };
@@ -3302,7 +3340,7 @@ function BindingsPage() {
   const bindings = (resp && resp.bindings) || [];
 
   const remove = async (index) => {
-    if (!confirm(`Remove binding #${index}?`)) return;
+    if (!(await confirmDialog({ title: "Remove binding", message: `Remove binding #${index}?`, danger: true, confirmLabel: "Remove" }))) return;
     try {
       await rhFetch(`/api/bindings/${index}`, { method: "DELETE" });
       toastOk("Binding removed");

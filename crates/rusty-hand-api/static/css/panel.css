@@ -997,6 +997,46 @@ code, .mono { font-family: var(--ff-mono); }
   resize: vertical;
 }
 
+/* ---------- Skeleton loading placeholders ---------- */
+.skel {
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 0%,
+    var(--surface-hi) 50%,
+    var(--surface-2) 100%
+  );
+  background-size: 200% 100%;
+  animation: skel-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes skel-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+[data-theme="light"] .skel {
+  background: linear-gradient(
+    90deg,
+    oklch(0.92 0.005 70) 0%,
+    oklch(0.96 0.005 70) 50%,
+    oklch(0.92 0.005 70) 100%
+  );
+  background-size: 200% 100%;
+}
+
+/* Spinner inside loading buttons */
+.btn .spinner {
+  display: inline-block;
+  width: 12px; height: 12px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: btn-spin .9s linear infinite;
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+@keyframes btn-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ---------- Toast notifications (bottom-right, stacked) ---------- */
 .toast-host {
   position: fixed;
@@ -1114,7 +1154,9 @@ code, .mono { font-family: var(--ff-mono); }
   text-align: left;
   color: var(--fg-2);
 }
-.palette-row:hover { background: var(--surface-2); color: var(--fg); }
+.palette-row:hover,
+.palette-row.active { background: var(--surface-2); color: var(--fg); }
+.palette-row.active { box-shadow: inset 2px 0 0 var(--rust); }
 
 /* ---------- DnD handle (workflow builder) ---------- */
 .dnd-handle {
