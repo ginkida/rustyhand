@@ -1171,6 +1171,39 @@ pub async fn list_workflows(State(state): State<Arc<AppState>>) -> impl IntoResp
     Json(list).into_response()
 }
 
+/// DELETE /api/workflows/:id — Remove a workflow definition.
+///
+/// Idempotent: returns 200 with `{status: "deleted"}` on success, 404 if
+/// the workflow was already absent. The workflow's run history is kept
+/// (it lives in a separate map keyed by run_id) so audit/inspection of
+/// past runs still works.
+pub async fn delete_workflow(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let workflow_id = WorkflowId(match id.parse() {
+        Ok(u) => u,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Invalid workflow ID"})),
+            );
+        }
+    });
+    let removed = state.kernel.workflows.remove_workflow(workflow_id).await;
+    if removed {
+        (
+            StatusCode::OK,
+            Json(serde_json::json!({"status": "deleted", "id": id})),
+        )
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Workflow not found"})),
+        )
+    }
+}
+
 /// POST /api/workflows/:id/run — Execute a workflow.
 pub async fn run_workflow(
     State(state): State<Arc<AppState>>,
@@ -2506,6 +2539,8 @@ pub async fn onboarding_status(State(state): State<Arc<AppState>>) -> impl IntoR
     let provider = state.kernel.config.default_model.provider.clone();
     let model = state.kernel.config.default_model.model.clone();
     let demo_mode = provider == "mock";
+    let marker = state.kernel.config.home_dir.join(".rustyhand_demo_seeded");
+    let demo_seeded = marker.exists();
 
     Json(serde_json::json!({
         "api_key_set": api_key_set,
@@ -2513,7 +2548,46 @@ pub async fn onboarding_status(State(state): State<Arc<AppState>>) -> impl IntoR
         "provider": provider,
         "model": model,
         "demo_mode": demo_mode,
+        "demo_seeded": demo_seeded,
     }))
+}
+
+/// POST /api/onboarding/reset-demo — Remove the demo-seed marker so the
+/// next kernel restart re-seeds the welcome agent + sample workflow +
+/// trigger + cron. The seed code is `pub(crate)` to the kernel and only
+/// runs at boot, so a restart is required. We surface that explicitly in
+/// the response so the dashboard can guide the user.
+pub async fn reset_demo_seed(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let marker = state.kernel.config.home_dir.join(".rustyhand_demo_seeded");
+    if !marker.exists() {
+        return (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "no_marker",
+                "message": "Demo seed marker was not present. Restart the daemon to seed.",
+                "marker_path": marker.display().to_string(),
+                "restart_required": true,
+            })),
+        );
+    }
+    match std::fs::remove_file(&marker) {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "marker_removed",
+                "message": "Marker removed. Restart the daemon to re-seed.",
+                "marker_path": marker.display().to_string(),
+                "restart_required": true,
+            })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": format!("Failed to remove marker: {e}"),
+                "marker_path": marker.display().to_string(),
+            })),
+        ),
+    }
 }
 
 // ---------------------------------------------------------------------------

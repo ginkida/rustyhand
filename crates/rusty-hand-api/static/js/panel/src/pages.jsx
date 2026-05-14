@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.56";
+  const version = (health && health.version) || "0.7.57";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -606,6 +606,39 @@ function AgentsPage({ openAgent }) {
     if (ok > 0) toastOk(`Restarted ${ok} agent${ok === 1 ? "" : "s"}${fail ? ` (${fail} failed)` : ""}`);
     refresh();
   };
+  // Bulk move-to-group: ask once for a target group name (with autocomplete
+  // sourced from existing groups), then PATCH each agent's config with the
+  // new group. Empty string clears the group, putting the agent under "—".
+  const bulkMoveToGroup = async () => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    const known = [...new Set(agents.map(a => a.group).filter(Boolean))].sort();
+    const promptText = known.length > 0
+      ? `Move ${ids.length} agent(s) to group:\n\nExisting groups: ${known.join(", ")}\n(empty = ungrouped)`
+      : `Move ${ids.length} agent(s) to group:\n(empty = ungrouped)`;
+    const ans = window.prompt(promptText, known[0] || "");
+    if (ans == null) return; // user pressed Cancel
+    const targetGroup = ans.trim();
+    let ok = 0, fail = 0;
+    for (const id of ids) {
+      try {
+        await rhFetch(`/api/agents/${encodeURIComponent(id)}/config`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ group: targetGroup }),
+        });
+        ok++;
+      } catch (e) {
+        fail++;
+        toastErr(`move ${String(id).slice(0, 8)}: ${e.message || e}`);
+      }
+    }
+    if (ok > 0) {
+      toastOk(`Moved ${ok} agent${ok === 1 ? "" : "s"} → ${targetGroup || "(ungrouped)"}${fail ? ` (${fail} failed)` : ""}`);
+    }
+    setSelected(new Set());
+    refresh();
+  };
 
   return (
     <div>
@@ -653,6 +686,9 @@ function AgentsPage({ openAgent }) {
         <div className="bulk-bar">
           <span className="mono" style={{fontSize:12}}>{selected.size} selected</span>
           <button className="btn sm" onClick={bulkRestart}><I.refresh/> Restart</button>
+          <button className="btn sm" onClick={bulkMoveToGroup} title="Move all selected agents to a single group">
+            <I.link/> Move to group
+          </button>
           {selected.size === 2 && (
             <button className="btn sm" onClick={() => setShowDiff(true)} title="Compare the two selected agents">
               <I.copy/> Diff
@@ -2219,6 +2255,24 @@ function WorkflowsPage() {
                   )}
                   <button className="btn sm" onClick={refreshRuns}><I.refresh/></button>
                   <button className="btn sm" onClick={() => exportWorkflowYaml(active)} title="Download workflow as YAML"><I.download/> YAML</button>
+                  <button className="btn sm ghost"
+                          title="Delete this workflow (run history is preserved)"
+                          onClick={async () => {
+                            const ok = await confirmDialog({
+                              title: "Delete workflow?",
+                              message: `Remove '${active.name || active.id}'? Past run history is kept, but the workflow definition will be gone.`,
+                              danger: true,
+                              confirmLabel: "Delete",
+                            });
+                            if (!ok) return;
+                            try {
+                              await rhFetch(`/api/workflows/${encodeURIComponent(active.id)}`, { method: "DELETE" });
+                              toastOk(`Deleted ${active.name || active.id}`);
+                              setActiveId(null);
+                              refreshList();
+                            } catch (err) { toastErr(`delete failed: ${err.message || err}`); }
+                          }}
+                          style={{color:"var(--crimson)"}}><I.trash/></button>
                   <button className="btn sm primary" onClick={runNow} disabled={liveRun}>
                     <I.play/> {liveRun ? "Running…" : "Run now"}
                   </button>
@@ -4893,7 +4947,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.56";
+  const version = (health && health.version) || "0.7.57";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 
@@ -4982,9 +5036,30 @@ function SettingsPage() {
               <dt>active</dt><dd>{onboarding ? (onboarding.demo_mode ? "yes" : "no") : "…"}</dd>
               <dt>provider</dt><dd className="mono">{onboarding ? onboarding.provider : "…"}</dd>
               <dt>api_key</dt><dd>{onboarding ? (onboarding.api_key_set ? "set" : "missing") : "…"}</dd>
+              <dt>seeded</dt><dd>{onboarding && onboarding.demo_seeded ? "yes" : "no"}</dd>
               <dt>agents</dt><dd>{onboarding ? onboarding.agent_count : "…"}</dd>
             </div>
             <div className="dim mt-8" style={{fontSize:11}}>set <span className="mono">RUSTYHAND_DISABLE_DEMO_MODE=1</span> to fall back to NullDriver</div>
+            {onboarding && onboarding.demo_mode && (
+              <div className="row gap-6 mt-8">
+                <button className="btn sm"
+                        title="Removes the .rustyhand_demo_seeded marker so the daemon re-seeds the welcome agent + sample workflow on next start"
+                        onClick={async () => {
+                          const ok = await confirmDialog({
+                            title: "Reset demo seed?",
+                            message: "Removes the demo-seed marker. On the next daemon restart, the welcome agent, sample workflow, trigger and disabled cron job will be re-created. Existing resources stay in place — you may want to delete them first to avoid duplicates.",
+                            confirmLabel: "Remove marker",
+                          });
+                          if (!ok) return;
+                          try {
+                            const r = await rhFetch("/api/onboarding/reset-demo", { method: "POST" });
+                            toastOk(r.message || "Marker removed. Restart the daemon to re-seed.");
+                          } catch (err) { toastErr(`reset failed: ${err.message || err}`); }
+                        }}>
+                  <I.refresh/> Re-seed on restart
+                </button>
+              </div>
+            )}
           </div>
           <div className="card">
             <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Build</div>
@@ -5336,7 +5411,15 @@ function McpPage() {
   const [resp, fetchErr, refresh] = usePolling("/api/mcp/servers", 30000);
   const configured = (resp && resp.configured) || [];
   const connected = (resp && resp.connected) || [];
-  const connectedNames = new Set(connected.map(c => c.name));
+  const connectedByName = new Map(connected.map(c => [c.name, c]));
+  const [expanded, setExpanded] = useState(() => new Set());
+  const toggleExpand = (name) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
+  };
   return (
     <div>
       <div className="page-head">
@@ -5356,8 +5439,11 @@ function McpPage() {
       {resp && configured.length === 0 && <div className="muted mono" style={{padding:"24px", fontSize:12}}>No MCP servers configured. Add them in <span className="mono">~/.rustyhand/config.toml</span> under <span className="mono">[[mcp.servers]]</span>.</div>}
       <div className="grid-12">
         {configured.map(s => {
-          const isConnected = connectedNames.has(s.name);
+          const live = connectedByName.get(s.name);
+          const isConnected = !!live;
           const transport = s.transport || {};
+          const tools = (live && Array.isArray(live.tools)) ? live.tools : [];
+          const isOpen = expanded.has(s.name);
           return (
             <div key={s.name} className="col-6 card">
               <div className="row between mb-12">
@@ -5378,7 +5464,48 @@ function McpPage() {
                 {s.env && Object.keys(s.env).length > 0 && <>
                   <dt>env</dt><dd className="mono dim">{Object.keys(s.env).join(", ")}</dd>
                 </>}
+                {isConnected && <>
+                  <dt>tools</dt>
+                  <dd className="mono">
+                    {tools.length}
+                    {tools.length > 0 && (
+                      <button className="kbd"
+                              style={{marginLeft:6, cursor:"pointer"}}
+                              onClick={() => toggleExpand(s.name)}>
+                        {isOpen ? "hide" : "show"}
+                      </button>
+                    )}
+                  </dd>
+                </>}
               </div>
+              {isOpen && tools.length > 0 && (
+                <div className="col gap-4 mt-8" style={{
+                  maxHeight: 240,
+                  overflow: "auto",
+                  background: "var(--bg-2)",
+                  borderRadius: 6,
+                  padding: "8px 10px",
+                }}>
+                  {tools.map((t, i) => (
+                    <div key={t.name || i} style={{
+                      fontFamily: "var(--ff-mono)",
+                      fontSize: 11.5,
+                      padding: "3px 0",
+                      borderBottom: i < tools.length - 1 ? "1px solid var(--border)" : "none",
+                    }}>
+                      <span style={{color:"var(--rust)"}}>{t.name}</span>
+                      {t.description && (
+                        <div className="dim" style={{
+                          marginTop: 2,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}>{t.description}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}

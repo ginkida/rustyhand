@@ -435,6 +435,10 @@ async fn dashboard_wires_write_paths() {
             "rustyhand-audit-${tag}",
             "Audit CSV export filename template",
         ),
+        // Iter 61-63: bulk move-to-group + workflow delete + demo reseed + MCP tools
+        ("bulkMoveToGroup", "Agents bulk move-to-group"),
+        ("/api/onboarding/reset-demo", "Demo seed reset endpoint"),
+        ("Re-seed on restart", "Settings demo reseed button"),
     ];
     for (needle, what) in markers {
         assert!(

@@ -145,6 +145,10 @@ pub async fn build_router(
             "/api/onboarding",
             axum::routing::get(routes::onboarding_status),
         )
+        .route(
+            "/api/onboarding/reset-demo",
+            axum::routing::post(routes::reset_demo_seed),
+        )
         .route("/api/status", axum::routing::get(routes::status))
         .route("/api/version", axum::routing::get(routes::version))
         .route(
@@ -325,6 +329,10 @@ pub async fn build_router(
         .route(
             "/api/workflows/import-yaml",
             axum::routing::post(routes::import_workflow_yaml),
+        )
+        .route(
+            "/api/workflows/{id}",
+            axum::routing::delete(routes::delete_workflow),
         )
         .route(
             "/api/workflows/{id}/run",
