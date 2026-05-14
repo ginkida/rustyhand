@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.46";
+  const version = (health && health.version) || "0.7.47";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -385,17 +385,13 @@ function AgentsPage({ openAgent }) {
   const [q, setQ] = useState("");
   const [showSpawn, setShowSpawn] = useState(false);
   const [rowMenu, setRowMenu] = useState(null);
-  const pg = usePagination(50);
-  // Snapshot the requested offset before the fetch so a slow response from
-  // the previous page doesn't overwrite the current page (gotcha from
-  // CLAUDE.md). usePolling drops stale responses automatically because the
-  // path key changes, but we still update the pagination total from the
-  // latest envelope.
-  const [resp, fetchErr, refresh] = usePolling(
-    `/api/agents?limit=${pg.pageSize}&offset=${pg.offset}`, 15000);
-  React.useEffect(() => {
-    if (resp && resp.total != null) pg.setTotal(resp.total);
-  }, [resp && resp.total]);
+  // No server-side pagination on Agents: the typical N is small (5-50)
+  // and the filter/search is client-side. Paginating the server response
+  // makes the "1-50 of 200" counter incoherent with a state filter that
+  // can only see the current page. If real ops hit 1000+ agents we'll
+  // revisit — by then the API needs a `?state=` filter to keep the
+  // counts honest.
+  const [resp, fetchErr, refresh] = usePolling("/api/agents?limit=200", 15000);
   const agents = (resp && resp.agents) ? resp.agents.map(normalizeAgent) : D.agents;
   const filtered = agents.filter(a => {
     if (filter !== "all" && a.state !== filter && !(filter === "running" && a.state === "running")) return false;
@@ -493,7 +489,6 @@ function AgentsPage({ openAgent }) {
             ))}
           </tbody>
         </table>
-        <Pagination pg={pg}/>
       </div>
 
       {showSpawn && <SpawnAgentModal onClose={() => setShowSpawn(false)} onSpawned={() => { setShowSpawn(false); refresh(); }}/>}
@@ -2915,7 +2910,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.46";
+  const version = (health && health.version) || "0.7.47";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 

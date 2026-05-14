@@ -352,7 +352,7 @@ function useEscapeKey(handler) {
 // or shortcut helpers; a single `<ToastHost/>` mounted by App renders
 // the queue. State lives in module scope so any caller can dispatch
 // without prop drilling.
-const __TOASTS = { items: [], subs: new Set(), nextId: 1 };
+const __TOASTS = { items: [], timers: new Map(), subs: new Set(), nextId: 1 };
 function toast(msg, opts) {
   const id = __TOASTS.nextId++;
   const t = {
@@ -363,10 +363,21 @@ function toast(msg, opts) {
   };
   __TOASTS.items = __TOASTS.items.concat([t]);
   __TOASTS.subs.forEach((fn) => fn(__TOASTS.items));
-  if (t.ttl > 0) setTimeout(() => dismissToast(id), t.ttl);
+  if (t.ttl > 0) {
+    // Track the timer so manual dismiss can cancel it. Without this,
+    // dismissing a toast early still left a pending no-op timer in the
+    // event loop — harmless but a slow leak under high toast throughput.
+    const timerId = setTimeout(() => dismissToast(id), t.ttl);
+    __TOASTS.timers.set(id, timerId);
+  }
   return id;
 }
 function dismissToast(id) {
+  const timerId = __TOASTS.timers.get(id);
+  if (timerId != null) {
+    clearTimeout(timerId);
+    __TOASTS.timers.delete(id);
+  }
   __TOASTS.items = __TOASTS.items.filter((t) => t.id !== id);
   __TOASTS.subs.forEach((fn) => fn(__TOASTS.items));
 }
