@@ -145,6 +145,41 @@ function normalizeAgent(a) {
     hue: hueFromId(a.id)
   };
 }
+function useEventSource(path, onMessage) {
+  const [connected, setConnected] = React.useState(false);
+  const handlerRef = React.useRef(onMessage);
+  handlerRef.current = onMessage;
+  React.useEffect(() => {
+    if (!path) return;
+    const key = getApiKey();
+    const sep = path.includes("?") ? "&" : "?";
+    const url = key ? `${path}${sep}token=${encodeURIComponent(key)}` : path;
+    let es;
+    try {
+      es = new EventSource(url);
+    } catch (e) {
+      console.warn("SSE open failed", e);
+      return;
+    }
+    es.onopen = () => setConnected(true);
+    es.onerror = () => setConnected(false);
+    es.onmessage = (e) => {
+      let msg = e.data;
+      try {
+        msg = JSON.parse(e.data);
+      } catch (_) {
+      }
+      if (handlerRef.current) handlerRef.current(msg);
+    };
+    return () => {
+      try {
+        es.close();
+      } catch (_) {
+      }
+    };
+  }, [path]);
+  return { connected };
+}
 function useAgentWs(agentId, onEvent) {
   const [connected, setConnected] = React.useState(false);
   const [reconnecting, setReconnecting] = React.useState(false);
@@ -235,7 +270,13 @@ function useAgentWs(agentId, onEvent) {
     ws.send(JSON.stringify({ type: "message", content }));
     return true;
   }, []);
-  return { connected, reconnecting, send };
+  const sendCommand = React.useCallback((command, args) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== 1) return false;
+    ws.send(JSON.stringify({ type: "command", command, args: args || "" }));
+    return true;
+  }, []);
+  return { connected, reconnecting, send, sendCommand };
 }
 function renderMarkdown(src) {
   if (!src) return null;
@@ -610,6 +651,7 @@ Object.assign(window, {
   useApi,
   usePolling,
   useAgentWs,
+  useEventSource,
   usePagination,
   useEscapeKey,
   useHashRoute,

@@ -166,6 +166,42 @@ function normalizeAgent(a) {
   };
 }
 
+// useEventSource(path, onMessage) — subscribe to a Server-Sent Events
+// stream. EventSource has no built-in auth header support, so we
+// append `?token=…` when an API key is set (the kernel accepts it on
+// /api/logs/stream the same way it does on /api/agents/{id}/ws).
+//
+// Auto-reconnect is built into the browser's EventSource for transient
+// errors, but on 401/404 it gives up — we listen for `error` events
+// and surface a `connected` boolean so the UI can show a stale-feed
+// indicator.
+function useEventSource(path, onMessage) {
+  const [connected, setConnected] = React.useState(false);
+  const handlerRef = React.useRef(onMessage);
+  handlerRef.current = onMessage;
+
+  React.useEffect(() => {
+    if (!path) return;
+    const key = getApiKey();
+    const sep = path.includes("?") ? "&" : "?";
+    const url = key ? `${path}${sep}token=${encodeURIComponent(key)}` : path;
+    let es;
+    try { es = new EventSource(url); } catch (e) { console.warn("SSE open failed", e); return; }
+    es.onopen = () => setConnected(true);
+    es.onerror = () => setConnected(false);
+    es.onmessage = (e) => {
+      let msg = e.data;
+      // SSE data is often JSON; try to parse but fall through to raw
+      // string if the producer ships plain text.
+      try { msg = JSON.parse(e.data); } catch (_) {}
+      if (handlerRef.current) handlerRef.current(msg);
+    };
+    return () => { try { es.close(); } catch (_) {} };
+  }, [path]);
+
+  return { connected };
+}
+
 // useAgentWs(agentId, onEvent) — open a WebSocket to /api/agents/{id}/ws,
 // dispatch parsed JSON events to `onEvent`, and expose `send(content)`.
 //
@@ -257,8 +293,18 @@ function useAgentWs(agentId, onEvent) {
     ws.send(JSON.stringify({ type: "message", content }));
     return true;
   }, []);
+  // sendCommand routes through the kernel's command dispatcher rather
+  // than the message path. Used for slash commands (`/workflow run …`,
+  // `/model gpt-4o-mini`, etc) so the kernel can run them without an
+  // LLM round-trip.
+  const sendCommand = React.useCallback((command, args) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== 1) return false;
+    ws.send(JSON.stringify({ type: "command", command, args: args || "" }));
+    return true;
+  }, []);
 
-  return { connected, reconnecting, send };
+  return { connected, reconnecting, send, sendCommand };
 }
 
 // renderMarkdown — convert a plain-text string with a handful of markdown
@@ -743,7 +789,7 @@ function rowsToCsv(rows, columns) {
 }
 
 Object.assign(window, {
-  rhFetch, useApi, usePolling, useAgentWs, usePagination, useEscapeKey, useHashRoute, useAsyncAction,
+  rhFetch, useApi, usePolling, useAgentWs, useEventSource, usePagination, useEscapeKey, useHashRoute, useAsyncAction,
   mapAgentState, hueFromId, relativeTime, formatUptimeShort, normalizeAgent,
   renderMarkdown, downloadBlob, rowsToCsv,
   getApiKey, setApiKey, clearApiKey,

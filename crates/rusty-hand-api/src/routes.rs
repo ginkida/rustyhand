@@ -3528,6 +3528,81 @@ pub async fn knowledge_graph(State(state): State<Arc<AppState>>) -> impl IntoRes
     Json(execute_knowledge_query(&state, pattern).await)
 }
 
+/// POST /api/knowledge/entities — Add or upsert a knowledge-graph
+/// entity. Body shape: `{id?, type, name, properties?}`. If `id` is
+/// empty the kernel assigns a UUID. `type` must be a snake_case
+/// `EntityType` variant (e.g. `"person"`, `"organization"`).
+///
+/// Returns `{id, status: "created"}` on success. Validation errors
+/// yield 400 with a descriptive message (e.g. bad `type` value) so
+/// misspellings are loud rather than silently mis-typed.
+pub async fn knowledge_add_entity(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    use rusty_hand_types::memory::Entity;
+
+    let name = match body.get("name").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Missing or empty 'name' field"})),
+            );
+        }
+    };
+    let entity_type_v = match body.get("type").cloned() {
+        Some(v) => v,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "Missing 'type' field — use a snake_case EntityType variant"
+                })),
+            );
+        }
+    };
+    let entity_type: rusty_hand_types::memory::EntityType =
+        match serde_json::from_value(entity_type_v) {
+            Ok(t) => t,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"error": format!("Unknown entity type: {e}")})),
+                );
+            }
+        };
+    let id = body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+    let properties: std::collections::HashMap<String, serde_json::Value> = body
+        .get("properties")
+        .and_then(|v| v.as_object())
+        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        .unwrap_or_default();
+    let now = chrono::Utc::now();
+    let entity = Entity {
+        id,
+        entity_type,
+        name,
+        properties,
+        created_at: now,
+        updated_at: now,
+    };
+    match state.kernel.memory.add_entity(entity).await {
+        Ok(stored_id) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({"id": stored_id, "status": "created"})),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Add entity failed: {e}")})),
+        ),
+    }
+}
+
 /// POST /api/knowledge/query — Filtered knowledge-graph query.
 ///
 /// Request body shape: `{source?, relation?, target?, max_depth?}`.

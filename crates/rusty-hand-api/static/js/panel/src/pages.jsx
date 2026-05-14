@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.51";
+  const version = (health && health.version) || "0.7.52";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -287,14 +287,47 @@ function formatTime(ts) {
 
 const ActivityFeed = ({ entries }) => {
   const cls = c => ({ live: "var(--live)", violet: "var(--violet)", amber: "var(--amber)", muted: "var(--fg-3)" }[c]);
-  if (!entries) {
+  // Live overlay: subscribe to /api/logs/stream and prepend new entries
+  // to the polled `entries` prop. The polled snapshot still drives the
+  // initial paint (so the feed isn't empty on first load while the SSE
+  // backfill streams in). After that, SSE additions are the source of
+  // truth — we de-dupe by hash || seq.
+  const [live, setLive] = useState([]);
+  const stream = useEventSource("/api/logs/stream", React.useCallback((msg) => {
+    if (!msg || typeof msg !== "object") return;
+    setLive((prev) => {
+      const key = msg.hash || msg.seq;
+      // Skip duplicates: the SSE backfill includes the latest 200
+      // entries on first poll, which usually overlaps the polled list.
+      if (prev.some(p => (p.hash || p.seq) === key)) return prev;
+      // Cap at 200 to keep the DOM bounded; the user can navigate to
+      // /audit for full history.
+      return [msg, ...prev].slice(0, 200);
+    });
+  }, []));
+
+  // Merge polled + live, de-duped, sorted descending by seq.
+  const polled = entries || [];
+  const merged = React.useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    for (const e of live.concat(polled)) {
+      const k = e.hash || e.seq;
+      if (k != null && seen.has(k)) continue;
+      if (k != null) seen.add(k);
+      out.push(e);
+    }
+    return out.sort((a, b) => (b.seq || 0) - (a.seq || 0)).slice(0, 200);
+  }, [live, polled]);
+
+  if (!entries && live.length === 0) {
     return (
       <div className="muted mono" style={{padding:"16px 14px", fontSize:12}}>
         Loading audit chain…
       </div>
     );
   }
-  if (entries.length === 0) {
+  if (merged.length === 0) {
     return (
       <div className="muted mono" style={{padding:"16px 14px", fontSize:12}}>
         No audit entries yet — they appear as agents act.
@@ -303,7 +336,14 @@ const ActivityFeed = ({ entries }) => {
   }
   return (
     <div style={{ maxHeight: 360, overflow: "auto" }}>
-      {entries.map((it, i) => {
+      <div className="row" style={{padding:"4px 14px", borderBottom:"1px solid var(--border)", gap:8, background:"var(--bg-2)"}}>
+        <span className={"dot " + (stream.connected ? "live" : "warn")}/>
+        <span className="dim mono" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>
+          {stream.connected ? "live · sse" : "stale · sse disconnected"}
+        </span>
+        <span className="dim mono" style={{fontSize:10.5, marginLeft:"auto"}}>{merged.length} events</span>
+      </div>
+      {merged.map((it, i) => {
         const color = actionColor(it.action);
         const detail = it.detail || it.outcome || "";
         return (
@@ -491,6 +531,20 @@ function AgentsPage({ openAgent }) {
       refresh();
     } catch (e) { toastErr(`restart failed: ${e.message || e}`); }
   };
+  const forkAgent = async (id, name) => {
+    const proposed = `${name}-fork`;
+    const ans = window.prompt(`Fork agent ${name} as:`, proposed);
+    if (!ans || !ans.trim()) return;
+    try {
+      const r = await rhFetch(`/api/agents/${encodeURIComponent(id)}/clone`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ new_name: ans.trim() }),
+      });
+      toastOk(`Forked ${name} → ${ans.trim()}`);
+      refresh();
+    } catch (e) { toastErr(`fork failed: ${e.message || e}`); }
+  };
 
   // Bulk actions: one network call per id, sequential to keep server
   // load predictable. We track partial successes so a single error
@@ -603,7 +657,7 @@ function AgentsPage({ openAgent }) {
             {!grouped && filtered.map(a => (
               <AgentRow key={a.id} agent={a} selected={selected.has(a.id)} onSelect={toggleSelect}
                         openAgent={openAgent} rowMenu={rowMenu} setRowMenu={setRowMenu}
-                        restart={restartAgent} kill={killAgent} showGroup={true}/>
+                        restart={restartAgent} kill={killAgent} fork={forkAgent} showGroup={true}/>
             ))}
             {grouped && groupBuckets && groupBuckets.map(([g, arr]) => {
               const collapsed = collapsedGroups.has(g);
@@ -619,7 +673,7 @@ function AgentsPage({ openAgent }) {
                   {!collapsed && arr.map(a => (
                     <AgentRow key={a.id} agent={a} selected={selected.has(a.id)} onSelect={toggleSelect}
                               openAgent={openAgent} rowMenu={rowMenu} setRowMenu={setRowMenu}
-                              restart={restartAgent} kill={killAgent} showGroup={false}/>
+                              restart={restartAgent} kill={killAgent} fork={forkAgent} showGroup={false}/>
                   ))}
                 </React.Fragment>
               );
@@ -637,7 +691,7 @@ function AgentsPage({ openAgent }) {
 // don't drift in cell ordering. `showGroup` toggles whether the Group
 // column is rendered — hidden when the table is grouped (the section
 // header carries the group name).
-function AgentRow({ agent, selected, onSelect, openAgent, rowMenu, setRowMenu, restart, kill, showGroup }) {
+function AgentRow({ agent, selected, onSelect, openAgent, rowMenu, setRowMenu, restart, kill, fork, showGroup }) {
   const a = agent;
   return (
     <tr key={a.id} style={{cursor:"pointer", background: selected ? "var(--surface-2)" : undefined}}
@@ -668,6 +722,7 @@ function AgentRow({ agent, selected, onSelect, openAgent, rowMenu, setRowMenu, r
         {rowMenu === a.id && (
           <div className="row-menu" onClick={(e) => e.stopPropagation()}>
             <button onClick={() => { setRowMenu(null); restart(a.id); }}><I.refresh/> Restart</button>
+            <button onClick={() => { setRowMenu(null); fork && fork(a.id, a.name); }}><I.copy/> Fork…</button>
             <button onClick={() => { setRowMenu(null); kill(a.id); }} style={{color:"var(--crimson)"}}><I.close/> Kill</button>
           </div>
         )}
@@ -874,7 +929,13 @@ function AgentDrawer({ agent, onClose }) {
               </pre>
             </>
           )}
-          {tab === "config" && detail && <AgentConfigForm agent={agent} detail={detail} onSaved={refreshDetail}/>}
+          {tab === "config" && detail && (
+            <>
+              <AgentConfigForm agent={agent} detail={detail} onSaved={refreshDetail}/>
+              <div className="divider"/>
+              <AgentKvEditor agent={agent}/>
+            </>
+          )}
           {tab === "config" && !detail && <div className="dim mono" style={{fontSize:11}}>loading…</div>}
           {tab === "identity" && <AgentIdentityForm agent={agent} detail={detail} onSaved={refreshDetail}/>}
           {tab === "activity" && (
@@ -1152,6 +1213,112 @@ function AgentConfigForm({ agent, detail, onSaved }) {
   );
 }
 
+// AgentKvEditor — per-agent key/value store backed by
+// /api/memory/agents/{id}/kv. Values are JSON-typed; the editor shows
+// the raw JSON in the textarea so structured values (objects, arrays)
+// can be edited without a complex tree UI. Submission either parses
+// the input as JSON or falls back to a plain string.
+function AgentKvEditor({ agent }) {
+  const path = agent ? `/api/memory/agents/${agent.id}/kv` : null;
+  const [resp, fetchErr, refresh] = useApi(path);
+  const pairs = (resp && resp.kv) || [];
+  const [newKey, setNewKey] = useState("");
+  const [newValue, setNewValue] = useState("");
+  const [editingKey, setEditingKey] = useState(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const parseValue = (s) => {
+    const trimmed = s.trim();
+    if (trimmed === "") return "";
+    try { return JSON.parse(trimmed); }
+    catch (_) { return s; }
+  };
+
+  const save = async (k, v) => {
+    if (!k.trim()) { toastErr("Key required"); return; }
+    setBusy(true);
+    try {
+      await rhFetch(`/api/memory/agents/${agent.id}/kv/${encodeURIComponent(k.trim())}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: parseValue(v) }),
+      });
+      toastOk(`Saved ${k}`);
+      setNewKey(""); setNewValue("");
+      setEditingKey(null); setEditDraft("");
+      refresh();
+    } catch (e) { toastErr(`save failed: ${e.message || e}`); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async (k) => {
+    if (!(await confirmDialog({ title: "Delete key", message: `Delete kv key "${k}"?`, danger: true, confirmLabel: "Delete" }))) return;
+    setBusy(true);
+    try {
+      await rhFetch(`/api/memory/agents/${agent.id}/kv/${encodeURIComponent(k)}`, { method: "DELETE" });
+      toastOk(`Deleted ${k}`);
+      refresh();
+    } catch (e) { toastErr(`delete failed: ${e.message || e}`); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="col gap-8 mt-12">
+      <div className="muted mono" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>
+        Environment / KV store
+        <Tip>Key/value pairs stored per-agent and surfaced to skills as
+          environment variables. Values are JSON-typed: numbers, strings,
+          objects, arrays. Plain text is auto-quoted.</Tip>
+      </div>
+      {fetchErr && <div className="dim mono" style={{fontSize:11, color:"var(--crimson)"}}>{fetchErr}</div>}
+      {!resp && <div className="dim mono" style={{fontSize:11.5}}>loading…</div>}
+      {resp && pairs.length === 0 && (
+        <div className="dim" style={{fontSize:11.5}}>No keys yet — add one below.</div>
+      )}
+      <div className="col gap-4">
+        {pairs.map((p) => {
+          const v = p.value;
+          const display = typeof v === "string" ? v : JSON.stringify(v);
+          const isEditing = editingKey === p.key;
+          return (
+            <div key={p.key} className="row gap-8" style={{padding:"6px 8px", background:"var(--bg-2)", borderRadius:6, alignItems:"flex-start"}}>
+              <span className="mono" style={{fontSize:11.5, width:120, paddingTop:4}}>{p.key}</span>
+              {isEditing ? (
+                <textarea className="modal-field modal-textarea"
+                          style={{flex:1, minHeight:36, fontSize:11.5, fontFamily:"var(--ff-mono)"}}
+                          value={editDraft}
+                          onChange={(e) => setEditDraft(e.target.value)}
+                          autoFocus/>
+              ) : (
+                <span className="mono dim" style={{flex:1, fontSize:11.5, paddingTop:4, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{display}</span>
+              )}
+              {isEditing ? (
+                <span className="row gap-4">
+                  <button className="btn sm" onClick={() => save(p.key, editDraft)} disabled={busy}>save</button>
+                  <button className="btn sm ghost" onClick={() => { setEditingKey(null); setEditDraft(""); }}>cancel</button>
+                </span>
+              ) : (
+                <span className="row gap-4">
+                  <button className="btn sm ghost" onClick={() => { setEditingKey(p.key); setEditDraft(typeof v === "string" ? v : JSON.stringify(v, null, 2)); }}>edit</button>
+                  <button className="btn sm danger" onClick={() => remove(p.key)}><I.close/></button>
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="row gap-6 mt-8">
+        <input className="modal-field" style={{flex:0, width:140}} placeholder="new key" value={newKey} onChange={(e) => setNewKey(e.target.value)}/>
+        <input className="modal-field" style={{flex:1}} placeholder='value (JSON or plain text)' value={newValue} onChange={(e) => setNewValue(e.target.value)}/>
+        <button className="btn sm primary" onClick={() => save(newKey, newValue)} disabled={busy || !newKey.trim()}>
+          <I.plus/> Add
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AgentIdentityForm({ agent, detail, onSaved }) {
   const id = (detail && detail.identity) || {};
   const [emoji, setEmoji] = useState(id.emoji || "");
@@ -1339,6 +1506,16 @@ function ChatPage() {
     setStreamingText("");
     setStreamingTools([]);
     setSending(true);
+    // Slash commands: route through the WS command channel rather than
+    // sending as a chat message. The kernel handles the dispatch with
+    // no LLM round-trip and replies via command_result events.
+    if (text.startsWith("/") && ws.connected) {
+      const rest = text.slice(1).trim();
+      const sp = rest.indexOf(" ");
+      const command = sp < 0 ? rest : rest.slice(0, sp);
+      const args = sp < 0 ? "" : rest.slice(sp + 1);
+      if (ws.sendCommand(command, args)) return;
+    }
     if (ws.connected && ws.send(text)) return;
     // Fallback to HTTP roundtrip if WS isn't connected.
     try {
@@ -1454,15 +1631,11 @@ function ChatPage() {
           )}
         </div>
 
-        <div className="chat-input">
-          <div className="field">
-            <I.zap/>
-            <input placeholder={`Message ${active.name}…  /workflow  /tool  /memory`}
-                   value={typed} disabled={sending} onChange={e=>setTyped(e.target.value)} onKeyDown={onKeyDown}/>
-            <span className="kbd">↵ send</span>
-          </div>
-          <button className="btn primary" onClick={send} disabled={sending || !typed.trim()}><I.send/> {sending ? "…" : "Send"}</button>
-        </div>
+        <ChatInput
+          typed={typed} setTyped={setTyped} sending={sending}
+          send={send} active={active}
+          ws={ws}
+        />
       </div>
 
       {/* side: context */}
@@ -1494,6 +1667,103 @@ function ChatPage() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Slash-command catalog the chat input surfaces when the user types `/`.
+// Matches the commands the WS handler accepts on the server side
+// (kernel ws::handle_client_message dispatches by `command` text).
+// Adding a new command means adding a row here and ensuring the
+// server handler recognizes it; the panel is otherwise a thin
+// pass-through.
+const CHAT_SLASH_COMMANDS = [
+  { cmd: "/workflow run", help: "Run a workflow with the next args as input", usage: "/workflow run <name> [input…]" },
+  { cmd: "/workflow list", help: "List all workflows", usage: "/workflow list" },
+  { cmd: "/tool", help: "Show the agent's allowed tool list" },
+  { cmd: "/memory recall", help: "Recall a memory by key or substring", usage: "/memory recall <key>" },
+  { cmd: "/memory remember", help: "Store a memory under a key", usage: "/memory remember <key> <value…>" },
+  { cmd: "/memory forget", help: "Drop a memory by key", usage: "/memory forget <key>" },
+  { cmd: "/model", help: "Switch the agent's model", usage: "/model <model-id>" },
+  { cmd: "/temp", help: "Set sampling temperature (0–2)", usage: "/temp 0.7" },
+  { cmd: "/system", help: "Update the system prompt", usage: "/system <new prompt>" },
+  { cmd: "/thinking", help: "Toggle extended thinking" },
+  { cmd: "/reset", help: "Reset the conversation" },
+  { cmd: "/help", help: "Show server-side command help" },
+];
+
+function ChatInput({ typed, setTyped, sending, send, active, ws }) {
+  const inputRef = React.useRef(null);
+  const open = typed.startsWith("/") && !typed.includes("\n");
+  // Filter commands by the leading token of the typed text. Once the
+  // user typed past the command (e.g. "/workflow run leadgen"), keep
+  // the matching command pinned at the top with no other suggestions
+  // so they can see which command they're invoking.
+  const candidates = React.useMemo(() => {
+    if (!open) return [];
+    const ql = typed.toLowerCase();
+    return CHAT_SLASH_COMMANDS
+      .filter((c) => c.cmd.toLowerCase().startsWith(ql) || ql.startsWith(c.cmd.toLowerCase() + " "))
+      .sort((a, b) => {
+        // Exact-prefix matches first.
+        const ap = ql.startsWith(a.cmd.toLowerCase()) ? 0 : 1;
+        const bp = ql.startsWith(b.cmd.toLowerCase()) ? 0 : 1;
+        return ap - bp;
+      });
+  }, [typed, open]);
+  const [highlight, setHighlight] = React.useState(0);
+  React.useEffect(() => { setHighlight(0); }, [candidates.length]);
+  const pick = (c) => {
+    // Pre-fill the input with the command + a trailing space if it has
+    // arguments, so the user can keep typing.
+    const next = c.usage ? c.cmd + " " : c.cmd;
+    setTyped(next);
+    setTimeout(() => inputRef.current && inputRef.current.focus(), 0);
+  };
+  const onKeyDown = (e) => {
+    if (open && candidates.length > 0) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setHighlight(h => Math.min(candidates.length - 1, h + 1)); return; }
+      if (e.key === "ArrowUp") { e.preventDefault(); setHighlight(h => Math.max(0, h - 1)); return; }
+      if (e.key === "Tab") { e.preventDefault(); pick(candidates[highlight]); return; }
+    }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  };
+  return (
+    <div className="chat-input" style={{position:"relative"}}>
+      {open && candidates.length > 0 && (
+        <div className="slash-popup">
+          <div className="slash-popup-head">
+            <span className="mono dim" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>
+              Slash commands
+            </span>
+            <span className="dim mono" style={{fontSize:10.5}}>Tab / Enter to insert</span>
+          </div>
+          {candidates.map((c, i) => (
+            <button key={c.cmd}
+                    className={"slash-popup-row" + (i === highlight ? " active" : "")}
+                    onMouseEnter={() => setHighlight(i)}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => pick(c)}>
+              <span className="mono" style={{fontSize:12.5, color:"var(--rust)", width:170}}>{c.cmd}</span>
+              <span className="dim" style={{fontSize:11.5, flex:1}}>{c.help}</span>
+              {c.usage && <span className="dim mono" style={{fontSize:10.5}}>{c.usage}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="field">
+        <I.zap/>
+        <input ref={inputRef}
+               placeholder={`Message ${active.name}…  (type / for commands)`}
+               value={typed} disabled={sending}
+               onChange={e => setTyped(e.target.value)}
+               onKeyDown={onKeyDown}/>
+        <span className="kbd">↵ send</span>
+      </div>
+      <button className="btn primary" onClick={send} disabled={sending || !typed.trim()}><I.send/> {sending ? "…" : "Send"}</button>
     </div>
   );
 }
@@ -1720,6 +1990,7 @@ function WorkflowsPage() {
                 </div>
                 <div className="row gap-6">
                   <button className="btn sm" onClick={refreshRuns}><I.refresh/></button>
+                  <button className="btn sm" onClick={() => exportWorkflowYaml(active)} title="Download workflow as YAML"><I.download/> YAML</button>
                   <button className="btn sm primary" onClick={runNow}><I.play/> Run now</button>
                 </div>
               </div>
@@ -1795,6 +2066,89 @@ function WorkflowsPage() {
       {inspectingRun && <WorkflowRunInspector run={inspectingRun} onClose={() => setInspectingRun(null)}/>}
     </div>
   );
+}
+
+// Client-side YAML serializer for the workflow subset. Handles strings
+// (auto-quoted when they contain whitespace, colons, or YAML-reserved
+// characters), numbers, booleans, null, plain objects, and arrays.
+// Does NOT try to be a full YAML implementation — it's only ever called
+// on workflow definitions which have a known shape, so anchors,
+// references, and flow-style collections are out of scope.
+function toYaml(value, indent) {
+  const ind = indent || 0;
+  const pad = "  ".repeat(ind);
+  if (value === null || value === undefined) return "null";
+  if (typeof value === "boolean" || typeof value === "number") return String(value);
+  if (typeof value === "string") {
+    // Quote if the string contains characters that would confuse a
+    // YAML parser, otherwise emit as a plain scalar.
+    if (/^\s|\s$|[:#\-?,&*!|>'"%@`]|^(true|false|null|yes|no)$|^-?\d/i.test(value) || value === "") {
+      return JSON.stringify(value);
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "[]";
+    return value.map((item) => {
+      const rendered = toYaml(item, ind + 1);
+      if (typeof item === "object" && item !== null && !Array.isArray(item)) {
+        // First field inline with the dash, the rest indented.
+        const lines = rendered.split("\n");
+        return `${pad}- ${lines[0].trimStart()}\n${lines.slice(1).join("\n")}`;
+      }
+      return `${pad}- ${rendered}`;
+    }).join("\n");
+  }
+  if (typeof value === "object") {
+    const keys = Object.keys(value);
+    if (keys.length === 0) return "{}";
+    return keys.map((k) => {
+      const v = value[k];
+      if (v == null || typeof v === "boolean" || typeof v === "number" || typeof v === "string") {
+        return `${pad}${k}: ${toYaml(v, ind)}`;
+      }
+      if (Array.isArray(v) && v.length === 0) return `${pad}${k}: []`;
+      if (typeof v === "object" && Object.keys(v).length === 0) return `${pad}${k}: {}`;
+      return `${pad}${k}:\n${toYaml(v, ind + 1)}`;
+    }).join("\n");
+  }
+  return JSON.stringify(value);
+}
+
+function exportWorkflowYaml(workflow) {
+  if (!workflow) return;
+  // Re-shape to the same JSON keys the import endpoint accepts so the
+  // round-trip is symmetric (export → import yields an identical
+  // workflow with a new id).
+  const out = {
+    name: workflow.name,
+    description: workflow.description || "",
+    steps: Array.isArray(workflow.steps) ? workflow.steps.map((s) => {
+      const step = { name: s.name };
+      if (s.agent && s.agent.id) step.agent_id = s.agent.id;
+      else if (s.agent && s.agent.name) step.agent_name = s.agent.name;
+      else if (s.agent_id) step.agent_id = s.agent_id;
+      else if (s.agent_name) step.agent_name = s.agent_name;
+      step.prompt = s.prompt_template || s.prompt || "{{input}}";
+      if (s.mode) {
+        if (typeof s.mode === "string") step.mode = s.mode;
+        else if (s.mode.Conditional) { step.mode = "conditional"; step.condition = s.mode.Conditional.condition; }
+        else if (s.mode.Loop) { step.mode = "loop"; step.max_iterations = s.mode.Loop.max_iterations; step.until = s.mode.Loop.until; }
+        else step.mode = "sequential";
+      }
+      if (s.timeout_secs && s.timeout_secs !== 120) step.timeout_secs = s.timeout_secs;
+      if (s.error_mode) {
+        if (typeof s.error_mode === "string" && s.error_mode !== "fail") step.error_mode = s.error_mode;
+        else if (s.error_mode && s.error_mode.Retry) { step.error_mode = "retry"; step.max_retries = s.error_mode.Retry.max_retries; }
+      }
+      if (s.output_var) step.output_var = s.output_var;
+      return step;
+    }) : [],
+  };
+  const yaml = toYaml(out);
+  const fname = `workflow-${(workflow.name || workflow.id || "export").replace(/[^a-zA-Z0-9_-]/g, "_")}.yaml`;
+  downloadBlob(fname, yaml, "application/yaml");
+  toastOk(`Exported ${fname}`);
 }
 
 function WorkflowImportModal({ onClose, onImported }) {
@@ -3061,6 +3415,7 @@ function KnowledgePage() {
   // mini-cypher query (e.g. `source:linder relation:works_at depth:3`), we
   // POST to /api/knowledge/query and render that result instead.
   const [graph, , refresh] = usePolling("/api/knowledge", 30000);
+  const [showAdd, setShowAdd] = useState(false);
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState(null);
   const [serverResult, setServerResult] = useState(null);
@@ -3159,6 +3514,7 @@ function KnowledgePage() {
             {(query || submittedQuery) && <button className="kbd" onClick={clearQuery} style={{cursor:"pointer"}}>clear</button>}
           </div>
           <button className="btn primary" onClick={runQuery} disabled={!query.trim()}><I.play/> Run</button>
+          <button className="btn ghost" onClick={() => setShowAdd(true)}><I.plus/> Add node</button>
         </div>
       </div>
       {queryErr && (
@@ -3203,6 +3559,82 @@ function KnowledgePage() {
               </>
             )}
           </div>
+        </div>
+      </div>
+      {showAdd && <KnowledgeAddNodeModal onClose={() => setShowAdd(false)} onAdded={() => { setShowAdd(false); refresh(); }}/>}
+    </div>
+  );
+}
+
+function KnowledgeAddNodeModal({ onClose, onAdded }) {
+  useEscapeKey(onClose);
+  const [id, setId] = useState("");
+  const [type, setType] = useState("person");
+  const [name, setName] = useState("");
+  const [propsJson, setPropsJson] = useState("{}");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  // EntityType variants from rusty-hand-types/src/memory.rs. Adding a
+  // new variant in Rust means appending it here so the dropdown stays
+  // in sync.
+  const TYPES = ["person", "organization", "project", "concept", "event", "location", "document", "tool", "other"];
+
+  const submit = async () => {
+    if (!name.trim()) { setErr("Name required"); return; }
+    let properties = {};
+    if (propsJson.trim()) {
+      try { properties = JSON.parse(propsJson); }
+      catch (e) { setErr(`Properties must be valid JSON: ${e.message}`); return; }
+      if (typeof properties !== "object" || Array.isArray(properties)) {
+        setErr("Properties must be a JSON object");
+        return;
+      }
+    }
+    setBusy(true); setErr(null);
+    try {
+      await rhFetch("/api/knowledge/entities", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: id.trim() || undefined, type, name: name.trim(), properties }),
+      });
+      toastOk(`Added ${name.trim()}`);
+      onAdded();
+    } catch (e) { setErr(String(e.message || e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><b className="mono">Add knowledge node</b><button className="icon-btn" onClick={onClose}><I.close/></button></div>
+        <div className="modal-body">
+          <div className="col gap-8">
+            <label className="t-row col"><span className="t-lbl">Name</span>
+              <input className="modal-field" value={name} onChange={(e) => setName(e.target.value)} placeholder="A. Linder" autoFocus/></label>
+            <label className="t-row col">
+              <span className="t-lbl">
+                Type
+                <Tip>One of the EntityType variants: person, organization, project, concept, event, location, document, tool, other.</Tip>
+              </span>
+              <select className="t-select" value={type} onChange={(e) => setType(e.target.value)}>
+                {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </label>
+            <label className="t-row col"><span className="t-lbl">ID (optional — kernel assigns UUID if empty)</span>
+              <input className="modal-field" value={id} onChange={(e) => setId(e.target.value)} placeholder="p_linder"/></label>
+            <label className="t-row col"><span className="t-lbl">Properties (JSON object)</span>
+              <textarea className="modal-field modal-textarea" style={{minHeight:100, fontFamily:"var(--ff-mono)"}}
+                        value={propsJson} onChange={(e) => setPropsJson(e.target.value)}/></label>
+          </div>
+          {err && <div className="banner mt-12" style={{borderColor:"oklch(0.66 0.18 25 / .35)"}}>
+            <span className="dot err"/><span className="banner-title">ERROR</span>
+            <span className="banner-body mono" style={{fontSize:11}}>{err}</span>
+          </div>}
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+          <button className="btn primary" onClick={submit} disabled={busy}>{busy ? "Adding…" : "Add node"}</button>
         </div>
       </div>
     </div>
@@ -3827,7 +4259,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.51";
+  const version = (health && health.version) || "0.7.52";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 

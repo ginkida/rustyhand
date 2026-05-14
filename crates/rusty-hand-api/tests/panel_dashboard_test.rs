@@ -149,6 +149,16 @@ async fn dashboard_includes_all_panel_modules() {
         ("Authorized users", "RBAC users section in Settings"),
         ("swatch", "identity color picker swatches"),
         ("rh.panel.agentsCompact", "Agents compact density toggle"),
+        // Iter 43-45
+        ("useEventSource", "SSE hook must be exposed"),
+        ("/api/logs/stream", "live activity feed wired to SSE"),
+        ("CHAT_SLASH_COMMANDS", "slash-command catalog"),
+        ("ChatInput", "ChatInput component (slash popup host)"),
+        ("forkAgent", "agent fork action wired"),
+        ("AgentKvEditor", "per-agent KV editor"),
+        ("exportWorkflowYaml", "workflow YAML export helper"),
+        ("KnowledgeAddNodeModal", "knowledge add-node modal"),
+        ("/api/knowledge/entities", "knowledge add-entity endpoint"),
     ];
     for (needle, msg) in markers {
         assert!(body.contains(needle), "{msg} (missing `{needle}`)");

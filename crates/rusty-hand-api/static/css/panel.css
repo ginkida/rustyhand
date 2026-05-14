@@ -1213,6 +1213,39 @@ code, .mono { font-family: var(--ff-mono); }
 }
 .swatch:hover { transform: scale(1.1); }
 
+/* ---------- Chat slash-command popup ---------- */
+.slash-popup {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: 60px;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  z-index: 30;
+  padding: 4px;
+}
+.slash-popup-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.slash-popup-row {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%;
+  padding: 7px 12px;
+  background: none;
+  color: var(--fg-2);
+  text-align: left;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.slash-popup-row:hover,
+.slash-popup-row.active { background: var(--surface-2); color: var(--fg); box-shadow: inset 2px 0 0 var(--rust); }
+
 /* ---------- Search highlight (audit page) ---------- */
 .audit-match {
   background: oklch(0.78 0.14 88 / .35);
