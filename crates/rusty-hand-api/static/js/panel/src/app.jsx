@@ -94,7 +94,7 @@ function Sidebar({ page, go }) {
         <div className="sb-mark">RH</div>
         <div>
           <div className="sb-title">Rusty Hand</div>
-          <div className="sb-sub">v0.7.59 · schema v8</div>
+          <div className="sb-sub">v0.7.60 · schema v8</div>
         </div>
       </div>
 
@@ -278,6 +278,23 @@ function CommandPalette({ open, onClose, go, openAgent }) {
 
     const matches = (s) => !ql || (s || "").toLowerCase().includes(ql);
 
+    // Quick-action rows: jump to a page and immediately open its create
+    // modal via the page's rh:hotkey:new listener. They appear when the
+    // query matches "new", "add", or the action's own keywords.
+    const QUICK_ACTIONS = [
+      { id: "new-agent",    label: "New agent",    page: "agents",     keys: "agent spawn create" },
+      { id: "new-workflow", label: "New workflow", page: "workflows",  keys: "workflow pipeline" },
+      { id: "new-cron",     label: "New cron job", page: "automation", keys: "cron schedule job" },
+      { id: "new-trigger",  label: "New trigger",  page: "automation", keys: "trigger event hook" },
+    ];
+    const quickActionMatches = (qa) => !ql
+      || qa.label.toLowerCase().includes(ql)
+      || qa.keys.toLowerCase().includes(ql)
+      || "new add create".includes(ql);
+    const quickRows = QUICK_ACTIONS
+      .filter(quickActionMatches)
+      .map((qa) => ({ kind: "action", id: qa.id, label: qa.label, sub: `→ ${qa.page} · ⌘N`, page: qa.page }));
+
     const pageRows = NAV.filter((n) => !n.kind && matches(n.label))
       .map((n) => ({ kind: "page", id: n.id, label: n.label, sub: "page" }));
     const agentRows = agents
@@ -300,13 +317,15 @@ function CommandPalette({ open, onClose, go, openAgent }) {
       : [];
 
     if (!ql) {
-      // No query → recents (de-duped against pages), then pages, then
-      // suggestions ("Spawn agent", "Open chat") to make the palette
-      // feel useful on first open.
+      // No query → recents (de-duped against pages), then quick actions,
+      // then pages. Quick actions get prime real estate because creating
+      // things is the most common reason to open the palette.
       const recent = loadRecentPicks().filter((r) => r.kind !== "audit"); // audit hashes drift
-      return recent.concat(pageRows.filter((p) => !recent.some((r) => r.kind === "page" && r.id === p.id)));
+      return recent
+        .concat(quickRows)
+        .concat(pageRows.filter((p) => !recent.some((r) => r.kind === "page" && r.id === p.id)));
     }
-    return pageRows.concat(agentRows, wfRows, sessionRows, auditRows);
+    return quickRows.concat(pageRows, agentRows, wfRows, sessionRows, auditRows);
   }, [open, q, agentsResp, wfResp, sessionsResp, auditResp]);
 
   React.useEffect(() => { setHighlight(0); }, [q]);
@@ -315,6 +334,14 @@ function CommandPalette({ open, onClose, go, openAgent }) {
     if (!row) return;
     pushRecentPick(row);
     if (row.kind === "page") go(row.id);
+    else if (row.kind === "action") {
+      // Navigate then dispatch the same hot-key event that 'n' would fire,
+      // so the destination page opens its create modal automatically.
+      go(row.page);
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("rh:hotkey:new", { detail: { page: row.page } }));
+      }, 60);
+    }
     else if (row.kind === "agent") {
       const a = ((agentsResp && agentsResp.agents) || []).find((x) => x.id === row.id);
       if (a) openAgent(normalizeAgent(a));

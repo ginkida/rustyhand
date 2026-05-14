@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.59";
+  const version = (health && health.version) || "0.7.60";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -4582,6 +4582,22 @@ function ClawHubModal({ onClose, onInstalled }) {
   const items = (resp && resp.items) || [];
   const [installing, setInstalling] = useState(null);
   const [result, setResult] = useState(null);
+  // Peek state: slug currently expanded, plus a per-slug cache of the
+  // detail response so toggling open/closed doesn't re-fetch.
+  const [peekSlug, setPeekSlug] = useState(null);
+  const [peekCache, setPeekCache] = useState({});
+  const [peekErr, setPeekErr] = useState(null);
+  const peek = async (slug) => {
+    if (peekSlug === slug) { setPeekSlug(null); return; }
+    setPeekSlug(slug); setPeekErr(null);
+    if (peekCache[slug]) return;
+    try {
+      const r = await rhFetch(`/api/clawhub/skill/${encodeURIComponent(slug)}`);
+      setPeekCache(prev => ({ ...prev, [slug]: r }));
+    } catch (e) {
+      setPeekErr(String(e.message || e));
+    }
+  };
 
   const install = async (slug) => {
     setInstalling(slug); setResult(null);
@@ -4627,29 +4643,97 @@ function ClawHubModal({ onClose, onInstalled }) {
               const isInstalling = installing === slug;
               const ok = result && result.slug === slug && result.ok;
               const err = result && result.slug === slug && !result.ok;
+              const isOpen = peekSlug === slug;
+              const detail = peekCache[slug];
               return (
-                <div key={slug} className="row gap-12" style={{padding:"10px 12px", border:"1px solid var(--border)", borderRadius:7, background:"var(--bg-2)"}}>
-                  <div className="col" style={{flex:1, gap:3, minWidth:0}}>
-                    <div className="row gap-8">
-                      <span className="mono" style={{fontSize:13}}>{it.name || slug}</span>
-                      {it.version && <span className="badge plain">{it.version}</span>}
-                      {it.author && <span className="dim mono" style={{fontSize:10.5}}>{it.author}</span>}
+                <div key={slug} style={{padding:"10px 12px", border:"1px solid var(--border)", borderRadius:7, background:"var(--bg-2)"}}>
+                  <div className="row gap-12">
+                    <div className="col" style={{flex:1, gap:3, minWidth:0}}>
+                      <div className="row gap-8">
+                        <span className="mono" style={{fontSize:13}}>{it.name || slug}</span>
+                        {it.version && <span className="badge plain">{it.version}</span>}
+                        {it.author && <span className="dim mono" style={{fontSize:10.5}}>{it.author}</span>}
+                      </div>
+                      <span className="dim" style={{fontSize:11.5, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{it.description || it.summary || "—"}</span>
+                      <div className="row gap-12 dim mono" style={{fontSize:10.5}}>
+                        {it.downloads != null && <span>↓ {Number(it.downloads).toLocaleString()}</span>}
+                        {it.stars != null && <span>★ {it.stars}</span>}
+                        {it.rating != null && <span>{Number(it.rating).toFixed(1)}/5</span>}
+                        {it.updated && <span>upd {relativeTime(it.updated)}</span>}
+                      </div>
                     </div>
-                    <span className="dim" style={{fontSize:11.5, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{it.description || it.summary || "—"}</span>
-                    <div className="row gap-12 dim mono" style={{fontSize:10.5}}>
-                      {it.downloads != null && <span>↓ {Number(it.downloads).toLocaleString()}</span>}
-                      {it.stars != null && <span>★ {it.stars}</span>}
-                      {it.rating != null && <span>{Number(it.rating).toFixed(1)}/5</span>}
-                      {it.updated && <span>upd {relativeTime(it.updated)}</span>}
+                    <div className="row gap-6">
+                      {ok && <span className="badge live">installed</span>}
+                      {err && <span className="badge error" title={result.message}>failed</span>}
+                      <button className="btn sm" onClick={() => peek(slug)} title="Peek manifest without installing">
+                        {isOpen ? "Hide" : "Peek"}
+                      </button>
+                      <button className="btn sm primary" onClick={() => install(slug)} disabled={!!installing}>
+                        {isInstalling ? "Installing…" : "Install"}
+                      </button>
                     </div>
                   </div>
-                  <div className="row gap-6">
-                    {ok && <span className="badge live">installed</span>}
-                    {err && <span className="badge error" title={result.message}>failed</span>}
-                    <button className="btn sm primary" onClick={() => install(slug)} disabled={!!installing}>
-                      {isInstalling ? "Installing…" : "Install"}
-                    </button>
-                  </div>
+                  {isOpen && (
+                    <div style={{
+                      marginTop:10,
+                      padding:"10px 12px",
+                      background:"var(--surface)",
+                      borderRadius:5,
+                      border:"1px solid var(--border)",
+                    }}>
+                      {!detail && !peekErr && (
+                        <div className="dim mono" style={{fontSize:11, textAlign:"center"}}>loading…</div>
+                      )}
+                      {peekErr && (
+                        <div className="dim mono" style={{fontSize:11, color:"var(--crimson)"}}>{peekErr}</div>
+                      )}
+                      {detail && (
+                        <>
+                          {detail.description && (
+                            <div className="dim" style={{fontSize:11.5, lineHeight:1.5, marginBottom:8}}>
+                              {detail.description}
+                            </div>
+                          )}
+                          {Array.isArray(detail.tools) && detail.tools.length > 0 && (
+                            <>
+                              <div className="muted mono mb-4" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>
+                                Tools <span className="dim" style={{marginLeft:6}}>{detail.tools.length}</span>
+                              </div>
+                              <div className="col gap-4" style={{maxHeight:160, overflow:"auto"}}>
+                                {detail.tools.map((t, i) => (
+                                  <div key={i} className="mono" style={{
+                                    fontSize:11,
+                                    padding:"3px 6px",
+                                    background:"var(--bg-2)",
+                                    borderRadius:4,
+                                  }}>
+                                    <span style={{color:"var(--rust)"}}>{t.name || t.id || `tool-${i}`}</span>
+                                    {t.description && <span className="dim" style={{marginLeft:8}}>{t.description}</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                          {Array.isArray(detail.capabilities) && detail.capabilities.length > 0 && (
+                            <div className="mt-8">
+                              <div className="muted mono mb-4" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>Capabilities</div>
+                              <div className="row gap-4" style={{flexWrap:"wrap"}}>
+                                {detail.capabilities.map((c, i) => (
+                                  <span key={i} className="badge plain" style={{fontSize:10}}>{c}</span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {detail.homepage && (
+                            <div className="mt-8 dim mono" style={{fontSize:10.5}}>
+                              <span>homepage: </span>
+                              <a href={detail.homepage} target="_blank" rel="noreferrer" style={{color:"var(--rust)"}}>{detail.homepage}</a>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -4904,6 +4988,35 @@ function AuditPage() {
   };
   const [audit, , refresh] = usePolling(`/api/audit/recent?n=${windowSize}`, 8000);
   const [verify, verifyErr, verifyRefresh] = useApi("/api/audit/verify");
+  // Track an explicit user-triggered re-verify so the UI can show
+  // "verifying…" and a wall-clock timestamp of the last manual check.
+  const [verifyingNow, setVerifyingNow] = useState(false);
+  const [lastVerifiedAt, setLastVerifiedAt] = useState(null);
+  const forceReverify = async () => {
+    setVerifyingNow(true);
+    try {
+      await verifyRefresh();
+      setLastVerifiedAt(new Date());
+    } finally {
+      setVerifyingNow(false);
+    }
+  };
+  // Toast on each verify response so the operator gets explicit feedback
+  // even when the result happened to match the previous one (no banner
+  // diff to notice). Guard against initial mount with a ref.
+  const verifyToastedRef = React.useRef(null);
+  React.useEffect(() => {
+    if (!verify) return;
+    if (!lastVerifiedAt) return; // only toast user-triggered runs, not first auto-fetch
+    const key = `${verify.valid}-${verify.entries}-${lastVerifiedAt.getTime()}`;
+    if (verifyToastedRef.current === key) return;
+    verifyToastedRef.current = key;
+    if (verify.valid) {
+      toastOk(`Chain verified · ${verify.entries || 0} entries`);
+    } else {
+      toastErr(`Chain MISMATCH: ${verify.error || "see banner"}`);
+    }
+  }, [verify, lastVerifiedAt]);
   const [q, setQ] = useState("");
   // `pulse` is the hash prefix currently flashing in the list — set
   // by the route's ?h= query, cleared after 3.5s so the row relaxes.
@@ -5036,7 +5149,10 @@ function AuditPage() {
             ))}
           </div>
           <button className="btn ghost" onClick={() => { refresh(); verifyRefresh(); }}><I.refresh/></button>
-          <button className="btn ghost" onClick={verifyRefresh}><I.shield/> Verify chain</button>
+          <button className="btn ghost" onClick={forceReverify} disabled={verifyingNow}
+                  title="Force re-verify the audit chain end-to-end and toast the result">
+            <I.shield/> {verifyingNow ? "Verifying…" : "Verify chain"}
+          </button>
           <button className="btn ghost"
                   title={ql ? `Export ${entries.length} filtered entries as CSV` : "Export the loaded audit window as CSV"}
                   onClick={() => {
@@ -5074,12 +5190,24 @@ function AuditPage() {
           <div className="dim mono mt-4" style={{fontSize:11}}>depth {audit ? (audit.total != null ? audit.total.toLocaleString() : "—") : "…"}</div>
           <div className="divider"/>
           {verify ? (
-            <div className="row gap-6">
-              {verify.valid
-                ? <span className="badge live"><I.check/> verified</span>
-                : <span className="badge error"><I.warn/> mismatch</span>}
-              <span className="dim mono" style={{fontSize:11}}>{(verify.entries || []).length || verify.total || 0} entries</span>
-            </div>
+            <>
+              <div className="row gap-6">
+                {verify.valid
+                  ? <span className="badge live"><I.check/> verified</span>
+                  : <span className="badge error"><I.warn/> mismatch</span>}
+                <span className="dim mono" style={{fontSize:11}}>{(verify.entries || []).length || verify.total || 0} entries</span>
+              </div>
+              {lastVerifiedAt && (
+                <div className="dim mono mt-4" style={{fontSize:10.5}}>
+                  last manual check: {lastVerifiedAt.toLocaleTimeString("en-GB", { hour12: false })}
+                </div>
+              )}
+              {!verify.valid && verify.error && (
+                <div className="mono mt-4" style={{fontSize:10.5, color:"var(--crimson)", wordBreak:"break-word"}}>
+                  {verify.error}
+                </div>
+              )}
+            </>
           ) : <div className="dim mono" style={{fontSize:11}}>{verifyErr || "verifying…"}</div>}
         </div>
         <div className="col-3 card">
@@ -5160,7 +5288,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.59";
+  const version = (health && health.version) || "0.7.60";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 

@@ -83,7 +83,7 @@ function Sidebar({ page, go }) {
     setApprovalsCount(ids.length);
   });
   const uptime = health && health.uptime_seconds != null ? formatUptimeShort(health.uptime_seconds) : null;
-  return /* @__PURE__ */ React.createElement("nav", { className: "sidebar" }, /* @__PURE__ */ React.createElement("div", { className: "sb-brand" }, /* @__PURE__ */ React.createElement("div", { className: "sb-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sb-title" }, "Rusty Hand"), /* @__PURE__ */ React.createElement("div", { className: "sb-sub" }, "v0.7.59 \xB7 schema v8"))), /* @__PURE__ */ React.createElement("div", { className: "sb-nav", style: { flex: 1, overflow: "auto", padding: "6px 6px" } }, pinned.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-section-label", style: { marginTop: 4 } }, "Pinned"), pinned.map((id) => NAV.find((n) => n.id === id)).filter(Boolean).map((it) => {
+  return /* @__PURE__ */ React.createElement("nav", { className: "sidebar" }, /* @__PURE__ */ React.createElement("div", { className: "sb-brand" }, /* @__PURE__ */ React.createElement("div", { className: "sb-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sb-title" }, "Rusty Hand"), /* @__PURE__ */ React.createElement("div", { className: "sb-sub" }, "v0.7.60 \xB7 schema v8"))), /* @__PURE__ */ React.createElement("div", { className: "sb-nav", style: { flex: 1, overflow: "auto", padding: "6px 6px" } }, pinned.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-section-label", style: { marginTop: 4 } }, "Pinned"), pinned.map((id) => NAV.find((n) => n.id === id)).filter(Boolean).map((it) => {
     const active = page === it.id;
     const liveCount = it.id === "approvals" && approvalsCount != null ? approvalsCount : it.count;
     const liveBadge = it.id === "approvals" && approvalsCount > 0 ? "warn" : it.badge;
@@ -203,6 +203,14 @@ function CommandPalette({ open, onClose, go, openAgent }) {
     const sessions = sessionsResp && sessionsResp.sessions || [];
     const audit = auditResp && auditResp.entries || [];
     const matches = (s) => !ql || (s || "").toLowerCase().includes(ql);
+    const QUICK_ACTIONS = [
+      { id: "new-agent", label: "New agent", page: "agents", keys: "agent spawn create" },
+      { id: "new-workflow", label: "New workflow", page: "workflows", keys: "workflow pipeline" },
+      { id: "new-cron", label: "New cron job", page: "automation", keys: "cron schedule job" },
+      { id: "new-trigger", label: "New trigger", page: "automation", keys: "trigger event hook" }
+    ];
+    const quickActionMatches = (qa) => !ql || qa.label.toLowerCase().includes(ql) || qa.keys.toLowerCase().includes(ql) || "new add create".includes(ql);
+    const quickRows = QUICK_ACTIONS.filter(quickActionMatches).map((qa) => ({ kind: "action", id: qa.id, label: qa.label, sub: `\u2192 ${qa.page} \xB7 \u2318N`, page: qa.page }));
     const pageRows = NAV.filter((n) => !n.kind && matches(n.label)).map((n) => ({ kind: "page", id: n.id, label: n.label, sub: "page" }));
     const agentRows = agents.filter((a) => matches(a.name) || matches(a.model_name) || matches(a.id)).slice(0, 12).map((a) => ({ kind: "agent", id: a.id, label: a.name, sub: `${a.model_name || ""} \xB7 ${String(a.id).slice(0, 8)}` }));
     const wfRows = workflows.filter((w) => matches(w.name) || matches(w.description) || matches(w.id)).slice(0, 10).map((w) => ({ kind: "workflow", id: w.id, label: w.name || w.id, sub: w.description ? String(w.description).slice(0, 60) : "workflow" }));
@@ -210,9 +218,9 @@ function CommandPalette({ open, onClose, go, openAgent }) {
     const auditRows = ql && ql.length >= 3 ? audit.filter((e) => (e.hash || "").toLowerCase().startsWith(ql) || matches(e.action) || matches(e.agent_name)).slice(0, 10).map((e) => ({ kind: "audit", id: e.hash || String(e.seq), label: e.action || "(action)", sub: `${e.agent_name || "kernel"} \xB7 ${String(e.hash || "").slice(0, 8)}` })) : [];
     if (!ql) {
       const recent = loadRecentPicks().filter((r) => r.kind !== "audit");
-      return recent.concat(pageRows.filter((p) => !recent.some((r) => r.kind === "page" && r.id === p.id)));
+      return recent.concat(quickRows).concat(pageRows.filter((p) => !recent.some((r) => r.kind === "page" && r.id === p.id)));
     }
-    return pageRows.concat(agentRows, wfRows, sessionRows, auditRows);
+    return quickRows.concat(pageRows, agentRows, wfRows, sessionRows, auditRows);
   }, [open, q, agentsResp, wfResp, sessionsResp, auditResp]);
   React.useEffect(() => {
     setHighlight(0);
@@ -221,7 +229,12 @@ function CommandPalette({ open, onClose, go, openAgent }) {
     if (!row) return;
     pushRecentPick(row);
     if (row.kind === "page") go(row.id);
-    else if (row.kind === "agent") {
+    else if (row.kind === "action") {
+      go(row.page);
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("rh:hotkey:new", { detail: { page: row.page } }));
+      }, 60);
+    } else if (row.kind === "agent") {
       const a = (agentsResp && agentsResp.agents || []).find((x) => x.id === row.id);
       if (a) openAgent(normalizeAgent(a));
     } else if (row.kind === "workflow") go("workflows");

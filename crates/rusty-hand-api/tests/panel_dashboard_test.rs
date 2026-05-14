@@ -449,6 +449,11 @@ async fn dashboard_wires_write_paths() {
         ("bulkTrigSetEnabled", "Triggers bulk arm/disarm"),
         ("bulkRemove", "Bindings bulk remove"),
         ("HealthPage", "Health diagnostics page"),
+        // Iter 73-75: clawhub peek + audit re-verify + palette quick-actions
+        ("peekCache", "ClawHub peek detail cache"),
+        ("forceReverify", "Audit force re-verify handler"),
+        ("QUICK_ACTIONS", "Palette quick-action list"),
+        ("rh:hotkey:new", "Palette quick-action dispatch"),
     ];
     for (needle, what) in markers {
         assert!(
