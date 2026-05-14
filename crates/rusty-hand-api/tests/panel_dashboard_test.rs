@@ -104,6 +104,7 @@ async fn dashboard_includes_all_panel_modules() {
         ("McpPage", "pages.js must expose McpPage"),
         ("NetworkPage", "pages.js must expose NetworkPage"),
         ("BindingsPage", "pages.js must expose BindingsPage"),
+        ("HealthPage", "pages.js must expose HealthPage"),
         ("ToastHost", "api.js must expose ToastHost"),
         ("ErrorBoundary", "api.js must expose ErrorBoundary"),
         ("usePagination", "api.js must expose usePagination"),
@@ -444,6 +445,10 @@ async fn dashboard_wires_write_paths() {
         ("auditLevelOf", "Audit level classifier"),
         ("rh.panel.auditLevel", "Audit level filter persistence"),
         ("/api/config/export", "Config TOML export endpoint"),
+        // Iter 69-71: triggers bulk + bindings bulk + Health page
+        ("bulkTrigSetEnabled", "Triggers bulk arm/disarm"),
+        ("bulkRemove", "Bindings bulk remove"),
+        ("HealthPage", "Health diagnostics page"),
     ];
     for (needle, what) in markers {
         assert!(

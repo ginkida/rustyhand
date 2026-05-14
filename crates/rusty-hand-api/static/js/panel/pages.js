@@ -22,7 +22,7 @@ function OverviewPage({ go }) {
     refreshApprovals();
   };
   const approvalRows = approvalsResp && approvalsResp.approvals || D.approvals;
-  const version = health && health.version || "0.7.58";
+  const version = health && health.version || "0.7.59";
   const uptime = health && health.uptime_seconds ? formatUptime(health.uptime_seconds) : null;
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(Banner, { go, onboarding }), /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Overview"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "System pulse \xB7 kernel ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v", version), uptime && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 uptime ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, uptime)), " ", "\xB7 schema ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v8"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null), " Refresh"), /* @__PURE__ */ React.createElement("button", { className: "btn primary" }, /* @__PURE__ */ React.createElement(I.plus, null), " New agent"))), /* @__PURE__ */ React.createElement("div", { className: "tiles" }, /* @__PURE__ */ React.createElement(Tile, { label: "Agents running", value: `${live}`, foot: `of ${totalAgents} total`, spark: sparkOf(agents.map((_, i) => live + (i % 3 - 1)), 12) }), /* @__PURE__ */ React.createElement(Tile, { label: "Cost \xB7 today", value: `$${(cost24 || 0).toFixed(2)}`, foot: usage ? "from /api/usage/daily" : "loading\u2026", spark: days.slice(-12).map((d) => d.cost_usd || 0) }), /* @__PURE__ */ React.createElement(Tile, { label: "Audit entries", value: audit && audit.total != null ? audit.total.toLocaleString() : "\u2014", foot: audit && audit.tip_hash ? `tip ${String(audit.tip_hash).slice(0, 8)}` : "loading\u2026", spark: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] }), /* @__PURE__ */ React.createElement(Tile, { label: "Errors \xB7 agents", value: `${errors}`, foot: errors ? `${errors} crashed agent(s)` : "all green", spark: [0, 0, 1, 0, 0, 0, 0, 0, errors, 0, 0, 0], deltaCls: "up", warn: errors > 0 })), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 col" }, /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Live activity"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: refreshAudit }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost" }, /* @__PURE__ */ React.createElement(I.download, null), " Export"))), /* @__PURE__ */ React.createElement(ActivityFeed, { entries: audit && audit.entries })), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Approvals \xB7 waiting"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("approvals") }, "Open queue"))), approvalRows.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, "No approvals waiting.") : /* @__PURE__ */ React.createElement(ApprovalsTable, { rows: approvalRows.slice(0, 3), compact: true, onChange: refreshApprovals }))), /* @__PURE__ */ React.createElement("div", { className: "col-4 col" }, onboarding && onboarding.demo_mode && /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Demo seed"), /* @__PURE__ */ React.createElement("span", { className: "badge demo" }, /* @__PURE__ */ React.createElement("span", { className: "dot demo" }), "active")), /* @__PURE__ */ React.createElement("div", { className: "col gap-8" }, /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.agents, null), title: "rusty", sub: "welcome agent \xB7 chat-ready", onClick: () => go("chat") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.workflows, null), title: "demo-pipeline", sub: "2-step sample workflow \xB7 click to run", onClick: () => go("workflows") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.event, null), title: "sample trigger", sub: "agent-spawn on webhook", onClick: () => go("automation") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.cron, null), title: "demo-daily-ping", sub: "cron 0 9 * * * \xB7 disabled", onClick: () => go("automation") }))), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Providers"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("settings") }, "Manage")), /* @__PURE__ */ React.createElement(ProvidersList, { providers: providersResp && providersResp.providers })), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Audit chain"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("audit") }, "View")), /* @__PURE__ */ React.createElement("div", { className: "col gap-4" }, /* @__PURE__ */ React.createElement(AuditSummary, { audit }))))));
 }
@@ -1801,6 +1801,7 @@ function AutomationPage() {
   const [cronResp, , refreshCron] = usePolling("/api/cron/jobs", 15e3);
   const [trigResp, , refreshTrig] = usePolling("/api/triggers", 15e3);
   const [cronSelected, setCronSelected] = useState(() => /* @__PURE__ */ new Set());
+  const [trigSelected, setTrigSelected] = useState(() => /* @__PURE__ */ new Set());
   React.useEffect(() => {
     const onNew = (e) => {
       if (e.detail && e.detail.page === "automation") setShowCreate(true);
@@ -1887,6 +1888,56 @@ function AutomationPage() {
     else toastOk(`${label}d ${okCount} job(s)`);
     refreshCron();
   };
+  React.useEffect(() => {
+    if (trigSelected.size === 0) return;
+    const live = new Set(triggers.map((t) => t.id));
+    const next = new Set([...trigSelected].filter((id) => live.has(id)));
+    if (next.size !== trigSelected.size) setTrigSelected(next);
+  }, [triggers.map((t) => t.id).join(",")]);
+  const toggleTrigSelect = (id) => {
+    setTrigSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const toggleAllTrig = () => {
+    setTrigSelected((prev) => {
+      if (triggers.length === 0) return prev;
+      if (prev.size === triggers.length) return /* @__PURE__ */ new Set();
+      return new Set(triggers.map((t) => t.id));
+    });
+  };
+  const bulkTrigSetEnabled = async (target) => {
+    const ids = [...trigSelected];
+    if (ids.length === 0) return;
+    const label = target ? "Arm" : "Disarm";
+    const ok = await confirmDialog({
+      title: `${label} ${ids.length} trigger(s)?`,
+      message: `${label} all selected triggers. Disarmed triggers do not match incoming events until re-armed.`,
+      confirmLabel: `${label} ${ids.length}`,
+      danger: !target
+    });
+    if (!ok) return;
+    let okCount = 0, failCount = 0;
+    for (const id of ids) {
+      try {
+        await rhFetch(`/api/triggers/${encodeURIComponent(id)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: target })
+        });
+        okCount++;
+      } catch (_) {
+        failCount++;
+      }
+    }
+    setTrigSelected(/* @__PURE__ */ new Set());
+    if (failCount > 0) toastErr(`${label.toLowerCase()}: ${okCount} ok / ${failCount} failed`);
+    else toastOk(`${label}ed ${okCount} trigger(s)`);
+    refreshTrig();
+  };
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Automation"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Cron jobs survive restart \xB7 3 CronAction variants \xB7 trigger fire-counts persisted")), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => (tab === "cron" ? refreshCron : refreshTrig)() }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setShowCreate(true) }, /* @__PURE__ */ React.createElement(I.plus, null), " New ", tab === "cron" ? "job" : "trigger"))), /* @__PURE__ */ React.createElement("div", { className: "tabs" }, /* @__PURE__ */ React.createElement("button", { className: tab === "cron" ? "on" : "", onClick: () => setTab("cron") }, "Cron jobs \xB7 ", cron.length), /* @__PURE__ */ React.createElement("button", { className: tab === "triggers" ? "on" : "", onClick: () => setTab("triggers") }, "Triggers \xB7 ", triggers.length)), tab === "cron" && /* @__PURE__ */ React.createElement(React.Fragment, null, cronSelected.size > 0 && /* @__PURE__ */ React.createElement("div", { className: "bulk-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 12 } }, cronSelected.size, " selected"), /* @__PURE__ */ React.createElement("button", { className: "btn sm primary", onClick: () => bulkSetEnabled(true) }, /* @__PURE__ */ React.createElement(I.play, null), " Enable ", cronSelected.size), /* @__PURE__ */ React.createElement("button", { className: "btn sm danger", onClick: () => bulkSetEnabled(false) }, /* @__PURE__ */ React.createElement(I.pause, null), " Disable ", cronSelected.size), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => setCronSelected(/* @__PURE__ */ new Set()), style: { marginLeft: "auto" } }, "Clear")), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { style: { width: 28 } }, /* @__PURE__ */ React.createElement(
     "input",
     {
@@ -1911,14 +1962,33 @@ function AutomationPage() {
         onChange: () => toggleCronSelect(c.id)
       }
     )), /* @__PURE__ */ React.createElement("td", { className: "mono" }, c.id), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: "mono", style: { color: "var(--rust)" } }, c.schedule || c.cron || c.expression)), /* @__PURE__ */ React.createElement("td", { className: "mono", style: { maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, actionLabel), /* @__PURE__ */ React.createElement("td", { className: "mono muted" }, next === "\u2014" ? next : formatTime(next)), /* @__PURE__ */ React.createElement("td", { className: "num mono" }, Number(fires).toLocaleString()), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("div", { className: "switch " + (c.enabled ? "on" : ""), onClick: () => toggleCron(c.id, c.enabled) })), /* @__PURE__ */ React.createElement("td", { className: "right" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => runCronNow(c.id) }, "Run now")));
-  }))))), tab === "triggers" && /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "ID"), /* @__PURE__ */ React.createElement("th", null, "Kind"), /* @__PURE__ */ React.createElement("th", null, "Target"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Fired"), /* @__PURE__ */ React.createElement("th", null, "Last"), /* @__PURE__ */ React.createElement("th", null, "Status"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, !trigResp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 7, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), trigResp && triggers.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 7, style: { padding: "24px 14px", textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 12, marginBottom: 8 } }, "No triggers configured."), /* @__PURE__ */ React.createElement("button", { className: "btn primary sm", onClick: () => setShowCreate(true) }, /* @__PURE__ */ React.createElement(I.plus, null), " Add your first trigger"))), triggers.map((t) => {
+  }))))), tab === "triggers" && /* @__PURE__ */ React.createElement(React.Fragment, null, trigSelected.size > 0 && /* @__PURE__ */ React.createElement("div", { className: "bulk-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 12 } }, trigSelected.size, " selected"), /* @__PURE__ */ React.createElement("button", { className: "btn sm primary", onClick: () => bulkTrigSetEnabled(true) }, /* @__PURE__ */ React.createElement(I.play, null), " Arm ", trigSelected.size), /* @__PURE__ */ React.createElement("button", { className: "btn sm danger", onClick: () => bulkTrigSetEnabled(false) }, /* @__PURE__ */ React.createElement(I.pause, null), " Disarm ", trigSelected.size), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => setTrigSelected(/* @__PURE__ */ new Set()), style: { marginLeft: "auto" } }, "Clear")), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { style: { width: 28 } }, /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "checkbox",
+      checked: triggers.length > 0 && trigSelected.size === triggers.length,
+      ref: (el) => {
+        if (el) el.indeterminate = trigSelected.size > 0 && trigSelected.size < triggers.length;
+      },
+      onChange: toggleAllTrig,
+      title: trigSelected.size === triggers.length ? "Deselect all" : "Select all"
+    }
+  )), /* @__PURE__ */ React.createElement("th", null, "ID"), /* @__PURE__ */ React.createElement("th", null, "Kind"), /* @__PURE__ */ React.createElement("th", null, "Target"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Fired"), /* @__PURE__ */ React.createElement("th", null, "Last"), /* @__PURE__ */ React.createElement("th", null, "Status"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, !trigResp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 8, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), trigResp && triggers.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 8, style: { padding: "24px 14px", textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 12, marginBottom: 8 } }, "No triggers configured."), /* @__PURE__ */ React.createElement("button", { className: "btn primary sm", onClick: () => setShowCreate(true) }, /* @__PURE__ */ React.createElement(I.plus, null), " Add your first trigger"))), triggers.map((t) => {
     const kind = (t.kind || t.type || "\u2014").toString();
     const target = t.target || t.agent_id || t.workflow_id || "\u2014";
     const fired = t.fire_count != null ? t.fire_count : t.fired || 0;
     const last = t.last_fired || t.last || null;
     const status = (t.status || (t.enabled ? "active" : "armed")).toString();
-    return /* @__PURE__ */ React.createElement("tr", { key: t.id }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, t.id), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: "row gap-6", style: { color: "var(--fg-2)" } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--rust)", display: "inline-flex" } }, /* @__PURE__ */ React.createElement(ChannelIcon, { kind })), /* @__PURE__ */ React.createElement("span", { className: "mono" }, kind))), /* @__PURE__ */ React.createElement("td", { className: "mono" }, target), /* @__PURE__ */ React.createElement("td", { className: "num mono" }, Number(fired).toLocaleString()), /* @__PURE__ */ React.createElement("td", { className: "mono muted" }, last ? formatTime(last) : "\u2014"), /* @__PURE__ */ React.createElement("td", null, status === "active" ? /* @__PURE__ */ React.createElement("span", { className: "badge live" }, "active") : /* @__PURE__ */ React.createElement("span", { className: "badge violet" }, status)), /* @__PURE__ */ React.createElement("td", { className: "right" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost" }, /* @__PURE__ */ React.createElement(I.more, null))));
-  })))), showCreate && tab === "cron" && /* @__PURE__ */ React.createElement(CronJobModal, { onClose: () => setShowCreate(false), onCreated: () => {
+    const isSel = trigSelected.has(t.id);
+    return /* @__PURE__ */ React.createElement("tr", { key: t.id, style: isSel ? { background: "var(--surface-2)" } : null }, /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "checkbox",
+        checked: isSel,
+        onChange: () => toggleTrigSelect(t.id)
+      }
+    )), /* @__PURE__ */ React.createElement("td", { className: "mono" }, t.id), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: "row gap-6", style: { color: "var(--fg-2)" } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--rust)", display: "inline-flex" } }, /* @__PURE__ */ React.createElement(ChannelIcon, { kind })), /* @__PURE__ */ React.createElement("span", { className: "mono" }, kind))), /* @__PURE__ */ React.createElement("td", { className: "mono" }, target), /* @__PURE__ */ React.createElement("td", { className: "num mono" }, Number(fired).toLocaleString()), /* @__PURE__ */ React.createElement("td", { className: "mono muted" }, last ? formatTime(last) : "\u2014"), /* @__PURE__ */ React.createElement("td", null, status === "active" ? /* @__PURE__ */ React.createElement("span", { className: "badge live" }, "active") : /* @__PURE__ */ React.createElement("span", { className: "badge violet" }, status)), /* @__PURE__ */ React.createElement("td", { className: "right" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost" }, /* @__PURE__ */ React.createElement(I.more, null))));
+  }))))), showCreate && tab === "cron" && /* @__PURE__ */ React.createElement(CronJobModal, { onClose: () => setShowCreate(false), onCreated: () => {
     setShowCreate(false);
     refreshCron();
   } }), showCreate && tab === "triggers" && /* @__PURE__ */ React.createElement(TriggerModal, { onClose: () => setShowCreate(false), onCreated: () => {
@@ -2992,7 +3062,7 @@ function SettingsPage() {
   const users = usersResp && usersResp.users || [];
   const apiListen = config && (config.api_listen || config.api && config.api.listen) || "\u2014";
   const proxy = config && (config.proxy_url || config.proxy && config.proxy.url) || null;
-  const version = health && health.version || "0.7.58";
+  const version = health && health.version || "0.7.59";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "\u2014";
   const agentCount = health && health.agent_count != null ? health.agent_count : "\u2014";
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Settings"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Config at ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "~/.rustyhand/config.toml"), " \xB7 50+ fields with serde defaults \xB7 live from ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/config"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement(
@@ -3362,9 +3432,56 @@ function NetworkPage() {
     refreshPeers();
   } }, /* @__PURE__ */ React.createElement(I.refresh, null)))), /* @__PURE__ */ React.createElement("div", { className: "tiles" }, /* @__PURE__ */ React.createElement(Tile, { label: "Network state", value: status ? status.enabled ? "enabled" : "disabled" : "\u2026", foot: status && status.node_id ? `node ${String(status.node_id).slice(0, 12)}` : "no node id", spark: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }), /* @__PURE__ */ React.createElement(Tile, { label: "Listen address", value: status && status.listen_address ? String(status.listen_address) : "\u2014", foot: status ? "TCP" : "loading\u2026", spark: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }), /* @__PURE__ */ React.createElement(Tile, { label: "Connected peers", value: status ? status.connected_peers != null ? String(status.connected_peers) : "\u2014" : "\u2026", foot: status ? `${status.total_peers || 0} known` : "loading\u2026", spark: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }), /* @__PURE__ */ React.createElement(Tile, { label: "Loaded peers", value: `${peers.length}`, foot: peers.length === 0 ? "no peers" : "see below", spark: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] })), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Known peers")), /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Node ID"), /* @__PURE__ */ React.createElement("th", null, "Address"), /* @__PURE__ */ React.createElement("th", null, "State"), /* @__PURE__ */ React.createElement("th", null, "Last seen"))), /* @__PURE__ */ React.createElement("tbody", null, !peersResp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 4, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), peersResp && peers.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 4, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "No peers \u2014 network may be disabled or no peer has connected yet.")), peers.map((p, i) => /* @__PURE__ */ React.createElement("tr", { key: p.node_id || p.id || i }, /* @__PURE__ */ React.createElement("td", { className: "mono", style: { maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" } }, p.node_id || p.id || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "mono" }, p.address || p.endpoint || "\u2014"), /* @__PURE__ */ React.createElement("td", null, p.state ? /* @__PURE__ */ React.createElement("span", { className: "badge " + (String(p.state).toLowerCase() === "connected" ? "live" : "idle") }, p.state) : /* @__PURE__ */ React.createElement("span", { className: "badge idle" }, "\u2014")), /* @__PURE__ */ React.createElement("td", { className: "mono muted" }, p.last_seen ? relativeTime(p.last_seen) : "\u2014")))))));
 }
+function HealthPage() {
+  const [health, , refreshHealth] = usePolling("/api/health/detail", 1e4);
+  const [audit, , refreshAudit] = usePolling("/api/audit/verify", 3e4);
+  const [net] = usePolling("/api/network/status", 15e3);
+  const [mcp] = usePolling("/api/mcp/servers", 3e4);
+  const [onb] = usePolling("/api/onboarding", 3e4);
+  const [usage] = usePolling("/api/usage/daily", 2e4);
+  const allWarns = health && health.config_warnings || [];
+  const refresh = () => {
+    refreshHealth();
+    refreshAudit();
+  };
+  let overall = "green", overallLabel = "all systems normal";
+  if (health) {
+    if (health.status !== "ok") {
+      overall = "red";
+      overallLabel = `kernel status: ${health.status}`;
+    } else if (audit && audit.valid === false) {
+      overall = "red";
+      overallLabel = "audit chain mismatch";
+    } else if (health.panic_count > 0 || health.restart_count > 0) {
+      overall = "amber";
+      overallLabel = `${health.panic_count || 0} panic(s), ${health.restart_count || 0} restart(s)`;
+    } else if (allWarns.length > 0) {
+      overall = "amber";
+      overallLabel = `${allWarns.length} config warning(s)`;
+    }
+  } else {
+    overallLabel = "checking\u2026";
+  }
+  const dotCls = overall === "red" ? "err" : overall === "amber" ? "warn" : "live";
+  const badgeCls = overall === "red" ? "error" : overall === "amber" ? "warn" : "live";
+  const todayCost = usage && (usage.cost_usd_today || usage.cost_usd || usage.total_cost_usd) || 0;
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Health"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Live diagnostics \xB7 health/detail + audit/verify + network/status + mcp/servers")), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null)))), /* @__PURE__ */ React.createElement("div", { className: "banner mb-12", style: {
+    borderColor: overall === "red" ? "oklch(0.66 0.18 25 / .35)" : overall === "amber" ? "oklch(0.78 0.14 88 / .35)" : "oklch(0.66 0.15 155 / .35)"
+  } }, /* @__PURE__ */ React.createElement("span", { className: "dot " + dotCls }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, overall === "green" ? "HEALTHY" : overall === "amber" ? "DEGRADED" : "ATTENTION"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, overallLabel), /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 10.5, marginLeft: "auto" } }, "polls 10s")), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-6 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Kernel"), !health && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, "loading\u2026"), health && /* @__PURE__ */ React.createElement("div", { className: "kv" }, /* @__PURE__ */ React.createElement("dt", null, "status"), /* @__PURE__ */ React.createElement("dd", null, /* @__PURE__ */ React.createElement("span", { className: "badge " + badgeCls }, health.status)), /* @__PURE__ */ React.createElement("dt", null, "version"), /* @__PURE__ */ React.createElement("dd", { className: "mono" }, health.version), /* @__PURE__ */ React.createElement("dt", null, "uptime"), /* @__PURE__ */ React.createElement("dd", { className: "mono" }, health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "\u2014"), /* @__PURE__ */ React.createElement("dt", null, "database"), /* @__PURE__ */ React.createElement("dd", null, health.database === "connected" ? /* @__PURE__ */ React.createElement("span", { className: "badge live" }, "connected") : /* @__PURE__ */ React.createElement("span", { className: "badge error" }, health.database)), /* @__PURE__ */ React.createElement("dt", null, "agents"), /* @__PURE__ */ React.createElement("dd", { className: "num mono" }, health.agent_count), /* @__PURE__ */ React.createElement("dt", null, "panics"), /* @__PURE__ */ React.createElement("dd", { className: "num mono", style: { color: health.panic_count > 0 ? "var(--crimson)" : void 0 } }, health.panic_count), /* @__PURE__ */ React.createElement("dt", null, "restarts"), /* @__PURE__ */ React.createElement("dd", { className: "num mono", style: { color: health.restart_count > 0 ? "var(--amber)" : void 0 } }, health.restart_count))), /* @__PURE__ */ React.createElement("div", { className: "col-6 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Audit chain"), !audit && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, "verifying\u2026"), audit && /* @__PURE__ */ React.createElement("div", { className: "kv" }, /* @__PURE__ */ React.createElement("dt", null, "integrity"), /* @__PURE__ */ React.createElement("dd", null, audit.valid ? /* @__PURE__ */ React.createElement("span", { className: "badge live" }, /* @__PURE__ */ React.createElement(I.check, null), " verified") : /* @__PURE__ */ React.createElement("span", { className: "badge error" }, /* @__PURE__ */ React.createElement(I.warn, null), " mismatch")), /* @__PURE__ */ React.createElement("dt", null, "entries"), /* @__PURE__ */ React.createElement("dd", { className: "num mono" }, (audit.entries || []).length || audit.total || 0), /* @__PURE__ */ React.createElement("dt", null, "tip hash"), /* @__PURE__ */ React.createElement("dd", { className: "mono", style: { wordBreak: "break-all", fontSize: 11 } }, audit.tip_hash ? String(audit.tip_hash).slice(0, 24) + "\u2026" : "\u2014"), audit.warning && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("dt", null, "warning"), /* @__PURE__ */ React.createElement("dd", { className: "mono dim", style: { fontSize: 11 } }, audit.warning)))), /* @__PURE__ */ React.createElement("div", { className: "col-6 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Network"), !net && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, "loading\u2026"), net && /* @__PURE__ */ React.createElement("div", { className: "kv" }, /* @__PURE__ */ React.createElement("dt", null, "state"), /* @__PURE__ */ React.createElement("dd", null, net.enabled ? /* @__PURE__ */ React.createElement("span", { className: "badge live" }, "enabled") : /* @__PURE__ */ React.createElement("span", { className: "badge idle" }, "disabled")), /* @__PURE__ */ React.createElement("dt", null, "listen"), /* @__PURE__ */ React.createElement("dd", { className: "mono" }, net.listen_address || "\u2014"), /* @__PURE__ */ React.createElement("dt", null, "node id"), /* @__PURE__ */ React.createElement("dd", { className: "mono", style: { wordBreak: "break-all", fontSize: 11 } }, net.node_id ? String(net.node_id).slice(0, 24) + "\u2026" : "\u2014"), /* @__PURE__ */ React.createElement("dt", null, "peers"), /* @__PURE__ */ React.createElement("dd", { className: "num mono" }, net.connected_peers != null ? net.connected_peers : "\u2014", net.total_peers != null && /* @__PURE__ */ React.createElement("span", { className: "dim" }, " / ", net.total_peers)))), /* @__PURE__ */ React.createElement("div", { className: "col-6 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "MCP servers"), !mcp && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, "loading\u2026"), mcp && /* @__PURE__ */ React.createElement("div", { className: "kv" }, /* @__PURE__ */ React.createElement("dt", null, "configured"), /* @__PURE__ */ React.createElement("dd", { className: "num mono" }, mcp.total_configured != null ? mcp.total_configured : (mcp.configured || []).length), /* @__PURE__ */ React.createElement("dt", null, "connected"), /* @__PURE__ */ React.createElement("dd", { className: "num mono" }, mcp.total_connected != null ? mcp.total_connected : (mcp.connected || []).length, mcp.total_configured > 0 && mcp.total_connected === 0 && /* @__PURE__ */ React.createElement("span", { className: "badge warn", style: { marginLeft: 6 } }, "none live")), /* @__PURE__ */ React.createElement("dt", null, "tools"), /* @__PURE__ */ React.createElement("dd", { className: "num mono" }, (mcp.connected || []).reduce((s, c) => s + (c.tools_count || (c.tools || []).length || 0), 0)))), /* @__PURE__ */ React.createElement("div", { className: "col-6 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Mode"), !onb && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, "loading\u2026"), onb && /* @__PURE__ */ React.createElement("div", { className: "kv" }, /* @__PURE__ */ React.createElement("dt", null, "demo"), /* @__PURE__ */ React.createElement("dd", null, onb.demo_mode ? /* @__PURE__ */ React.createElement("span", { className: "badge demo" }, "yes \xB7 ", onb.provider) : /* @__PURE__ */ React.createElement("span", { className: "badge live" }, "no \xB7 ", onb.provider)), /* @__PURE__ */ React.createElement("dt", null, "api key"), /* @__PURE__ */ React.createElement("dd", null, onb.api_key_set ? /* @__PURE__ */ React.createElement("span", { className: "badge live" }, "set") : /* @__PURE__ */ React.createElement("span", { className: "badge idle" }, "missing")), /* @__PURE__ */ React.createElement("dt", null, "model"), /* @__PURE__ */ React.createElement("dd", { className: "mono" }, onb.model || "\u2014"), /* @__PURE__ */ React.createElement("dt", null, "seeded"), /* @__PURE__ */ React.createElement("dd", null, onb.demo_seeded ? "yes" : "no"))), /* @__PURE__ */ React.createElement("div", { className: "col-6 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Today's spend"), !usage && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, "loading\u2026"), usage && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 22, color: todayCost > 5 ? "var(--amber)" : "var(--rust)" } }, "$", Number(todayCost).toFixed(4)), /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 11 } }, "Tokens: ", Number((usage.input_tokens || 0) + (usage.output_tokens || 0)).toLocaleString(), " \xB7", " ", "Calls: ", Number(usage.tool_calls || 0).toLocaleString()))), allWarns.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "col-12 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Config warnings ", /* @__PURE__ */ React.createElement("span", { className: "dim", style: { marginLeft: 6 } }, allWarns.length)), /* @__PURE__ */ React.createElement("div", { className: "col gap-4" }, allWarns.map((w, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "row gap-6", style: {
+    padding: "5px 8px",
+    background: "var(--bg-2)",
+    borderRadius: 5,
+    fontFamily: "var(--ff-mono)",
+    fontSize: 11.5
+  } }, /* @__PURE__ */ React.createElement("span", { className: "dot warn" }), /* @__PURE__ */ React.createElement("span", null, typeof w === "string" ? w : w.message || JSON.stringify(w))))))));
+}
 function BindingsPage() {
   const [resp, fetchErr, refresh] = usePolling("/api/bindings", 3e4);
   const bindings = resp && resp.bindings || [];
+  const [selected, setSelected] = useState(() => /* @__PURE__ */ new Set());
+  React.useEffect(() => {
+    setSelected(/* @__PURE__ */ new Set());
+  }, [resp && bindings.length]);
   const remove = async (index) => {
     if (!await confirmDialog({ title: "Remove binding", message: `Remove binding #${index}?`, danger: true, confirmLabel: "Remove" })) return;
     try {
@@ -3375,7 +3492,67 @@ function BindingsPage() {
       toastErr(`Remove failed: ${e.message || e}`);
     }
   };
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Bindings ", /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 14 } }, "\xB7 ", bindings.length)), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Agent \u2192 channel/trigger bindings \xB7 live from ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/bindings"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null)))), fetchErr && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "API ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, fetchErr)), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "#"), /* @__PURE__ */ React.createElement("th", null, "Agent"), /* @__PURE__ */ React.createElement("th", null, "Kind"), /* @__PURE__ */ React.createElement("th", null, "Target"), /* @__PURE__ */ React.createElement("th", null, "Pattern"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, !resp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 6, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), resp && bindings.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 6, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "No bindings configured.")), bindings.map((b, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "num mono" }, i), /* @__PURE__ */ React.createElement("td", { className: "mono" }, b.agent_id || b.agent || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "mono" }, b.kind || b.type || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "mono" }, b.target || b.channel || b.trigger || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "mono dim", style: { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" } }, b.pattern ? JSON.stringify(b.pattern) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "right" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm danger", onClick: () => remove(i), title: "Remove" }, /* @__PURE__ */ React.createElement(I.close, null)))))))));
+  const toggle = (i) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  };
+  const toggleAll = () => {
+    setSelected((prev) => {
+      if (bindings.length === 0) return prev;
+      if (prev.size === bindings.length) return /* @__PURE__ */ new Set();
+      return new Set(bindings.map((_, i) => i));
+    });
+  };
+  const bulkRemove = async () => {
+    const ids = [...selected].sort((a, b) => b - a);
+    if (ids.length === 0) return;
+    const ok = await confirmDialog({
+      title: `Remove ${ids.length} binding(s)?`,
+      message: "Bindings are positional \u2014 this loops indices from high to low so partial failure can't desync the remaining selection.",
+      danger: true,
+      confirmLabel: `Remove ${ids.length}`
+    });
+    if (!ok) return;
+    let okCount = 0, failCount = 0;
+    for (const i of ids) {
+      try {
+        await rhFetch(`/api/bindings/${i}`, { method: "DELETE" });
+        okCount++;
+      } catch (_) {
+        failCount++;
+      }
+    }
+    setSelected(/* @__PURE__ */ new Set());
+    if (failCount > 0) toastErr(`Removed ${okCount}, failed ${failCount}`);
+    else toastOk(`Removed ${okCount} binding(s)`);
+    refresh();
+  };
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Bindings ", /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 14 } }, "\xB7 ", bindings.length)), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Agent \u2192 channel/trigger bindings \xB7 live from ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/bindings"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null)))), selected.size > 0 && /* @__PURE__ */ React.createElement("div", { className: "bulk-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 12 } }, selected.size, " selected"), /* @__PURE__ */ React.createElement("button", { className: "btn sm danger", onClick: bulkRemove }, /* @__PURE__ */ React.createElement(I.trash, null), " Remove ", selected.size), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => setSelected(/* @__PURE__ */ new Set()), style: { marginLeft: "auto" } }, "Clear")), fetchErr && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "API ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, fetchErr)), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { style: { width: 28 } }, /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "checkbox",
+      checked: bindings.length > 0 && selected.size === bindings.length,
+      ref: (el) => {
+        if (el) el.indeterminate = selected.size > 0 && selected.size < bindings.length;
+      },
+      onChange: toggleAll,
+      title: selected.size === bindings.length ? "Deselect all" : "Select all"
+    }
+  )), /* @__PURE__ */ React.createElement("th", null, "#"), /* @__PURE__ */ React.createElement("th", null, "Agent"), /* @__PURE__ */ React.createElement("th", null, "Kind"), /* @__PURE__ */ React.createElement("th", null, "Target"), /* @__PURE__ */ React.createElement("th", null, "Pattern"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, !resp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 7, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), resp && bindings.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 7, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "No bindings configured.")), bindings.map((b, i) => {
+    const isSel = selected.has(i);
+    return /* @__PURE__ */ React.createElement("tr", { key: i, style: isSel ? { background: "var(--surface-2)" } : null }, /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "checkbox",
+        checked: isSel,
+        onChange: () => toggle(i)
+      }
+    )), /* @__PURE__ */ React.createElement("td", { className: "num mono" }, i), /* @__PURE__ */ React.createElement("td", { className: "mono" }, b.agent_id || b.agent || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "mono" }, b.kind || b.type || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "mono" }, b.target || b.channel || b.trigger || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "mono dim", style: { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" } }, b.pattern ? JSON.stringify(b.pattern) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "right" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm danger", onClick: () => remove(i), title: "Remove" }, /* @__PURE__ */ React.createElement(I.close, null))));
+  })))));
 }
 Object.assign(window, {
   OverviewPage,
@@ -3394,5 +3571,6 @@ Object.assign(window, {
   MemoryPage,
   McpPage,
   NetworkPage,
-  BindingsPage
+  BindingsPage,
+  HealthPage
 });

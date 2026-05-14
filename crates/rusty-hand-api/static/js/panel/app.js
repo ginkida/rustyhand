@@ -33,6 +33,7 @@ const NAV = [
   { id: "memory", label: "Memory", icon: /* @__PURE__ */ React.createElement(I.audit, null), count: null },
   { id: "audit", label: "Audit log", icon: /* @__PURE__ */ React.createElement(I.audit, null), count: null },
   { kind: "section", label: "System" },
+  { id: "health", label: "Health", icon: /* @__PURE__ */ React.createElement(I.shield, null), count: null },
   { id: "mcp", label: "MCP servers", icon: /* @__PURE__ */ React.createElement(I.cpu, null), count: null },
   { id: "network", label: "Network", icon: /* @__PURE__ */ React.createElement(I.link, null), count: null },
   { id: "bindings", label: "Bindings", icon: /* @__PURE__ */ React.createElement(I.link, null), count: null },
@@ -82,7 +83,7 @@ function Sidebar({ page, go }) {
     setApprovalsCount(ids.length);
   });
   const uptime = health && health.uptime_seconds != null ? formatUptimeShort(health.uptime_seconds) : null;
-  return /* @__PURE__ */ React.createElement("nav", { className: "sidebar" }, /* @__PURE__ */ React.createElement("div", { className: "sb-brand" }, /* @__PURE__ */ React.createElement("div", { className: "sb-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sb-title" }, "Rusty Hand"), /* @__PURE__ */ React.createElement("div", { className: "sb-sub" }, "v0.7.58 \xB7 schema v8"))), /* @__PURE__ */ React.createElement("div", { className: "sb-nav", style: { flex: 1, overflow: "auto", padding: "6px 6px" } }, pinned.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-section-label", style: { marginTop: 4 } }, "Pinned"), pinned.map((id) => NAV.find((n) => n.id === id)).filter(Boolean).map((it) => {
+  return /* @__PURE__ */ React.createElement("nav", { className: "sidebar" }, /* @__PURE__ */ React.createElement("div", { className: "sb-brand" }, /* @__PURE__ */ React.createElement("div", { className: "sb-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sb-title" }, "Rusty Hand"), /* @__PURE__ */ React.createElement("div", { className: "sb-sub" }, "v0.7.59 \xB7 schema v8"))), /* @__PURE__ */ React.createElement("div", { className: "sb-nav", style: { flex: 1, overflow: "auto", padding: "6px 6px" } }, pinned.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-section-label", style: { marginTop: 4 } }, "Pinned"), pinned.map((id) => NAV.find((n) => n.id === id)).filter(Boolean).map((it) => {
     const active = page === it.id;
     const liveCount = it.id === "approvals" && approvalsCount != null ? approvalsCount : it.count;
     const liveBadge = it.id === "approvals" && approvalsCount > 0 ? "warn" : it.badge;
@@ -150,6 +151,7 @@ const CRUMBS = {
   skills: ["RustyHand", "Skills"],
   approvals: ["RustyHand", "Approvals"],
   audit: ["RustyHand", "Audit log"],
+  health: ["RustyHand", "Health"],
   mcp: ["RustyHand", "MCP servers"],
   network: ["RustyHand", "Network"],
   bindings: ["RustyHand", "Bindings"],
@@ -593,6 +595,7 @@ function App() {
   else if (page === "analytics") pageEl = /* @__PURE__ */ React.createElement(AnalyticsPage, null);
   else if (page === "knowledge") pageEl = /* @__PURE__ */ React.createElement(KnowledgePage, null);
   else if (page === "memory") pageEl = /* @__PURE__ */ React.createElement(MemoryPage, null);
+  else if (page === "health") pageEl = /* @__PURE__ */ React.createElement(HealthPage, null);
   else if (page === "mcp") pageEl = /* @__PURE__ */ React.createElement(McpPage, null);
   else if (page === "network") pageEl = /* @__PURE__ */ React.createElement(NetworkPage, null);
   else if (page === "bindings") pageEl = /* @__PURE__ */ React.createElement(BindingsPage, null);

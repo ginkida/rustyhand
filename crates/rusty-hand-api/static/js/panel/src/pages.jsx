@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.58";
+  const version = (health && health.version) || "0.7.59";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -3005,6 +3005,7 @@ function AutomationPage() {
   const [cronResp, , refreshCron] = usePolling("/api/cron/jobs", 15000);
   const [trigResp, , refreshTrig] = usePolling("/api/triggers", 15000);
   const [cronSelected, setCronSelected] = useState(() => new Set());
+  const [trigSelected, setTrigSelected] = useState(() => new Set());
 
   React.useEffect(() => {
     const onNew = (e) => { if (e.detail && e.detail.page === "automation") setShowCreate(true); };
@@ -3096,6 +3097,58 @@ function AutomationPage() {
     refreshCron();
   };
 
+  // Same pattern as cron bulk for triggers — armed/disarmed via PUT
+  // /api/triggers/{id} with {enabled: bool}. Falls back to "armed" label
+  // when target=false because that's what the rest of the UI calls a
+  // not-yet-fired trigger.
+  React.useEffect(() => {
+    if (trigSelected.size === 0) return;
+    const live = new Set(triggers.map(t => t.id));
+    const next = new Set([...trigSelected].filter(id => live.has(id)));
+    if (next.size !== trigSelected.size) setTrigSelected(next);
+  }, [triggers.map(t => t.id).join(",")]);
+  const toggleTrigSelect = (id) => {
+    setTrigSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleAllTrig = () => {
+    setTrigSelected(prev => {
+      if (triggers.length === 0) return prev;
+      if (prev.size === triggers.length) return new Set();
+      return new Set(triggers.map(t => t.id));
+    });
+  };
+  const bulkTrigSetEnabled = async (target) => {
+    const ids = [...trigSelected];
+    if (ids.length === 0) return;
+    const label = target ? "Arm" : "Disarm";
+    const ok = await confirmDialog({
+      title: `${label} ${ids.length} trigger(s)?`,
+      message: `${label} all selected triggers. Disarmed triggers do not match incoming events until re-armed.`,
+      confirmLabel: `${label} ${ids.length}`,
+      danger: !target,
+    });
+    if (!ok) return;
+    let okCount = 0, failCount = 0;
+    for (const id of ids) {
+      try {
+        await rhFetch(`/api/triggers/${encodeURIComponent(id)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: target }),
+        });
+        okCount++;
+      } catch (_) { failCount++; }
+    }
+    setTrigSelected(new Set());
+    if (failCount > 0) toastErr(`${label.toLowerCase()}: ${okCount} ok / ${failCount} failed`);
+    else toastOk(`${label}ed ${okCount} trigger(s)`);
+    refreshTrig();
+  };
+
   return (
     <div>
       <div className="page-head">
@@ -3179,45 +3232,72 @@ function AutomationPage() {
       )}
 
       {tab === "triggers" && (
-        <div className="card flush">
-          <table className="tbl">
-            <thead><tr>
-              <th>ID</th><th>Kind</th><th>Target</th><th className="right">Fired</th><th>Last</th><th>Status</th><th></th>
-            </tr></thead>
-            <tbody>
-              {!trigResp && (<tr><td colSpan={7} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>)}
-              {trigResp && triggers.length === 0 && (
-                <tr><td colSpan={7} style={{padding:"24px 14px", textAlign:"center"}}>
-                  <div className="dim" style={{fontSize:12, marginBottom:8}}>No triggers configured.</div>
-                  <button className="btn primary sm" onClick={() => setShowCreate(true)}><I.plus/> Add your first trigger</button>
-                </td></tr>
-              )}
-              {triggers.map(t => {
-                const kind = (t.kind || t.type || "—").toString();
-                const target = t.target || t.agent_id || t.workflow_id || "—";
-                const fired = t.fire_count != null ? t.fire_count : (t.fired || 0);
-                const last = t.last_fired || t.last || null;
-                const status = (t.status || (t.enabled ? "active" : "armed")).toString();
-                return (
-                  <tr key={t.id}>
-                    <td className="mono">{t.id}</td>
-                    <td>
-                      <span className="row gap-6" style={{color:"var(--fg-2)"}}>
-                        <span style={{color:"var(--rust)",display:"inline-flex"}}><ChannelIcon kind={kind}/></span>
-                        <span className="mono">{kind}</span>
-                      </span>
-                    </td>
-                    <td className="mono">{target}</td>
-                    <td className="num mono">{Number(fired).toLocaleString()}</td>
-                    <td className="mono muted">{last ? formatTime(last) : "—"}</td>
-                    <td>{status === "active" ? <span className="badge live">active</span> : <span className="badge violet">{status}</span>}</td>
-                    <td className="right"><button className="btn sm ghost"><I.more/></button></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <>
+          {trigSelected.size > 0 && (
+            <div className="bulk-bar">
+              <span className="mono" style={{fontSize:12}}>{trigSelected.size} selected</span>
+              <button className="btn sm primary" onClick={() => bulkTrigSetEnabled(true)}>
+                <I.play/> Arm {trigSelected.size}
+              </button>
+              <button className="btn sm danger" onClick={() => bulkTrigSetEnabled(false)}>
+                <I.pause/> Disarm {trigSelected.size}
+              </button>
+              <button className="btn sm ghost" onClick={() => setTrigSelected(new Set())} style={{marginLeft:"auto"}}>Clear</button>
+            </div>
+          )}
+          <div className="card flush">
+            <table className="tbl">
+              <thead><tr>
+                <th style={{width:28}}>
+                  <input type="checkbox"
+                         checked={triggers.length > 0 && trigSelected.size === triggers.length}
+                         ref={el => { if (el) el.indeterminate = trigSelected.size > 0 && trigSelected.size < triggers.length; }}
+                         onChange={toggleAllTrig}
+                         title={trigSelected.size === triggers.length ? "Deselect all" : "Select all"}/>
+                </th>
+                <th>ID</th><th>Kind</th><th>Target</th><th className="right">Fired</th><th>Last</th><th>Status</th><th></th>
+              </tr></thead>
+              <tbody>
+                {!trigResp && (<tr><td colSpan={8} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>)}
+                {trigResp && triggers.length === 0 && (
+                  <tr><td colSpan={8} style={{padding:"24px 14px", textAlign:"center"}}>
+                    <div className="dim" style={{fontSize:12, marginBottom:8}}>No triggers configured.</div>
+                    <button className="btn primary sm" onClick={() => setShowCreate(true)}><I.plus/> Add your first trigger</button>
+                  </td></tr>
+                )}
+                {triggers.map(t => {
+                  const kind = (t.kind || t.type || "—").toString();
+                  const target = t.target || t.agent_id || t.workflow_id || "—";
+                  const fired = t.fire_count != null ? t.fire_count : (t.fired || 0);
+                  const last = t.last_fired || t.last || null;
+                  const status = (t.status || (t.enabled ? "active" : "armed")).toString();
+                  const isSel = trigSelected.has(t.id);
+                  return (
+                    <tr key={t.id} style={isSel ? {background:"var(--surface-2)"} : null}>
+                      <td>
+                        <input type="checkbox"
+                               checked={isSel}
+                               onChange={() => toggleTrigSelect(t.id)}/>
+                      </td>
+                      <td className="mono">{t.id}</td>
+                      <td>
+                        <span className="row gap-6" style={{color:"var(--fg-2)"}}>
+                          <span style={{color:"var(--rust)",display:"inline-flex"}}><ChannelIcon kind={kind}/></span>
+                          <span className="mono">{kind}</span>
+                        </span>
+                      </td>
+                      <td className="mono">{target}</td>
+                      <td className="num mono">{Number(fired).toLocaleString()}</td>
+                      <td className="mono muted">{last ? formatTime(last) : "—"}</td>
+                      <td>{status === "active" ? <span className="badge live">active</span> : <span className="badge violet">{status}</span>}</td>
+                      <td className="right"><button className="btn sm ghost"><I.more/></button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {showCreate && tab === "cron" && <CronJobModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); refreshCron(); }}/>}
@@ -5080,7 +5160,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.58";
+  const version = (health && health.version) || "0.7.59";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 
@@ -5705,10 +5785,207 @@ function NetworkPage() {
   );
 }
 
+/* ============================== HEALTH ============================== */
+// Read-only system diagnostics page. Aggregates the various status
+// endpoints (health/detail, audit/verify, network/status, mcp/servers,
+// onboarding) into a single dashboard so an operator can answer
+// "is the daemon healthy right now?" without bouncing between pages.
+function HealthPage() {
+  const [health, , refreshHealth] = usePolling("/api/health/detail", 10000);
+  const [audit, , refreshAudit] = usePolling("/api/audit/verify", 30000);
+  const [net] = usePolling("/api/network/status", 15000);
+  const [mcp] = usePolling("/api/mcp/servers", 30000);
+  const [onb] = usePolling("/api/onboarding", 30000);
+  const [usage] = usePolling("/api/usage/daily", 20000);
+  const allWarns = (health && health.config_warnings) || [];
+
+  const refresh = () => { refreshHealth(); refreshAudit(); };
+
+  // Roll-up traffic light: red if anything is failing or critical
+  // warnings present; amber if degraded or non-critical warnings;
+  // green if everything is normal.
+  let overall = "green", overallLabel = "all systems normal";
+  if (health) {
+    if (health.status !== "ok") { overall = "red"; overallLabel = `kernel status: ${health.status}`; }
+    else if (audit && audit.valid === false) { overall = "red"; overallLabel = "audit chain mismatch"; }
+    else if (health.panic_count > 0 || health.restart_count > 0) {
+      overall = "amber";
+      overallLabel = `${health.panic_count || 0} panic(s), ${health.restart_count || 0} restart(s)`;
+    }
+    else if (allWarns.length > 0) {
+      overall = "amber";
+      overallLabel = `${allWarns.length} config warning(s)`;
+    }
+  } else {
+    overallLabel = "checking…";
+  }
+
+  const dotCls = overall === "red" ? "err" : overall === "amber" ? "warn" : "live";
+  const badgeCls = overall === "red" ? "error" : overall === "amber" ? "warn" : "live";
+  const todayCost = (usage && (usage.cost_usd_today || usage.cost_usd || usage.total_cost_usd)) || 0;
+
+  return (
+    <div>
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">Health</h1>
+          <p className="page-sub">Live diagnostics · health/detail + audit/verify + network/status + mcp/servers</p>
+        </div>
+        <div className="page-actions">
+          <button className="btn ghost" onClick={refresh}><I.refresh/></button>
+        </div>
+      </div>
+
+      <div className="banner mb-12" style={{
+        borderColor: overall === "red" ? "oklch(0.66 0.18 25 / .35)"
+          : overall === "amber" ? "oklch(0.78 0.14 88 / .35)"
+          : "oklch(0.66 0.15 155 / .35)",
+      }}>
+        <span className={"dot " + dotCls}/>
+        <span className="banner-title">{overall === "green" ? "HEALTHY" : overall === "amber" ? "DEGRADED" : "ATTENTION"}</span>
+        <span className="banner-body mono" style={{fontSize:11}}>{overallLabel}</span>
+        <span className="dim mono" style={{fontSize:10.5, marginLeft:"auto"}}>polls 10s</span>
+      </div>
+
+      <div className="grid-12">
+        <div className="col-6 card">
+          <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Kernel</div>
+          {!health && <div className="dim mono" style={{fontSize:11}}>loading…</div>}
+          {health && (
+            <div className="kv">
+              <dt>status</dt><dd><span className={"badge " + badgeCls}>{health.status}</span></dd>
+              <dt>version</dt><dd className="mono">{health.version}</dd>
+              <dt>uptime</dt><dd className="mono">{health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—"}</dd>
+              <dt>database</dt><dd>{health.database === "connected"
+                ? <span className="badge live">connected</span>
+                : <span className="badge error">{health.database}</span>}</dd>
+              <dt>agents</dt><dd className="num mono">{health.agent_count}</dd>
+              <dt>panics</dt><dd className="num mono" style={{color: health.panic_count > 0 ? "var(--crimson)" : undefined}}>{health.panic_count}</dd>
+              <dt>restarts</dt><dd className="num mono" style={{color: health.restart_count > 0 ? "var(--amber)" : undefined}}>{health.restart_count}</dd>
+            </div>
+          )}
+        </div>
+
+        <div className="col-6 card">
+          <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Audit chain</div>
+          {!audit && <div className="dim mono" style={{fontSize:11}}>verifying…</div>}
+          {audit && (
+            <div className="kv">
+              <dt>integrity</dt><dd>{audit.valid
+                ? <span className="badge live"><I.check/> verified</span>
+                : <span className="badge error"><I.warn/> mismatch</span>}</dd>
+              <dt>entries</dt><dd className="num mono">{(audit.entries || []).length || audit.total || 0}</dd>
+              <dt>tip hash</dt><dd className="mono" style={{wordBreak:"break-all", fontSize:11}}>
+                {audit.tip_hash ? String(audit.tip_hash).slice(0, 24) + "…" : "—"}
+              </dd>
+              {audit.warning && <><dt>warning</dt><dd className="mono dim" style={{fontSize:11}}>{audit.warning}</dd></>}
+            </div>
+          )}
+        </div>
+
+        <div className="col-6 card">
+          <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Network</div>
+          {!net && <div className="dim mono" style={{fontSize:11}}>loading…</div>}
+          {net && (
+            <div className="kv">
+              <dt>state</dt><dd>{net.enabled
+                ? <span className="badge live">enabled</span>
+                : <span className="badge idle">disabled</span>}</dd>
+              <dt>listen</dt><dd className="mono">{net.listen_address || "—"}</dd>
+              <dt>node id</dt><dd className="mono" style={{wordBreak:"break-all", fontSize:11}}>
+                {net.node_id ? String(net.node_id).slice(0, 24) + "…" : "—"}
+              </dd>
+              <dt>peers</dt><dd className="num mono">{net.connected_peers != null ? net.connected_peers : "—"}{net.total_peers != null && <span className="dim"> / {net.total_peers}</span>}</dd>
+            </div>
+          )}
+        </div>
+
+        <div className="col-6 card">
+          <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>MCP servers</div>
+          {!mcp && <div className="dim mono" style={{fontSize:11}}>loading…</div>}
+          {mcp && (
+            <div className="kv">
+              <dt>configured</dt><dd className="num mono">{mcp.total_configured != null ? mcp.total_configured : (mcp.configured || []).length}</dd>
+              <dt>connected</dt><dd className="num mono">
+                {mcp.total_connected != null ? mcp.total_connected : (mcp.connected || []).length}
+                {mcp.total_configured > 0 && mcp.total_connected === 0 && (
+                  <span className="badge warn" style={{marginLeft:6}}>none live</span>
+                )}
+              </dd>
+              <dt>tools</dt><dd className="num mono">
+                {(mcp.connected || []).reduce((s, c) => s + (c.tools_count || (c.tools || []).length || 0), 0)}
+              </dd>
+            </div>
+          )}
+        </div>
+
+        <div className="col-6 card">
+          <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Mode</div>
+          {!onb && <div className="dim mono" style={{fontSize:11}}>loading…</div>}
+          {onb && (
+            <div className="kv">
+              <dt>demo</dt><dd>{onb.demo_mode
+                ? <span className="badge demo">yes · {onb.provider}</span>
+                : <span className="badge live">no · {onb.provider}</span>}</dd>
+              <dt>api key</dt><dd>{onb.api_key_set
+                ? <span className="badge live">set</span>
+                : <span className="badge idle">missing</span>}</dd>
+              <dt>model</dt><dd className="mono">{onb.model || "—"}</dd>
+              <dt>seeded</dt><dd>{onb.demo_seeded ? "yes" : "no"}</dd>
+            </div>
+          )}
+        </div>
+
+        <div className="col-6 card">
+          <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Today's spend</div>
+          {!usage && <div className="dim mono" style={{fontSize:11}}>loading…</div>}
+          {usage && (
+            <div>
+              <div className="mono" style={{fontSize:22, color: todayCost > 5 ? "var(--amber)" : "var(--rust)"}}>
+                ${Number(todayCost).toFixed(4)}
+              </div>
+              <div className="dim mono mt-4" style={{fontSize:11}}>
+                Tokens: {Number((usage.input_tokens || 0) + (usage.output_tokens || 0)).toLocaleString()} ·{" "}
+                Calls: {Number(usage.tool_calls || 0).toLocaleString()}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {allWarns.length > 0 && (
+          <div className="col-12 card">
+            <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>
+              Config warnings <span className="dim" style={{marginLeft:6}}>{allWarns.length}</span>
+            </div>
+            <div className="col gap-4">
+              {allWarns.map((w, i) => (
+                <div key={i} className="row gap-6" style={{
+                  padding:"5px 8px",
+                  background:"var(--bg-2)",
+                  borderRadius:5,
+                  fontFamily:"var(--ff-mono)",
+                  fontSize:11.5,
+                }}>
+                  <span className="dot warn"/>
+                  <span>{typeof w === "string" ? w : (w.message || JSON.stringify(w))}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ============================== BINDINGS ============================== */
 function BindingsPage() {
   const [resp, fetchErr, refresh] = usePolling("/api/bindings", 30000);
   const bindings = (resp && resp.bindings) || [];
+  // Indices are positional and shift on each delete, so the Set tracks
+  // the raw index values from the current render. We reset on refresh.
+  const [selected, setSelected] = useState(() => new Set());
+  React.useEffect(() => { setSelected(new Set()); }, [resp && bindings.length]);
 
   const remove = async (index) => {
     if (!(await confirmDialog({ title: "Remove binding", message: `Remove binding #${index}?`, danger: true, confirmLabel: "Remove" }))) return;
@@ -5717,6 +5994,45 @@ function BindingsPage() {
       toastOk("Binding removed");
       refresh();
     } catch (e) { toastErr(`Remove failed: ${e.message || e}`); }
+  };
+  const toggle = (i) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i); else next.add(i);
+      return next;
+    });
+  };
+  const toggleAll = () => {
+    setSelected(prev => {
+      if (bindings.length === 0) return prev;
+      if (prev.size === bindings.length) return new Set();
+      return new Set(bindings.map((_, i) => i));
+    });
+  };
+  // Bulk delete must walk indices descending — each successful DELETE
+  // shifts later indices down by one on the server, so descending order
+  // keeps untouched indices stable until we reach them.
+  const bulkRemove = async () => {
+    const ids = [...selected].sort((a, b) => b - a);
+    if (ids.length === 0) return;
+    const ok = await confirmDialog({
+      title: `Remove ${ids.length} binding(s)?`,
+      message: "Bindings are positional — this loops indices from high to low so partial failure can't desync the remaining selection.",
+      danger: true,
+      confirmLabel: `Remove ${ids.length}`,
+    });
+    if (!ok) return;
+    let okCount = 0, failCount = 0;
+    for (const i of ids) {
+      try {
+        await rhFetch(`/api/bindings/${i}`, { method: "DELETE" });
+        okCount++;
+      } catch (_) { failCount++; }
+    }
+    setSelected(new Set());
+    if (failCount > 0) toastErr(`Removed ${okCount}, failed ${failCount}`);
+    else toastOk(`Removed ${okCount} binding(s)`);
+    refresh();
   };
 
   return (
@@ -5730,28 +6046,54 @@ function BindingsPage() {
           <button className="btn ghost" onClick={refresh}><I.refresh/></button>
         </div>
       </div>
+      {selected.size > 0 && (
+        <div className="bulk-bar">
+          <span className="mono" style={{fontSize:12}}>{selected.size} selected</span>
+          <button className="btn sm danger" onClick={bulkRemove}>
+            <I.trash/> Remove {selected.size}
+          </button>
+          <button className="btn sm ghost" onClick={() => setSelected(new Set())} style={{marginLeft:"auto"}}>Clear</button>
+        </div>
+      )}
       {fetchErr && <div className="banner" style={{borderColor:"oklch(0.66 0.18 25 / .35)"}}>
         <span className="dot err"/><span className="banner-title">API ERROR</span>
         <span className="banner-body mono" style={{fontSize:11}}>{fetchErr}</span>
       </div>}
       <div className="card flush">
         <table className="tbl">
-          <thead><tr><th>#</th><th>Agent</th><th>Kind</th><th>Target</th><th>Pattern</th><th></th></tr></thead>
+          <thead><tr>
+            <th style={{width:28}}>
+              <input type="checkbox"
+                     checked={bindings.length > 0 && selected.size === bindings.length}
+                     ref={el => { if (el) el.indeterminate = selected.size > 0 && selected.size < bindings.length; }}
+                     onChange={toggleAll}
+                     title={selected.size === bindings.length ? "Deselect all" : "Select all"}/>
+            </th>
+            <th>#</th><th>Agent</th><th>Kind</th><th>Target</th><th>Pattern</th><th></th>
+          </tr></thead>
           <tbody>
-            {!resp && <tr><td colSpan={6} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>}
-            {resp && bindings.length === 0 && <tr><td colSpan={6} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>No bindings configured.</td></tr>}
-            {bindings.map((b, i) => (
-              <tr key={i}>
-                <td className="num mono">{i}</td>
-                <td className="mono">{b.agent_id || b.agent || "—"}</td>
-                <td className="mono">{b.kind || b.type || "—"}</td>
-                <td className="mono">{b.target || b.channel || b.trigger || "—"}</td>
-                <td className="mono dim" style={{maxWidth:280, overflow:"hidden", textOverflow:"ellipsis"}}>{b.pattern ? JSON.stringify(b.pattern) : "—"}</td>
-                <td className="right">
-                  <button className="btn sm danger" onClick={() => remove(i)} title="Remove"><I.close/></button>
-                </td>
-              </tr>
-            ))}
+            {!resp && <tr><td colSpan={7} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>}
+            {resp && bindings.length === 0 && <tr><td colSpan={7} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>No bindings configured.</td></tr>}
+            {bindings.map((b, i) => {
+              const isSel = selected.has(i);
+              return (
+                <tr key={i} style={isSel ? {background:"var(--surface-2)"} : null}>
+                  <td>
+                    <input type="checkbox"
+                           checked={isSel}
+                           onChange={() => toggle(i)}/>
+                  </td>
+                  <td className="num mono">{i}</td>
+                  <td className="mono">{b.agent_id || b.agent || "—"}</td>
+                  <td className="mono">{b.kind || b.type || "—"}</td>
+                  <td className="mono">{b.target || b.channel || b.trigger || "—"}</td>
+                  <td className="mono dim" style={{maxWidth:280, overflow:"hidden", textOverflow:"ellipsis"}}>{b.pattern ? JSON.stringify(b.pattern) : "—"}</td>
+                  <td className="right">
+                    <button className="btn sm danger" onClick={() => remove(i)} title="Remove"><I.close/></button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -5763,5 +6105,5 @@ Object.assign(window, {
   OverviewPage, AgentsPage, AgentDrawer, ChatPage, WorkflowsPage,
   AutomationPage, ChannelsPage, AnalyticsPage, KnowledgePage,
   SkillsPage, ApprovalsPage, AuditPage, SettingsPage, MemoryPage,
-  McpPage, NetworkPage, BindingsPage,
+  McpPage, NetworkPage, BindingsPage, HealthPage,
 });
