@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.48";
+  const version = (health && health.version) || "0.7.49";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -385,19 +385,82 @@ function AgentsPage({ openAgent }) {
   const [q, setQ] = useState("");
   const [showSpawn, setShowSpawn] = useState(false);
   const [rowMenu, setRowMenu] = useState(null);
-  // No server-side pagination on Agents: the typical N is small (5-50)
-  // and the filter/search is client-side. Paginating the server response
-  // makes the "1-50 of 200" counter incoherent with a state filter that
-  // can only see the current page. If real ops hit 1000+ agents we'll
-  // revisit — by then the API needs a `?state=` filter to keep the
-  // counts honest.
+  const [selected, setSelected] = useState(() => new Set());
+  const [grouped, setGrouped] = useState(true);
+  const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
+
   const [resp, fetchErr, refresh] = usePolling("/api/agents?limit=200", 15000);
+  // `n` opens the spawn modal, `r` refreshes — listeners scoped to this
+  // page via the rh:hotkey:* CustomEvents App dispatches.
+  React.useEffect(() => {
+    const onNew = (e) => { if (e.detail && e.detail.page === "agents") setShowSpawn(true); };
+    const onRefresh = (e) => { if (e.detail && e.detail.page === "agents") refresh(); };
+    window.addEventListener("rh:hotkey:new", onNew);
+    window.addEventListener("rh:hotkey:refresh", onRefresh);
+    return () => {
+      window.removeEventListener("rh:hotkey:new", onNew);
+      window.removeEventListener("rh:hotkey:refresh", onRefresh);
+    };
+  }, [refresh]);
   const agents = (resp && resp.agents) ? resp.agents.map(normalizeAgent) : D.agents;
   const filtered = agents.filter(a => {
     if (filter !== "all" && a.state !== filter && !(filter === "running" && a.state === "running")) return false;
-    if (q && !a.name.toLowerCase().includes(q.toLowerCase()) && !a.model.toLowerCase().includes(q.toLowerCase())) return false;
+    if (q && !a.name.toLowerCase().includes(q.toLowerCase()) && !a.model.toLowerCase().includes(q.toLowerCase()) && !(a.group || "").toLowerCase().includes(q.toLowerCase())) return false;
     return true;
   });
+
+  // Drop selected ids that no longer exist (e.g. after kill) so the
+  // bulk toolbar count stays honest.
+  React.useEffect(() => {
+    const live = new Set(agents.map(a => a.id));
+    setSelected(prev => {
+      const next = new Set([...prev].filter(id => live.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [agents.map(a => a.id).join(",")]);
+
+  // Group filtered agents by their `group` field, sorted by name within
+  // each group. Section order is stable across renders so the layout
+  // doesn't shift between polls.
+  const groupBuckets = React.useMemo(() => {
+    if (!grouped) return null;
+    const map = new Map();
+    for (const a of filtered) {
+      const g = a.group || "—";
+      if (!map.has(g)) map.set(g, []);
+      map.get(g).push(a);
+    }
+    const ordered = [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    for (const [, arr] of ordered) arr.sort((x, y) => x.name.localeCompare(y.name));
+    return ordered;
+  }, [filtered, grouped]);
+
+  const toggleSelect = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleSelectAll = (visible) => {
+    setSelected(prev => {
+      if (visible.every(a => prev.has(a.id))) {
+        const next = new Set(prev);
+        for (const a of visible) next.delete(a.id);
+        return next;
+      }
+      const next = new Set(prev);
+      for (const a of visible) next.add(a.id);
+      return next;
+    });
+  };
+  const toggleGroup = (g) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(g)) next.delete(g); else next.add(g);
+      return next;
+    });
+  };
 
   const killAgent = async (id) => {
     if (!(await confirmDialog({ title: "Kill agent", message: `Kill agent ${id}?`, danger: true, confirmLabel: "Kill" }))) return;
@@ -411,6 +474,45 @@ function AgentsPage({ openAgent }) {
       await rhFetch(`/api/agents/${encodeURIComponent(id)}/restart`, { method: "POST" });
       refresh();
     } catch (e) { toastErr(`restart failed: ${e.message || e}`); }
+  };
+
+  // Bulk actions: one network call per id, sequential to keep server
+  // load predictable. We track partial successes so a single error
+  // mid-batch doesn't lose progress visually.
+  const bulkKill = async () => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    if (!(await confirmDialog({ title: "Kill agents", message: `Kill ${ids.length} agent(s)? This cannot be undone.`, danger: true, confirmLabel: "Kill all" }))) return;
+    let ok = 0, fail = 0;
+    for (const id of ids) {
+      try {
+        await rhFetch(`/api/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
+        ok++;
+      } catch (e) {
+        fail++;
+        toastErr(`kill ${String(id).slice(0, 8)}: ${e.message || e}`);
+      }
+    }
+    if (ok > 0) toastOk(`Killed ${ok} agent${ok === 1 ? "" : "s"}${fail ? ` (${fail} failed)` : ""}`);
+    setSelected(new Set());
+    refresh();
+  };
+  const bulkRestart = async () => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    if (!(await confirmDialog({ title: "Restart agents", message: `Restart ${ids.length} agent(s)?`, confirmLabel: "Restart all" }))) return;
+    let ok = 0, fail = 0;
+    for (const id of ids) {
+      try {
+        await rhFetch(`/api/agents/${encodeURIComponent(id)}/restart`, { method: "POST" });
+        ok++;
+      } catch (e) {
+        fail++;
+        toastErr(`restart ${String(id).slice(0, 8)}: ${e.message || e}`);
+      }
+    }
+    if (ok > 0) toastOk(`Restarted ${ok} agent${ok === 1 ? "" : "s"}${fail ? ` (${fail} failed)` : ""}`);
+    refresh();
   };
 
   return (
@@ -447,55 +549,111 @@ function AgentsPage({ openAgent }) {
           <input placeholder="Find agent, group, model…" value={q} onChange={e=>setQ(e.target.value)}/>
           <span className="kbd">⌘K</span>
         </div>
+        <button className="btn ghost" onClick={() => setGrouped(g => !g)} title={grouped ? "Show flat list" : "Group by team"}>
+          {grouped ? "Flat" : "Group"}
+        </button>
       </div>
+
+      {selected.size > 0 && (
+        <div className="bulk-bar">
+          <span className="mono" style={{fontSize:12}}>{selected.size} selected</span>
+          <button className="btn sm" onClick={bulkRestart}><I.refresh/> Restart</button>
+          <button className="btn sm danger" onClick={bulkKill}><I.close/> Kill</button>
+          <button className="btn sm ghost" onClick={() => setSelected(new Set())} style={{marginLeft:"auto"}}>Clear</button>
+        </div>
+      )}
 
       <div className="card flush">
         <table className="tbl">
           <thead><tr>
-            <th>Agent</th><th>Group</th><th>Model</th><th>State</th>
+            <th style={{width:30}}>
+              <input
+                type="checkbox"
+                checked={filtered.length > 0 && filtered.every(a => selected.has(a.id))}
+                ref={el => { if (el) el.indeterminate = selected.size > 0 && !filtered.every(a => selected.has(a.id)); }}
+                onChange={() => toggleSelectAll(filtered)}
+                title={filtered.every(a => selected.has(a.id)) ? "Deselect all" : "Select all"}/>
+            </th>
+            <th>Agent</th>{!grouped && <th>Group</th>}<th>Model</th><th>State</th>
             <th className="right">Msgs</th><th className="right">Cost · 24h</th><th>Last activity</th><th>Updated</th><th></th>
           </tr></thead>
           <tbody>
             {!resp && Array.from({length:5}).map((_,i) => (
-              <SkelRow key={`s-${i}`} cols={[160, 80, 140, 90, 60, 60, 240, 50, 24]}/>
+              <SkelRow key={`s-${i}`} cols={[20, 160, 140, 90, 60, 60, 240, 50, 24]}/>
             ))}
-            {filtered.map(a => (
-              <tr key={a.id} style={{cursor:"pointer"}} onClick={() => openAgent(a)}>
-                <td>
-                  <div className="agent-row">
-                    <Avatar agent={a}/>
-                    <div>
-                      <div className="name">{a.name}</div>
-                      <div className="meta">{a.id}</div>
-                    </div>
-                  </div>
-                </td>
-                <td className="muted mono">{a.group}</td>
-                <td className="mono">{a.model}<div className="meta dim">{a.provider}</div></td>
-                <td><StateBadge state={a.state}/></td>
-                <td className="num mono">{a.messages.toLocaleString()}</td>
-                <td className="num mono">${a.cost.toFixed(2)}</td>
-                <td className="muted" style={{maxWidth:280,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{a.last}</td>
-                <td className="mono muted">{a.updated}</td>
-                <td style={{position:"relative"}}>
-                  <button className="btn sm ghost" onClick={e => { e.stopPropagation(); setRowMenu(rowMenu === a.id ? null : a.id); }}>
-                    <I.more/>
-                  </button>
-                  {rowMenu === a.id && (
-                    <div className="row-menu" onClick={e => e.stopPropagation()}>
-                      <button onClick={() => { setRowMenu(null); restartAgent(a.id); }}><I.refresh/> Restart</button>
-                      <button onClick={() => { setRowMenu(null); killAgent(a.id); }} style={{color:"var(--crimson)"}}><I.close/> Kill</button>
-                    </div>
-                  )}
-                </td>
-              </tr>
+            {!grouped && filtered.map(a => (
+              <AgentRow key={a.id} agent={a} selected={selected.has(a.id)} onSelect={toggleSelect}
+                        openAgent={openAgent} rowMenu={rowMenu} setRowMenu={setRowMenu}
+                        restart={restartAgent} kill={killAgent} showGroup={true}/>
             ))}
+            {grouped && groupBuckets && groupBuckets.map(([g, arr]) => {
+              const collapsed = collapsedGroups.has(g);
+              return (
+                <React.Fragment key={g}>
+                  <tr className="group-row" onClick={() => toggleGroup(g)} style={{cursor:"pointer"}}>
+                    <td colSpan={9} style={{padding:"6px 14px", background:"var(--bg-2)", borderBottom:"1px solid var(--border)"}}>
+                      <span className="mono" style={{fontSize:11, letterSpacing:".12em", textTransform:"uppercase", color:"var(--fg-3)"}}>
+                        {collapsed ? "▸" : "▾"} {g} <span className="dim" style={{marginLeft:6}}>{arr.length}</span>
+                      </span>
+                    </td>
+                  </tr>
+                  {!collapsed && arr.map(a => (
+                    <AgentRow key={a.id} agent={a} selected={selected.has(a.id)} onSelect={toggleSelect}
+                              openAgent={openAgent} rowMenu={rowMenu} setRowMenu={setRowMenu}
+                              restart={restartAgent} kill={killAgent} showGroup={false}/>
+                  ))}
+                </React.Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
 
       {showSpawn && <SpawnAgentModal onClose={() => setShowSpawn(false)} onSpawned={() => { setShowSpawn(false); refresh(); }}/>}
     </div>
+  );
+}
+
+// Single agent table row. Extracted so the grouped + flat list paths
+// don't drift in cell ordering. `showGroup` toggles whether the Group
+// column is rendered — hidden when the table is grouped (the section
+// header carries the group name).
+function AgentRow({ agent, selected, onSelect, openAgent, rowMenu, setRowMenu, restart, kill, showGroup }) {
+  const a = agent;
+  return (
+    <tr key={a.id} style={{cursor:"pointer", background: selected ? "var(--surface-2)" : undefined}}
+        onClick={() => openAgent(a)}>
+      <td onClick={(e) => { e.stopPropagation(); onSelect(a.id); }} style={{width:30}}>
+        <input type="checkbox" checked={selected} readOnly tabIndex={-1}/>
+      </td>
+      <td>
+        <div className="agent-row">
+          <Avatar agent={a}/>
+          <div>
+            <div className="name">{a.name}</div>
+            <div className="meta">{a.id}</div>
+          </div>
+        </div>
+      </td>
+      {showGroup && <td className="muted mono">{a.group}</td>}
+      <td className="mono">{a.model}<div className="meta dim">{a.provider}</div></td>
+      <td><StateBadge state={a.state}/></td>
+      <td className="num mono">{a.messages.toLocaleString()}</td>
+      <td className="num mono">${a.cost.toFixed(2)}</td>
+      <td className="muted" style={{maxWidth:280,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{a.last}</td>
+      <td className="mono muted">{a.updated}</td>
+      <td style={{position:"relative"}}>
+        <button className="btn sm ghost" onClick={(e) => { e.stopPropagation(); setRowMenu(rowMenu === a.id ? null : a.id); }}>
+          <I.more/>
+        </button>
+        {rowMenu === a.id && (
+          <div className="row-menu" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => { setRowMenu(null); restart(a.id); }}><I.refresh/> Restart</button>
+            <button onClick={() => { setRowMenu(null); kill(a.id); }} style={{color:"var(--crimson)"}}><I.close/> Kill</button>
+          </div>
+        )}
+      </td>
+    </tr>
   );
 }
 
@@ -961,7 +1119,9 @@ function ChatPage() {
     );
   }
 
-  const items = sessionToItems(session && session.messages).concat(pendingMessages);
+  const items = coalesceToolTraces(
+    sessionToItems(session && session.messages).concat(pendingMessages)
+  );
 
   const send = async () => {
     const text = typed.trim();
@@ -1058,13 +1218,7 @@ function ChatPage() {
                 </div>
               </div>
             );
-            if (it.role === "tool") return (
-              <div key={i} className={"tool-trace " + (it.running ? "" : "done")}>
-                <span style={{display:"inline-flex",width:14,height:14}}>{it.running ? <Spinner/> : <I.check/>}</span>
-                <span>{it.running ? "⚙" : "✓"} <span className="tool-name">{it.name}</span> <span className="dim">({String(it.input || "").slice(0, 80)})</span></span>
-                <span className="elapsed">{it.is_error ? "err" : "ok"}</span>
-              </div>
-            );
+            if (it.role === "tool") return <ToolTraceCard key={i} tool={it}/>;
             return (
               <div key={i} className="msg">
                 <Avatar agent={active}/>
@@ -1077,13 +1231,7 @@ function ChatPage() {
               </div>
             );
           })}
-          {streamingTools.map((t, i) => (
-            <div key={`stool-${i}`} className={"tool-trace " + (t.running ? "" : "done")}>
-              <span style={{display:"inline-flex",width:14,height:14}}>{t.running ? <Spinner/> : <I.check/>}</span>
-              <span>{t.running ? "⚙" : "✓"} <span className="tool-name">{t.name}</span> {t.input && <span className="dim">({String(typeof t.input === "string" ? t.input : JSON.stringify(t.input)).slice(0, 80)})</span>}</span>
-              <span className="elapsed">{t.is_error ? "err" : (t.running ? "…" : "ok")}</span>
-            </div>
-          ))}
+          {streamingTools.map((t, i) => <ToolTraceCard key={`stool-${i}`} tool={t}/>)}
           {(sending || streamingText) && (
             <div className="msg">
               <Avatar agent={active}/>
@@ -1163,6 +1311,84 @@ function sessionToItems(messages) {
   return items;
 }
 
+// ToolTraceCard — a single tool invocation in the chat stream. Click
+// the row to expand input + result; collapsed by default to keep the
+// stream readable. `tool.input` is whatever the agent passed (string
+// or object); `tool.result` is the truncated response string the
+// kernel returns. `tool.duration_ms` (if present) shows next to the
+// status badge.
+//
+// We intentionally avoid an animated expand — the panel runs in
+// dense ops contexts where reflow churn matters more than smoothness.
+function ToolTraceCard({ tool }) {
+  const [open, setOpen] = useState(false);
+  const t = tool || {};
+  const running = !!t.running;
+  const isError = !!t.is_error;
+  const hasDetail = !!t.input || !!t.result;
+  const argStr = String(typeof t.input === "string" ? t.input : (t.input ? JSON.stringify(t.input) : "")).slice(0, 240);
+  const resultStr = t.result ? String(t.result).slice(0, 2000) : "";
+  const elapsed = t.elapsed || (t.duration_ms != null ? `${(Number(t.duration_ms) / 1000).toFixed(2)}s` : null);
+  const status = running ? "…" : (isError ? "err" : (elapsed || "ok"));
+  return (
+    <div className={"tool-trace " + (running ? "" : (isError ? "fail" : "done"))}>
+      <button
+        className="tool-trace-head"
+        onClick={() => hasDetail && setOpen(o => !o)}
+        disabled={!hasDetail}
+        title={hasDetail ? "Show full input + result" : "No detail captured"}>
+        <span style={{display:"inline-flex",width:14,height:14}}>{running ? <Spinner/> : <I.check/>}</span>
+        <span className="tool-trace-label">
+          {running ? "⚙" : (isError ? "✗" : "✓")} <span className="tool-name">{t.name}</span>
+          {argStr && <span className="dim"> ({argStr.length > 80 ? argStr.slice(0, 80) + "…" : argStr})</span>}
+          {(t.count && t.count > 1) ? <span className="badge plain" style={{marginLeft:6}}>×{t.count}</span> : null}
+        </span>
+        <span className="elapsed">{status}</span>
+        {hasDetail && <span className="tool-trace-caret">{open ? "−" : "+"}</span>}
+      </button>
+      {open && hasDetail && (
+        <div className="tool-trace-detail">
+          {t.input && (
+            <>
+              <div className="tool-trace-detail-label">Input</div>
+              <pre className="codebox" style={{maxHeight:140, marginBottom:6}}>{typeof t.input === "string" ? t.input : JSON.stringify(t.input, null, 2)}</pre>
+            </>
+          )}
+          {t.result && (
+            <>
+              <div className="tool-trace-detail-label">{isError ? "Error" : "Result"}</div>
+              <pre className="codebox" style={{maxHeight:240, color: isError ? "var(--crimson)" : undefined}}>{resultStr}</pre>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Coalesce consecutive tool calls with the same name into a single card
+// with a count badge. Repeated probes (e.g. polling a queue) clutter
+// the stream otherwise; the operator can still expand to see each call
+// since we keep the latest input/result attached. Items not in `tool`
+// role pass through unchanged.
+function coalesceToolTraces(items) {
+  const out = [];
+  for (const it of items) {
+    const last = out[out.length - 1];
+    if (it && it.role === "tool" && last && last.role === "tool" && last.name === it.name && !last.running && !it.running && !last.is_error && !it.is_error) {
+      last.count = (last.count || 1) + 1;
+      // Keep the latest input/result so expanding shows the most recent
+      // sample of that group. Older samples are dropped — acceptable
+      // for the chat-stream use case.
+      last.input = it.input;
+      last.result = it.result;
+      continue;
+    }
+    out.push(it && it.role === "tool" ? { ...it, count: 1 } : it);
+  }
+  return out;
+}
+
 const Spinner = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
     <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.4" opacity=".2"/>
@@ -1188,10 +1414,23 @@ function WorkflowsPage() {
   const active = workflows.find(w => w.id === activeId) || workflows[0];
   const [showCreate, setShowCreate] = useState(false);
   const [showRunInput, setShowRunInput] = useState(false);
+  const [inspectingRun, setInspectingRun] = useState(null);
+
+  React.useEffect(() => {
+    const onNew = (e) => { if (e.detail && e.detail.page === "workflows") setShowCreate(true); };
+    const onRefresh = (e) => { if (e.detail && e.detail.page === "workflows") refreshList(); };
+    window.addEventListener("rh:hotkey:new", onNew);
+    window.addEventListener("rh:hotkey:refresh", onRefresh);
+    return () => {
+      window.removeEventListener("rh:hotkey:new", onNew);
+      window.removeEventListener("rh:hotkey:refresh", onRefresh);
+    };
+  }, [refreshList]);
 
   // The real path is GET /api/workflows/{id}/runs (path param, NOT a
   // ?workflow_id= query — the handler reads it as Path<String>).
-  const [runsResp, , refreshRuns] = useApi(active ? `/api/workflows/${encodeURIComponent(active.id)}/runs` : null);
+  // Poll because workflow runs can complete while the page is open.
+  const [runsResp, , refreshRuns] = usePolling(active ? `/api/workflows/${encodeURIComponent(active.id)}/runs` : null, 8000);
   const runs = Array.isArray(runsResp) ? runsResp : (runsResp && runsResp.runs) || [];
 
   const runWith = async (input) => {
@@ -1301,17 +1540,36 @@ function WorkflowsPage() {
                   const id = r.id || r.run_id || "—";
                   const trig = r.trigger || r.source || "manual";
                   const t = formatTime(r.started_at || r.created_at);
-                  const dur = r.duration_ms ? `${(r.duration_ms / 1000).toFixed(2)}s` : "—";
-                  const st = (r.status || r.outcome || "ok").toLowerCase();
-                  const tok = r.total_tokens || r.tokens || "—";
+                  // Compute duration from started/completed timestamps if
+                  // duration_ms wasn't sent (older API). Sum step times
+                  // as a last resort.
+                  let dur = "—";
+                  if (r.duration_ms != null) dur = `${(r.duration_ms / 1000).toFixed(2)}s`;
+                  else if (r.started_at && r.completed_at) {
+                    const ms = Date.parse(r.completed_at) - Date.parse(r.started_at);
+                    if (!Number.isNaN(ms) && ms >= 0) dur = `${(ms / 1000).toFixed(2)}s`;
+                  } else if (Array.isArray(r.step_results)) {
+                    const ms = r.step_results.reduce((s, x) => s + (x.duration_ms || 0), 0);
+                    if (ms) dur = `${(ms / 1000).toFixed(2)}s`;
+                  }
+                  const st = (typeof r.state === "string" ? r.state : (r.status || r.outcome || "ok")).toLowerCase();
+                  // Sum tokens across steps when present.
+                  let tok = r.total_tokens || r.tokens;
+                  if (tok == null && Array.isArray(r.step_results)) {
+                    tok = r.step_results.reduce((s, x) => s + (x.input_tokens || 0) + (x.output_tokens || 0), 0);
+                  }
                   return (
-                    <tr key={id}>
-                      <td className="mono">{id}</td>
+                    <tr key={id} style={{cursor:"pointer"}} onClick={() => setInspectingRun(r)} title="Click to inspect step-by-step output">
+                      <td className="mono">{String(id).slice(0, 8)}</td>
                       <td><span className="badge plain">{trig}</span></td>
                       <td className="mono muted">{t}</td>
                       <td className="mono">{dur}</td>
-                      <td>{st === "ok" || st === "success" ? <span className="badge live">ok</span> : <span className="badge warn">{st}</span>}</td>
-                      <td className="num mono">{tok}</td>
+                      <td>{st === "ok" || st === "success" || st === "completed"
+                        ? <span className="badge live">{st}</span>
+                        : st === "failed" || st === "error"
+                        ? <span className="badge error">{st}</span>
+                        : <span className="badge warn">{st}</span>}</td>
+                      <td className="num mono">{tok != null ? tok.toLocaleString() : "—"}</td>
                     </tr>
                   );
                 })}
@@ -1323,6 +1581,105 @@ function WorkflowsPage() {
 
       {showCreate && <WorkflowCreateModal onClose={() => setShowCreate(false)} onCreated={(id) => { setShowCreate(false); setActiveId(id); refreshList(); }}/>}
       {showRunInput && active && <WorkflowRunModal workflow={active} onClose={() => setShowRunInput(false)} onRun={runWith}/>}
+      {inspectingRun && <WorkflowRunInspector run={inspectingRun} onClose={() => setInspectingRun(null)}/>}
+    </div>
+  );
+}
+
+function WorkflowRunInspector({ run, onClose }) {
+  useEscapeKey(onClose);
+  const steps = Array.isArray(run.step_results) ? run.step_results : [];
+  const totalDur = steps.reduce((s, x) => s + (x.duration_ms || 0), 0);
+  const totalTokens = steps.reduce((s, x) => s + (x.input_tokens || 0) + (x.output_tokens || 0), 0);
+  const state = typeof run.state === "string" ? run.state : "—";
+  const isFailed = state.toLowerCase() === "failed" || !!run.error;
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal wide" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <b className="mono">Run · {String(run.id || "").slice(0, 12)}</b>
+            <div className="dim mono" style={{fontSize:11, marginTop:2}}>
+              {run.workflow_name || run.workflow_id} · started {formatTime(run.started_at)}
+              {run.completed_at ? ` · completed ${formatTime(run.completed_at)}` : " · running…"}
+            </div>
+          </div>
+          <button className="icon-btn" onClick={onClose}><I.close/></button>
+        </div>
+        <div className="modal-body">
+          <div className="row gap-12 mb-12">
+            <Stat label="State" value={state}/>
+            <Stat label="Steps" value={`${steps.length}`}/>
+            <Stat label="Duration" value={totalDur ? `${(totalDur / 1000).toFixed(2)}s` : "—"}/>
+            <Stat label="Tokens" value={totalTokens.toLocaleString()}/>
+          </div>
+          {run.input && (
+            <>
+              <div className="muted mono mb-8" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>Initial input</div>
+              <pre className="codebox mb-16" style={{maxHeight:100, whiteSpace:"pre-wrap"}}>{run.input}</pre>
+            </>
+          )}
+          {isFailed && run.error && (
+            <>
+              <div className="muted mono mb-8" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--crimson)"}}>Error</div>
+              <pre className="codebox mb-16" style={{color:"var(--crimson)", maxHeight:120}}>{run.error}</pre>
+            </>
+          )}
+          <div className="muted mono mb-8" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>Steps ({steps.length})</div>
+          <div className="col gap-6" style={{maxHeight:420, overflow:"auto"}}>
+            {steps.length === 0 && <div className="dim mono" style={{fontSize:11, padding:"6px 8px"}}>No step output recorded yet.</div>}
+            {steps.map((s, i) => {
+              const tokens = (s.input_tokens || 0) + (s.output_tokens || 0);
+              return (
+                <RunStepCard key={i} index={i} step={s} tokens={tokens}/>
+              );
+            })}
+          </div>
+          {run.output && (
+            <>
+              <div className="muted mono mb-8 mt-16" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>Final output</div>
+              <pre className="codebox" style={{maxHeight:160, whiteSpace:"pre-wrap"}}>{run.output}</pre>
+            </>
+          )}
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Single step card inside the run inspector. Output is collapsed to the
+// first 200 chars; click expands to show the full (server-truncated to
+// 2000 chars) output. Failed steps borrowed the chat tool-trace `fail`
+// styling for consistency.
+function RunStepCard({ index, step, tokens }) {
+  const [open, setOpen] = useState(false);
+  const preview = (step.output || "").slice(0, 200);
+  const dur = step.duration_ms != null ? `${(step.duration_ms / 1000).toFixed(2)}s` : "—";
+  return (
+    <div style={{border:"1px solid var(--border)", borderRadius:7, background:"var(--bg-2)", overflow:"hidden"}}>
+      <button onClick={() => setOpen(o => !o)}
+              className="row gap-8"
+              style={{width:"100%", padding:"8px 10px", background:"none", color:"inherit", textAlign:"left", cursor:"pointer"}}>
+        <span className="badge plain" style={{minWidth:32, textAlign:"center"}}>#{index + 1}</span>
+        <span className="mono" style={{fontSize:12.5}}>{step.step_name || "step"}</span>
+        <span className="dim mono" style={{fontSize:11}}>{step.agent_name || step.agent_id}</span>
+        <span style={{marginLeft:"auto"}} className="row gap-12">
+          <span className="dim mono" style={{fontSize:11}}>{tokens.toLocaleString()} tok</span>
+          <span className="dim mono" style={{fontSize:11}}>{dur}</span>
+          <span className="dim" style={{width:12, textAlign:"center"}}>{open ? "−" : "+"}</span>
+        </span>
+      </button>
+      {!open && preview && (
+        <div className="dim" style={{padding:"0 12px 8px 50px", fontSize:11.5, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{preview}</div>
+      )}
+      {open && (
+        <div style={{padding:"4px 12px 10px 12px"}}>
+          <pre className="codebox" style={{maxHeight:240, whiteSpace:"pre-wrap"}}>{step.output || "(empty)"}</pre>
+        </div>
+      )}
     </div>
   );
 }
@@ -1697,6 +2054,17 @@ function AutomationPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [cronResp, , refreshCron] = usePolling("/api/cron/jobs", 15000);
   const [trigResp, , refreshTrig] = usePolling("/api/triggers", 15000);
+
+  React.useEffect(() => {
+    const onNew = (e) => { if (e.detail && e.detail.page === "automation") setShowCreate(true); };
+    const onRefresh = (e) => { if (e.detail && e.detail.page === "automation") (tab === "cron" ? refreshCron : refreshTrig)(); };
+    window.addEventListener("rh:hotkey:new", onNew);
+    window.addEventListener("rh:hotkey:refresh", onRefresh);
+    return () => {
+      window.removeEventListener("rh:hotkey:new", onNew);
+      window.removeEventListener("rh:hotkey:refresh", onRefresh);
+    };
+  }, [tab, refreshCron, refreshTrig]);
   const cron = (cronResp && cronResp.jobs) || [];
   const triggers = Array.isArray(trigResp) ? trigResp : (trigResp && trigResp.triggers) || [];
 
@@ -1899,7 +2267,14 @@ function CronJobModal({ onClose, onCreated }) {
                 <option value="">— pick agent —</option>
                 {agents.map(a => <option key={a.id} value={a.id}>{a.name} ({String(a.id).slice(0, 8)})</option>)}
               </select></label>
-            <span className="muted mono" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase", marginTop:6}}>Schedule</span>
+            <span className="muted mono" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase", marginTop:6}}>
+              Schedule
+              <Tip>
+                <b>Cron</b> — 5-field expression (min hour dom month dow), optional IANA tz.<br/>
+                <b>Every</b> — fixed interval in seconds (60..86400).<br/>
+                <b>At</b> — fire once at the specified UTC time.
+              </Tip>
+            </span>
             <div className="seg">
               <button className={scheduleKind==="cron"?"on":""} onClick={() => setScheduleKind("cron")}>Cron</button>
               <button className={scheduleKind==="every"?"on":""} onClick={() => setScheduleKind("every")}>Every</button>
@@ -1909,7 +2284,14 @@ function CronJobModal({ onClose, onCreated }) {
             {scheduleKind === "every" && <input className="modal-field" type="number" min={60} value={everySecs} onChange={e => setEverySecs(e.target.value)} placeholder="seconds (60..86400)"/>}
             {scheduleKind === "at" && <input className="modal-field" type="datetime-local" value={atIso} onChange={e => setAtIso(e.target.value)}/>}
 
-            <span className="muted mono" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase", marginTop:6}}>Action</span>
+            <span className="muted mono" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase", marginTop:6}}>
+              Action
+              <Tip>
+                <b>System event</b> — publishes a kernel event with the given text.<br/>
+                <b>Agent turn</b> — sends a message to the owning agent.<br/>
+                <b>Workflow run</b> — executes a workflow with input.
+              </Tip>
+            </span>
             <div className="seg">
               <button className={actionKind==="system_event"?"on":""} onClick={() => setActionKind("system_event")}>System event</button>
               <button className={actionKind==="agent_turn"?"on":""} onClick={() => setActionKind("agent_turn")}>Agent turn</button>
@@ -2948,7 +3330,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.48";
+  const version = (health && health.version) || "0.7.49";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 

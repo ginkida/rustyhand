@@ -120,6 +120,17 @@ async fn dashboard_includes_all_panel_modules() {
         ("Skel", "api.js must expose Skel"),
         ("SkelRow", "api.js must expose SkelRow"),
         ("loadRecentPicks", "palette must expose recent-picks helper"),
+        ("ToolTraceCard", "chat must expose ToolTraceCard"),
+        ("coalesceToolTraces", "chat must coalesce repeated tools"),
+        (
+            "WorkflowRunInspector",
+            "workflows must expose run inspector",
+        ),
+        ("RunStepCard", "workflows must expose per-step card"),
+        ("AgentRow", "agents must expose AgentRow"),
+        ("HelpOverlay", "shortcuts help overlay must be present"),
+        ("rh:hotkey:new", "hotkey dispatch wired"),
+        ("Tip", "tooltip primitive must be exposed"),
     ];
     for (needle, msg) in markers {
         assert!(body.contains(needle), "{msg} (missing `{needle}`)");

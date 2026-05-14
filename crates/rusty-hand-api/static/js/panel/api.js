@@ -488,6 +488,22 @@ function usePagination(pageSize) {
     hasNext: offset + pageSize < total
   };
 }
+function Tip({ children }) {
+  const [open, setOpen] = React.useState(false);
+  return /* @__PURE__ */ React.createElement(
+    "span",
+    {
+      className: "tip-wrap",
+      tabIndex: 0,
+      onMouseEnter: () => setOpen(true),
+      onMouseLeave: () => setOpen(false),
+      onFocus: () => setOpen(true),
+      onBlur: () => setOpen(false)
+    },
+    /* @__PURE__ */ React.createElement("span", { className: "tip-glyph" }, "?"),
+    open && /* @__PURE__ */ React.createElement("span", { className: "tip-bubble", role: "tooltip" }, children)
+  );
+}
 function useEscapeKey(handler) {
   React.useEffect(() => {
     if (!handler) return;
@@ -619,6 +635,7 @@ Object.assign(window, {
   Skel,
   SkelRow,
   SkelCard,
+  Tip,
   confirmDialog,
   ConfirmHost
 });

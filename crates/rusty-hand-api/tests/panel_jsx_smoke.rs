@@ -121,6 +121,8 @@ const need = [
   'Skel', 'SkelRow', 'SkelCard',
   'confirmDialog', 'ConfirmHost',
   'formatUptimeShort',
+  // Iter 30-33: chat tool-trace, run inspector, bulk agents, tooltips
+  'Tip',
 ];
 const missing = need.filter((n) => global[n] === undefined);
 if (missing.length) {{

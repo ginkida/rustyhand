@@ -1158,12 +1158,35 @@ pub async fn list_workflow_runs(
         .iter()
         .filter(|r| r.workflow_id == workflow_id)
         .map(|r| {
+            // Expose step_results, input, output, error so the dashboard
+            // run-inspector can render per-step details without a second
+            // round-trip. step_results are small (the kernel truncates
+            // each step's output to 2000 chars) so embedding is cheap.
+            let step_results: Vec<serde_json::Value> = r
+                .step_results
+                .iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "step_name": s.step_name,
+                        "agent_id": s.agent_id,
+                        "agent_name": s.agent_name,
+                        "output": s.output,
+                        "input_tokens": s.input_tokens,
+                        "output_tokens": s.output_tokens,
+                        "duration_ms": s.duration_ms,
+                    })
+                })
+                .collect();
             serde_json::json!({
                 "id": r.id.to_string(),
                 "workflow_id": r.workflow_id.to_string(),
                 "workflow_name": r.workflow_name,
+                "input": r.input,
                 "state": serde_json::to_value(&r.state).unwrap_or_default(),
+                "step_results": step_results,
                 "steps_completed": r.step_results.len(),
+                "output": r.output,
+                "error": r.error,
                 "started_at": r.started_at.to_rfc3339(),
                 "completed_at": r.completed_at.map(|t| t.to_rfc3339()),
             })

@@ -57,7 +57,7 @@ function Sidebar({ page, go }) {
         <div className="sb-mark">RH</div>
         <div>
           <div className="sb-title">Rusty Hand</div>
-          <div className="sb-sub">v0.7.48 · schema v8</div>
+          <div className="sb-sub">v0.7.49 · schema v8</div>
         </div>
       </div>
 
@@ -130,7 +130,7 @@ const CRUMBS = {
   settings:   ["RustyHand", "Settings"],
 };
 
-function Topbar({ page, onOpenPalette }) {
+function Topbar({ page, onOpenPalette, onOpenHelp }) {
   const crumbs = CRUMBS[page] || ["RustyHand"];
   return (
     <div className="topbar">
@@ -147,7 +147,9 @@ function Topbar({ page, onOpenPalette }) {
         <span>Jump to agent, page…</span>
         <span className="kbd kbd-row"><span className="kbd">⌘</span><span className="kbd">K</span></span>
       </button>
-      <button className="icon-btn" title="Notifications"><I.zap/></button>
+      <button className="icon-btn" title="Keyboard shortcuts (?)" onClick={onOpenHelp}>
+        <span style={{fontFamily:"var(--ff-mono)", fontSize:12, fontWeight:600}}>?</span>
+      </button>
       <button className="icon-btn" title="Operator"><div className="avatar" style={{width:24,height:24,fontSize:10,background:"linear-gradient(135deg,oklch(0.6 0.13 22),oklch(0.42 0.1 35))"}}>OP</div></button>
     </div>
   );
@@ -378,6 +380,89 @@ function LoginScreen({ onLogin }) {
   );
 }
 
+// HelpOverlay — keyboard shortcut cheat sheet. Opened by `?`. Pure
+// data-driven so adding a shortcut means adding a row, not editing
+// a template string.
+function HelpOverlay({ open, onClose }) {
+  useEscapeKey(open ? onClose : null);
+  if (!open) return null;
+  const groups = [
+    {
+      label: "Navigation",
+      rows: [
+        ["⌘ K  /  Ctrl K", "Open command palette"],
+        ["1 — 9", "Jump to the Nth sidebar entry"],
+        ["g a", "Sidebar links — middle-click for new tab"],
+        ["Esc", "Close any overlay (palette, drawer, modal)"],
+      ],
+    },
+    {
+      label: "On any page",
+      rows: [
+        ["/", "Focus the page's search field"],
+        ["n", "Open the primary “New …” modal (Spawn, New job, etc.)"],
+        ["r", "Refresh the current page"],
+        ["?", "Toggle this help overlay"],
+      ],
+    },
+    {
+      label: "Inside the chat",
+      rows: [
+        ["Enter", "Send the message"],
+        ["Click ⚙ trace", "Expand to see tool input + result"],
+      ],
+    },
+    {
+      label: "Workflows page",
+      rows: [
+        ["Click a run row", "Inspect step-by-step output + tokens"],
+        ["Drag ☰ on a step", "Reorder steps in the visual builder"],
+      ],
+    },
+    {
+      label: "Agents page",
+      rows: [
+        ["Checkbox in row", "Add to bulk selection"],
+        ["Bulk bar", "Kill / Restart all selected agents"],
+        ["Group / Flat", "Toggle grouping by team"],
+      ],
+    },
+  ];
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal wide" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><b className="mono">Keyboard shortcuts</b><button className="icon-btn" onClick={onClose}><I.close/></button></div>
+        <div className="modal-body">
+          <div className="grid-12" style={{rowGap:16}}>
+            {groups.map((g) => (
+              <div key={g.label} className="col-6">
+                <div className="muted mono mb-8" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>{g.label}</div>
+                <div className="col gap-4">
+                  {g.rows.map(([k, desc]) => (
+                    <div key={k} className="row" style={{padding:"4px 0", gap:12}}>
+                      <span className="kbd-row" style={{minWidth:130}}>
+                        {k.split(/\s+\/\s+|\s+/).map((part, i, arr) =>
+                          /^[A-Za-z]$/.test(part) || part === "Esc" || part === "Enter" || part === "⌘" || part === "Ctrl" || part === "K" || /^\d+$/.test(part) || part === "—" || part === "/" || part === "?" || part === "n" || part === "r"
+                            ? <span key={i} className="kbd">{part}</span>
+                            : <span key={i} style={{margin:"0 4px"}}>{part}</span>
+                        )}
+                      </span>
+                      <span className="dim" style={{fontSize:12}}>{desc}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Per-page ErrorBoundary: a render error in one page no longer kicks the
 // whole shell to the recovery screen — other pages stay reachable via the
 // sidebar. We key on `pageId` so navigating to a fresh page resets state
@@ -452,7 +537,16 @@ function App() {
     root.style.setProperty("--rust-dim", a.dim);
   }, [t.theme, t.accent, t.density]);
 
-  // Keyboard nav: 1-9 for top items + ⌘K / Ctrl-K for palette.
+  const [helpOpen, setHelpOpen] = useState(false);
+
+  // Keyboard shortcuts:
+  //   ⌘K / Ctrl-K : palette
+  //   1..9        : jump to NAV item
+  //   /           : focus page search (Agents, Memory, Knowledge, etc.)
+  //   n           : open primary "New X" modal on current page
+  //   r           : refresh current page
+  //   ?           : help overlay
+  //   esc         : close any open overlay
   useEffect(() => {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -460,15 +554,39 @@ function App() {
         setPaletteOpen(true);
         return;
       }
-      if (e.key === "Escape") { setPaletteOpen(false); return; }
-      if (e.target.matches?.("input, textarea")) return;
+      if (e.key === "Escape") {
+        setPaletteOpen(false);
+        setHelpOpen(false);
+        return;
+      }
+      // Inside form controls we don't want hotkeys stealing keystrokes.
+      if (e.target.matches?.("input, textarea, select, [contenteditable]")) return;
+      if (e.key === "?") { e.preventDefault(); setHelpOpen((v) => !v); return; }
+      if (e.key === "/") {
+        // Focus the first .search-field input on the active page.
+        const el = document.querySelector(".content .search-field input");
+        if (el) { e.preventDefault(); el.focus(); }
+        return;
+      }
+      if (e.key === "n" || e.key === "N") {
+        // Dispatch a custom event that pages listen for to open their
+        // primary "New X" modal. Decouples App from per-page state.
+        const ev = new CustomEvent("rh:hotkey:new", { detail: { page } });
+        window.dispatchEvent(ev);
+        return;
+      }
+      if (e.key === "r" || e.key === "R") {
+        const ev = new CustomEvent("rh:hotkey:refresh", { detail: { page } });
+        window.dispatchEvent(ev);
+        return;
+      }
       const items = NAV.filter(n => !n.kind);
       const idx = parseInt(e.key, 10);
       if (idx >= 1 && idx <= items.length) { setPage(items[idx-1].id); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [setPage]);
+  }, [setPage, page]);
 
   let pageEl;
   if (page === "overview") pageEl = <OverviewPage go={setPage}/>;
@@ -493,7 +611,7 @@ function App() {
     <div className="app" data-screen-label={`Page · ${page}`}>
       <Sidebar page={page} go={setPage}/>
       <div className="main">
-        <Topbar page={page} onOpenPalette={() => setPaletteOpen(true)}/>
+        <Topbar page={page} onOpenPalette={() => setPaletteOpen(true)} onOpenHelp={() => setHelpOpen(true)}/>
         <div className="content" style={{position:"relative"}}>
           <PageErrorBoundary pageId={page}>{pageEl}</PageErrorBoundary>
           <AgentDrawer agent={drawerAgent} onClose={closeDrawer}/>
@@ -501,6 +619,7 @@ function App() {
       </div>
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} go={setPage} openAgent={openAgent}/>
+      <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)}/>
 
       <TweaksPanel>
         <TweakSection label="Theme"/>

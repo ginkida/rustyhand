@@ -588,6 +588,25 @@ function usePagination(pageSize) {
   };
 }
 
+// Tip — small `?` hover tooltip for non-obvious labels (CronAction
+// variants, StepMode, etc.). Pure CSS would suffice for hover-only,
+// but we also want focus-triggered display for keyboard users, so it
+// becomes a tiny React component.
+function Tip({ children }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <span className="tip-wrap"
+          tabIndex={0}
+          onMouseEnter={() => setOpen(true)}
+          onMouseLeave={() => setOpen(false)}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}>
+      <span className="tip-glyph">?</span>
+      {open && <span className="tip-bubble" role="tooltip">{children}</span>}
+    </span>
+  );
+}
+
 // useEscapeKey(handler) — register a window keydown listener that fires
 // `handler()` on Escape. Used by modals to close on Esc. Cleans up on
 // unmount so closed modals don't leak listeners.
@@ -729,6 +748,6 @@ Object.assign(window, {
   renderMarkdown, downloadBlob, rowsToCsv,
   getApiKey, setApiKey, clearApiKey,
   toast, toastOk, toastWarn, toastErr, dismissToast, ToastHost, ErrorBoundary,
-  Skel, SkelRow, SkelCard,
+  Skel, SkelRow, SkelCard, Tip,
   confirmDialog, ConfirmHost,
 });

@@ -44,7 +44,7 @@ function Sidebar({ page, go }) {
   const [approvalsResp] = usePolling("/api/approvals", 1e4);
   const approvalsCount = approvalsResp && Array.isArray(approvalsResp.approvals) ? approvalsResp.approvals.length : null;
   const uptime = health && health.uptime_seconds != null ? formatUptimeShort(health.uptime_seconds) : null;
-  return /* @__PURE__ */ React.createElement("nav", { className: "sidebar" }, /* @__PURE__ */ React.createElement("div", { className: "sb-brand" }, /* @__PURE__ */ React.createElement("div", { className: "sb-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sb-title" }, "Rusty Hand"), /* @__PURE__ */ React.createElement("div", { className: "sb-sub" }, "v0.7.48 \xB7 schema v8"))), /* @__PURE__ */ React.createElement("div", { className: "sb-nav", style: { flex: 1, overflow: "auto", padding: "6px 6px" } }, NAV.map((it, i) => {
+  return /* @__PURE__ */ React.createElement("nav", { className: "sidebar" }, /* @__PURE__ */ React.createElement("div", { className: "sb-brand" }, /* @__PURE__ */ React.createElement("div", { className: "sb-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sb-title" }, "Rusty Hand"), /* @__PURE__ */ React.createElement("div", { className: "sb-sub" }, "v0.7.49 \xB7 schema v8"))), /* @__PURE__ */ React.createElement("div", { className: "sb-nav", style: { flex: 1, overflow: "auto", padding: "6px 6px" } }, NAV.map((it, i) => {
     if (it.kind === "section") return /* @__PURE__ */ React.createElement("div", { key: i, className: "sb-section-label", style: { marginTop: i === 0 ? 4 : 10 } }, it.label);
     const active = page === it.id;
     const liveCount = it.id === "approvals" && approvalsCount != null ? approvalsCount : it.count;
@@ -85,9 +85,9 @@ const CRUMBS = {
   bindings: ["RustyHand", "Bindings"],
   settings: ["RustyHand", "Settings"]
 };
-function Topbar({ page, onOpenPalette }) {
+function Topbar({ page, onOpenPalette, onOpenHelp }) {
   const crumbs = CRUMBS[page] || ["RustyHand"];
-  return /* @__PURE__ */ React.createElement("div", { className: "topbar" }, /* @__PURE__ */ React.createElement("div", { className: "crumbs" }, crumbs.map((c, i) => /* @__PURE__ */ React.createElement("span", { key: i }, i > 0 && /* @__PURE__ */ React.createElement("span", { className: "crumb-sep" }, " / "), /* @__PURE__ */ React.createElement("span", { className: i === crumbs.length - 1 ? "crumb-now" : "" }, c)))), /* @__PURE__ */ React.createElement("button", { className: "cmd", onClick: onOpenPalette }, /* @__PURE__ */ React.createElement(I.search, null), /* @__PURE__ */ React.createElement("span", null, "Jump to agent, page\u2026"), /* @__PURE__ */ React.createElement("span", { className: "kbd kbd-row" }, /* @__PURE__ */ React.createElement("span", { className: "kbd" }, "\u2318"), /* @__PURE__ */ React.createElement("span", { className: "kbd" }, "K"))), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", title: "Notifications" }, /* @__PURE__ */ React.createElement(I.zap, null)), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", title: "Operator" }, /* @__PURE__ */ React.createElement("div", { className: "avatar", style: { width: 24, height: 24, fontSize: 10, background: "linear-gradient(135deg,oklch(0.6 0.13 22),oklch(0.42 0.1 35))" } }, "OP")));
+  return /* @__PURE__ */ React.createElement("div", { className: "topbar" }, /* @__PURE__ */ React.createElement("div", { className: "crumbs" }, crumbs.map((c, i) => /* @__PURE__ */ React.createElement("span", { key: i }, i > 0 && /* @__PURE__ */ React.createElement("span", { className: "crumb-sep" }, " / "), /* @__PURE__ */ React.createElement("span", { className: i === crumbs.length - 1 ? "crumb-now" : "" }, c)))), /* @__PURE__ */ React.createElement("button", { className: "cmd", onClick: onOpenPalette }, /* @__PURE__ */ React.createElement(I.search, null), /* @__PURE__ */ React.createElement("span", null, "Jump to agent, page\u2026"), /* @__PURE__ */ React.createElement("span", { className: "kbd kbd-row" }, /* @__PURE__ */ React.createElement("span", { className: "kbd" }, "\u2318"), /* @__PURE__ */ React.createElement("span", { className: "kbd" }, "K"))), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", title: "Keyboard shortcuts (?)", onClick: onOpenHelp }, /* @__PURE__ */ React.createElement("span", { style: { fontFamily: "var(--ff-mono)", fontSize: 12, fontWeight: 600 } }, "?")), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", title: "Operator" }, /* @__PURE__ */ React.createElement("div", { className: "avatar", style: { width: 24, height: 24, fontSize: 10, background: "linear-gradient(135deg,oklch(0.6 0.13 22),oklch(0.42 0.1 35))" } }, "OP")));
 }
 const __PALETTE_RECENT_KEY = "rh.panel.paletteRecent";
 function loadRecentPicks() {
@@ -249,6 +249,55 @@ function LoginScreen({ onLogin }) {
   };
   return /* @__PURE__ */ React.createElement("div", { className: "auth-splash" }, /* @__PURE__ */ React.createElement("form", { className: "auth-card", onSubmit: submit }, /* @__PURE__ */ React.createElement("div", { className: "auth-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", { className: "auth-title" }, "RustyHand \xB7 Control Panel"), /* @__PURE__ */ React.createElement("div", { className: "auth-sub" }, "Enter your API key to continue. Configure it in ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "~/.rustyhand/config.toml"), " under ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "api_key"), " or via per-user RBAC."), /* @__PURE__ */ React.createElement("input", { className: "modal-field", type: "password", autoFocus: true, placeholder: "rh_\u2026", value: key, onChange: (e) => setKey(e.target.value) }), err && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, err)), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn primary", disabled: busy || !key.trim(), style: { width: "100%" } }, busy ? "Verifying\u2026" : "Sign in"), /* @__PURE__ */ React.createElement("div", { className: "dim mono auth-foot" }, "Running on localhost? Auth is auto-granted \u2014 this screen shouldn't appear.")));
 }
+function HelpOverlay({ open, onClose }) {
+  useEscapeKey(open ? onClose : null);
+  if (!open) return null;
+  const groups = [
+    {
+      label: "Navigation",
+      rows: [
+        ["\u2318 K  /  Ctrl K", "Open command palette"],
+        ["1 \u2014 9", "Jump to the Nth sidebar entry"],
+        ["g a", "Sidebar links \u2014 middle-click for new tab"],
+        ["Esc", "Close any overlay (palette, drawer, modal)"]
+      ]
+    },
+    {
+      label: "On any page",
+      rows: [
+        ["/", "Focus the page's search field"],
+        ["n", "Open the primary \u201CNew \u2026\u201D modal (Spawn, New job, etc.)"],
+        ["r", "Refresh the current page"],
+        ["?", "Toggle this help overlay"]
+      ]
+    },
+    {
+      label: "Inside the chat",
+      rows: [
+        ["Enter", "Send the message"],
+        ["Click \u2699 trace", "Expand to see tool input + result"]
+      ]
+    },
+    {
+      label: "Workflows page",
+      rows: [
+        ["Click a run row", "Inspect step-by-step output + tokens"],
+        ["Drag \u2630 on a step", "Reorder steps in the visual builder"]
+      ]
+    },
+    {
+      label: "Agents page",
+      rows: [
+        ["Checkbox in row", "Add to bulk selection"],
+        ["Bulk bar", "Kill / Restart all selected agents"],
+        ["Group / Flat", "Toggle grouping by team"]
+      ]
+    }
+  ];
+  return /* @__PURE__ */ React.createElement("div", { className: "modal-back", onClick: onClose }, /* @__PURE__ */ React.createElement("div", { className: "modal wide", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "modal-head" }, /* @__PURE__ */ React.createElement("b", { className: "mono" }, "Keyboard shortcuts"), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", onClick: onClose }, /* @__PURE__ */ React.createElement(I.close, null))), /* @__PURE__ */ React.createElement("div", { className: "modal-body" }, /* @__PURE__ */ React.createElement("div", { className: "grid-12", style: { rowGap: 16 } }, groups.map((g) => /* @__PURE__ */ React.createElement("div", { key: g.label, className: "col-6" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, g.label), /* @__PURE__ */ React.createElement("div", { className: "col gap-4" }, g.rows.map(([k, desc]) => /* @__PURE__ */ React.createElement("div", { key: k, className: "row", style: { padding: "4px 0", gap: 12 } }, /* @__PURE__ */ React.createElement("span", { className: "kbd-row", style: { minWidth: 130 } }, k.split(/\s+\/\s+|\s+/).map(
+    (part, i, arr) => /^[A-Za-z]$/.test(part) || part === "Esc" || part === "Enter" || part === "\u2318" || part === "Ctrl" || part === "K" || /^\d+$/.test(part) || part === "\u2014" || part === "/" || part === "?" || part === "n" || part === "r" ? /* @__PURE__ */ React.createElement("span", { key: i, className: "kbd" }, part) : /* @__PURE__ */ React.createElement("span", { key: i, style: { margin: "0 4px" } }, part)
+  )), /* @__PURE__ */ React.createElement("span", { className: "dim", style: { fontSize: 12 } }, desc)))))))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: onClose }, "Close"))));
+}
 class PageErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -293,6 +342,7 @@ function App() {
     root.style.setProperty("--rust-2", a.rust2);
     root.style.setProperty("--rust-dim", a.dim);
   }, [t.theme, t.accent, t.density]);
+  const [helpOpen, setHelpOpen] = useState(false);
   useEffect(() => {
     const onKey = (e) => {
       var _a, _b;
@@ -303,9 +353,33 @@ function App() {
       }
       if (e.key === "Escape") {
         setPaletteOpen(false);
+        setHelpOpen(false);
         return;
       }
-      if ((_b = (_a = e.target).matches) == null ? void 0 : _b.call(_a, "input, textarea")) return;
+      if ((_b = (_a = e.target).matches) == null ? void 0 : _b.call(_a, "input, textarea, select, [contenteditable]")) return;
+      if (e.key === "?") {
+        e.preventDefault();
+        setHelpOpen((v) => !v);
+        return;
+      }
+      if (e.key === "/") {
+        const el = document.querySelector(".content .search-field input");
+        if (el) {
+          e.preventDefault();
+          el.focus();
+        }
+        return;
+      }
+      if (e.key === "n" || e.key === "N") {
+        const ev = new CustomEvent("rh:hotkey:new", { detail: { page } });
+        window.dispatchEvent(ev);
+        return;
+      }
+      if (e.key === "r" || e.key === "R") {
+        const ev = new CustomEvent("rh:hotkey:refresh", { detail: { page } });
+        window.dispatchEvent(ev);
+        return;
+      }
       const items = NAV.filter((n) => !n.kind);
       const idx = parseInt(e.key, 10);
       if (idx >= 1 && idx <= items.length) {
@@ -314,7 +388,7 @@ function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [setPage]);
+  }, [setPage, page]);
   let pageEl;
   if (page === "overview") pageEl = /* @__PURE__ */ React.createElement(OverviewPage, { go: setPage });
   else if (page === "agents") pageEl = /* @__PURE__ */ React.createElement(AgentsPage, { openAgent });
@@ -333,7 +407,7 @@ function App() {
   else if (page === "audit") pageEl = /* @__PURE__ */ React.createElement(AuditPage, null);
   else if (page === "settings") pageEl = /* @__PURE__ */ React.createElement(SettingsPage, null);
   else pageEl = /* @__PURE__ */ React.createElement(OverviewPage, { go: setPage });
-  return /* @__PURE__ */ React.createElement("div", { className: "app", "data-screen-label": `Page \xB7 ${page}` }, /* @__PURE__ */ React.createElement(Sidebar, { page, go: setPage }), /* @__PURE__ */ React.createElement("div", { className: "main" }, /* @__PURE__ */ React.createElement(Topbar, { page, onOpenPalette: () => setPaletteOpen(true) }), /* @__PURE__ */ React.createElement("div", { className: "content", style: { position: "relative" } }, /* @__PURE__ */ React.createElement(PageErrorBoundary, { pageId: page }, pageEl), /* @__PURE__ */ React.createElement(AgentDrawer, { agent: drawerAgent, onClose: closeDrawer }))), /* @__PURE__ */ React.createElement(CommandPalette, { open: paletteOpen, onClose: () => setPaletteOpen(false), go: setPage, openAgent }), /* @__PURE__ */ React.createElement(TweaksPanel, null, /* @__PURE__ */ React.createElement(TweakSection, { label: "Theme" }), /* @__PURE__ */ React.createElement(TweakRadio, { label: "Mode", value: t.theme, options: ["dark", "light"], onChange: (v) => setTweak("theme", v) }), /* @__PURE__ */ React.createElement(TweakSection, { label: "Accent" }), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "app", "data-screen-label": `Page \xB7 ${page}` }, /* @__PURE__ */ React.createElement(Sidebar, { page, go: setPage }), /* @__PURE__ */ React.createElement("div", { className: "main" }, /* @__PURE__ */ React.createElement(Topbar, { page, onOpenPalette: () => setPaletteOpen(true), onOpenHelp: () => setHelpOpen(true) }), /* @__PURE__ */ React.createElement("div", { className: "content", style: { position: "relative" } }, /* @__PURE__ */ React.createElement(PageErrorBoundary, { pageId: page }, pageEl), /* @__PURE__ */ React.createElement(AgentDrawer, { agent: drawerAgent, onClose: closeDrawer }))), /* @__PURE__ */ React.createElement(CommandPalette, { open: paletteOpen, onClose: () => setPaletteOpen(false), go: setPage, openAgent }), /* @__PURE__ */ React.createElement(HelpOverlay, { open: helpOpen, onClose: () => setHelpOpen(false) }), /* @__PURE__ */ React.createElement(TweaksPanel, null, /* @__PURE__ */ React.createElement(TweakSection, { label: "Theme" }), /* @__PURE__ */ React.createElement(TweakRadio, { label: "Mode", value: t.theme, options: ["dark", "light"], onChange: (v) => setTweak("theme", v) }), /* @__PURE__ */ React.createElement(TweakSection, { label: "Accent" }), /* @__PURE__ */ React.createElement(
     TweakSelect,
     {
       label: "Color",

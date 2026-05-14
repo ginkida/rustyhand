@@ -583,6 +583,40 @@ a { color: inherit; text-decoration: none; }
   display: flex; align-items: center; gap: 8px;
 }
 .tool-trace.done { background: oklch(0.74 0.135 150 / .07); border-style: solid; border-color: oklch(0.74 0.135 150 / .3); }
+.tool-trace.fail { background: oklch(0.66 0.18 25 / .08); border-style: solid; border-color: oklch(0.66 0.18 25 / .4); }
+.tool-trace { display: block; padding: 0; overflow: hidden; }
+.tool-trace-head {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  background: none; color: inherit;
+  text-align: left;
+  font-family: var(--ff-mono);
+  font-size: 11.5px;
+}
+.tool-trace-head:disabled { cursor: default; }
+.tool-trace-head:not(:disabled) { cursor: pointer; }
+.tool-trace-head:not(:disabled):hover { background: oklch(0 0 0 / .04); }
+[data-theme="light"] .tool-trace-head:not(:disabled):hover { background: oklch(0 0 0 / .04); }
+.tool-trace-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-trace-caret {
+  width: 14px; text-align: center;
+  font-family: var(--ff-mono);
+  color: var(--fg-3);
+}
+.tool-trace-detail {
+  padding: 0 10px 8px 32px;
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  border-top: 1px dashed oklch(0.665 0.165 50 / .25);
+}
+.tool-trace-detail-label {
+  font-size: 9.5px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  margin: 6px 0 4px;
+}
 .tool-trace .tool-name { color: var(--rust); }
 .tool-trace.done .tool-name { color: var(--live); }
 .tool-trace .elapsed { margin-left: auto; color: var(--fg-3); font-size: 10.5px; }
@@ -1157,6 +1191,67 @@ code, .mono { font-family: var(--ff-mono); }
 .palette-row:hover,
 .palette-row.active { background: var(--surface-2); color: var(--fg); }
 .palette-row.active { box-shadow: inset 2px 0 0 var(--rust); }
+
+/* ---------- Inline tooltips (Tip component) ---------- */
+.tip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  cursor: help;
+  outline: none;
+}
+.tip-glyph {
+  width: 13px; height: 13px;
+  display: grid; place-items: center;
+  border: 1px solid var(--border-hi);
+  border-radius: 50%;
+  color: var(--fg-3);
+  font-size: 9.5px;
+  font-family: var(--ff-mono);
+  font-weight: 600;
+  background: var(--surface);
+}
+.tip-wrap:hover .tip-glyph,
+.tip-wrap:focus .tip-glyph { color: var(--rust); border-color: var(--rust); }
+.tip-bubble {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  padding: 6px 9px;
+  min-width: 200px;
+  max-width: 280px;
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: 6px;
+  color: var(--fg);
+  font-family: var(--ff-sans);
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: normal;
+  box-shadow: var(--shadow);
+}
+
+/* ---------- Bulk-actions toolbar (appears when rows are selected) ---------- */
+.bulk-bar {
+  display: flex; align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 0 0 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-hi);
+  border-radius: 8px;
+  font-family: var(--ff-mono);
+  font-size: 12px;
+  animation: bulk-bar-in .12s ease-out;
+}
+@keyframes bulk-bar-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 /* ---------- DnD handle (workflow builder) ---------- */
 .dnd-handle {
