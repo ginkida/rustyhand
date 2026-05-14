@@ -430,6 +430,10 @@ pub async fn build_router(
         // Config endpoints
         .route("/api/config", axum::routing::get(routes::get_config))
         .route(
+            "/api/config/export",
+            axum::routing::get(routes::export_config_toml),
+        )
+        .route(
             "/api/config/schema",
             axum::routing::get(routes::config_schema),
         )

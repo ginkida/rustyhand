@@ -3882,6 +3882,84 @@ pub async fn knowledge_query(
 // Config endpoint
 // ---------------------------------------------------------------------------
 
+/// GET /api/config/export — Download the on-disk config.toml as a
+/// text/plain attachment so operators can back it up / diff it without
+/// reading a redacted JSON view. Server-side credentials are masked
+/// (matches the Debug impl on KernelConfig) so the export is safe to
+/// share — passwords and api keys come out as `<redacted>`.
+pub async fn export_config_toml(State(state): State<Arc<AppState>>) -> axum::response::Response {
+    let path = state.kernel.config.home_dir.join("config.toml");
+    let body = match std::fs::read_to_string(&path) {
+        Ok(s) => mask_config_secrets(&s),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": format!("Failed to read config.toml: {e}"),
+                    "path": path.display().to_string(),
+                })),
+            )
+                .into_response();
+        }
+    };
+    let filename = format!(
+        "rustyhand-config-{}.toml",
+        chrono::Utc::now().format("%Y-%m-%d")
+    );
+    let mut resp = body.into_response();
+    let headers = resp.headers_mut();
+    headers.insert("content-type", "text/plain; charset=utf-8".parse().unwrap());
+    headers.insert(
+        "content-disposition",
+        format!("attachment; filename=\"{filename}\"")
+            .parse()
+            .unwrap(),
+    );
+    resp
+}
+
+/// Replace common credential field values with `<redacted>` in a TOML
+/// blob. Belt-and-braces redaction for the export endpoint — even if the
+/// user pasted a key into a field we don't formally mark as secret, it
+/// won't leak through this helper. Matches keys are: `api_key`,
+/// `password`, `token`, `secret`, `bearer_token`, plus anything ending
+/// in `_key` (e.g. `openai_api_key`).
+fn mask_config_secrets(toml: &str) -> String {
+    let mut out = String::with_capacity(toml.len());
+    for line in toml.lines() {
+        let trimmed = line.trim_start();
+        let key_end = trimmed
+            .find('=')
+            .map(|i| trimmed[..i].trim().to_lowercase());
+        let is_secret_key = match key_end {
+            Some(k) => {
+                k == "api_key"
+                    || k == "password"
+                    || k == "token"
+                    || k == "secret"
+                    || k == "bearer_token"
+                    || k.ends_with("_key")
+                    || k.ends_with("_token")
+                    || k.ends_with("_password")
+                    || k.ends_with("_secret")
+            }
+            None => false,
+        };
+        if is_secret_key {
+            if let Some(eq) = line.find('=') {
+                let (lhs, _) = line.split_at(eq + 1);
+                out.push_str(lhs);
+                out.push_str(" \"<redacted>\"");
+                out.push('\n');
+                continue;
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
 /// GET /api/config — Get kernel configuration (secrets redacted).
 pub async fn get_config(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     // Return a redacted view of the kernel config

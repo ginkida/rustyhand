@@ -22,7 +22,7 @@ function OverviewPage({ go }) {
     refreshApprovals();
   };
   const approvalRows = approvalsResp && approvalsResp.approvals || D.approvals;
-  const version = health && health.version || "0.7.57";
+  const version = health && health.version || "0.7.58";
   const uptime = health && health.uptime_seconds ? formatUptime(health.uptime_seconds) : null;
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(Banner, { go, onboarding }), /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Overview"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "System pulse \xB7 kernel ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v", version), uptime && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 uptime ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, uptime)), " ", "\xB7 schema ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v8"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null), " Refresh"), /* @__PURE__ */ React.createElement("button", { className: "btn primary" }, /* @__PURE__ */ React.createElement(I.plus, null), " New agent"))), /* @__PURE__ */ React.createElement("div", { className: "tiles" }, /* @__PURE__ */ React.createElement(Tile, { label: "Agents running", value: `${live}`, foot: `of ${totalAgents} total`, spark: sparkOf(agents.map((_, i) => live + (i % 3 - 1)), 12) }), /* @__PURE__ */ React.createElement(Tile, { label: "Cost \xB7 today", value: `$${(cost24 || 0).toFixed(2)}`, foot: usage ? "from /api/usage/daily" : "loading\u2026", spark: days.slice(-12).map((d) => d.cost_usd || 0) }), /* @__PURE__ */ React.createElement(Tile, { label: "Audit entries", value: audit && audit.total != null ? audit.total.toLocaleString() : "\u2014", foot: audit && audit.tip_hash ? `tip ${String(audit.tip_hash).slice(0, 8)}` : "loading\u2026", spark: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] }), /* @__PURE__ */ React.createElement(Tile, { label: "Errors \xB7 agents", value: `${errors}`, foot: errors ? `${errors} crashed agent(s)` : "all green", spark: [0, 0, 1, 0, 0, 0, 0, 0, errors, 0, 0, 0], deltaCls: "up", warn: errors > 0 })), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 col" }, /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Live activity"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: refreshAudit }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost" }, /* @__PURE__ */ React.createElement(I.download, null), " Export"))), /* @__PURE__ */ React.createElement(ActivityFeed, { entries: audit && audit.entries })), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Approvals \xB7 waiting"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("approvals") }, "Open queue"))), approvalRows.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, "No approvals waiting.") : /* @__PURE__ */ React.createElement(ApprovalsTable, { rows: approvalRows.slice(0, 3), compact: true, onChange: refreshApprovals }))), /* @__PURE__ */ React.createElement("div", { className: "col-4 col" }, onboarding && onboarding.demo_mode && /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Demo seed"), /* @__PURE__ */ React.createElement("span", { className: "badge demo" }, /* @__PURE__ */ React.createElement("span", { className: "dot demo" }), "active")), /* @__PURE__ */ React.createElement("div", { className: "col gap-8" }, /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.agents, null), title: "rusty", sub: "welcome agent \xB7 chat-ready", onClick: () => go("chat") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.workflows, null), title: "demo-pipeline", sub: "2-step sample workflow \xB7 click to run", onClick: () => go("workflows") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.event, null), title: "sample trigger", sub: "agent-spawn on webhook", onClick: () => go("automation") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.cron, null), title: "demo-daily-ping", sub: "cron 0 9 * * * \xB7 disabled", onClick: () => go("automation") }))), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Providers"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("settings") }, "Manage")), /* @__PURE__ */ React.createElement(ProvidersList, { providers: providersResp && providersResp.providers })), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Audit chain"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("audit") }, "View")), /* @__PURE__ */ React.createElement("div", { className: "col gap-4" }, /* @__PURE__ */ React.createElement(AuditSummary, { audit }))))));
 }
@@ -98,6 +98,12 @@ function actionColor(action) {
   if (a.includes("approval") || a.includes("denied") || a.includes("reject")) return "amber";
   if (a.includes("error") || a.includes("panic") || a.includes("crash")) return "muted";
   return "muted";
+}
+function auditLevelOf(entry) {
+  const a = ((entry && (entry.action || "")) + " " + (entry && entry.outcome || "")).toLowerCase();
+  if (a.includes("error") || a.includes("panic") || a.includes("crash") || a.includes("fail")) return "error";
+  if (a.includes("approval") || a.includes("denied") || a.includes("reject") || a.includes("warn")) return "warn";
+  return "info";
 }
 function formatTime(ts) {
   if (!ts) return "\u2014";
@@ -1794,6 +1800,7 @@ function AutomationPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [cronResp, , refreshCron] = usePolling("/api/cron/jobs", 15e3);
   const [trigResp, , refreshTrig] = usePolling("/api/triggers", 15e3);
+  const [cronSelected, setCronSelected] = useState(() => /* @__PURE__ */ new Set());
   React.useEffect(() => {
     const onNew = (e) => {
       if (e.detail && e.detail.page === "automation") setShowCreate(true);
@@ -1830,12 +1837,81 @@ function AutomationPage() {
       toastErr(`run failed: ${e.message || e}`);
     }
   };
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Automation"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Cron jobs survive restart \xB7 3 CronAction variants \xB7 trigger fire-counts persisted")), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => (tab === "cron" ? refreshCron : refreshTrig)() }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setShowCreate(true) }, /* @__PURE__ */ React.createElement(I.plus, null), " New ", tab === "cron" ? "job" : "trigger"))), /* @__PURE__ */ React.createElement("div", { className: "tabs" }, /* @__PURE__ */ React.createElement("button", { className: tab === "cron" ? "on" : "", onClick: () => setTab("cron") }, "Cron jobs \xB7 ", cron.length), /* @__PURE__ */ React.createElement("button", { className: tab === "triggers" ? "on" : "", onClick: () => setTab("triggers") }, "Triggers \xB7 ", triggers.length)), tab === "cron" && /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "ID"), /* @__PURE__ */ React.createElement("th", null, "Schedule"), /* @__PURE__ */ React.createElement("th", null, "Action"), /* @__PURE__ */ React.createElement("th", null, "Next"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Fires"), /* @__PURE__ */ React.createElement("th", null, "Enabled"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, !cronResp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 7, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), cronResp && cron.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 7, style: { padding: "24px 14px", textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 12, marginBottom: 8 } }, "No cron jobs yet."), /* @__PURE__ */ React.createElement("button", { className: "btn primary sm", onClick: () => setShowCreate(true) }, /* @__PURE__ */ React.createElement(I.plus, null), " Schedule your first job"))), cron.map((c) => {
+  React.useEffect(() => {
+    if (cronSelected.size === 0) return;
+    const live = new Set(cron.map((c) => c.id));
+    const next = new Set([...cronSelected].filter((id) => live.has(id)));
+    if (next.size !== cronSelected.size) setCronSelected(next);
+  }, [cron.map((c) => c.id).join(",")]);
+  const toggleCronSelect = (id) => {
+    setCronSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const toggleAllCron = () => {
+    setCronSelected((prev) => {
+      if (cron.length === 0) return prev;
+      if (prev.size === cron.length) return /* @__PURE__ */ new Set();
+      return new Set(cron.map((c) => c.id));
+    });
+  };
+  const bulkSetEnabled = async (target) => {
+    const ids = [...cronSelected];
+    if (ids.length === 0) return;
+    const label = target ? "Enable" : "Disable";
+    const ok = await confirmDialog({
+      title: `${label} ${ids.length} cron job(s)?`,
+      message: `${label} all selected jobs. Disabled jobs do not fire on their schedule until re-enabled.`,
+      confirmLabel: `${label} ${ids.length}`,
+      danger: !target
+    });
+    if (!ok) return;
+    let okCount = 0, failCount = 0;
+    for (const id of ids) {
+      try {
+        await rhFetch(`/api/cron/jobs/${encodeURIComponent(id)}/enable`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: target })
+        });
+        okCount++;
+      } catch (_) {
+        failCount++;
+      }
+    }
+    setCronSelected(/* @__PURE__ */ new Set());
+    if (failCount > 0) toastErr(`${label.toLowerCase()}: ${okCount} ok / ${failCount} failed`);
+    else toastOk(`${label}d ${okCount} job(s)`);
+    refreshCron();
+  };
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Automation"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Cron jobs survive restart \xB7 3 CronAction variants \xB7 trigger fire-counts persisted")), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => (tab === "cron" ? refreshCron : refreshTrig)() }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setShowCreate(true) }, /* @__PURE__ */ React.createElement(I.plus, null), " New ", tab === "cron" ? "job" : "trigger"))), /* @__PURE__ */ React.createElement("div", { className: "tabs" }, /* @__PURE__ */ React.createElement("button", { className: tab === "cron" ? "on" : "", onClick: () => setTab("cron") }, "Cron jobs \xB7 ", cron.length), /* @__PURE__ */ React.createElement("button", { className: tab === "triggers" ? "on" : "", onClick: () => setTab("triggers") }, "Triggers \xB7 ", triggers.length)), tab === "cron" && /* @__PURE__ */ React.createElement(React.Fragment, null, cronSelected.size > 0 && /* @__PURE__ */ React.createElement("div", { className: "bulk-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 12 } }, cronSelected.size, " selected"), /* @__PURE__ */ React.createElement("button", { className: "btn sm primary", onClick: () => bulkSetEnabled(true) }, /* @__PURE__ */ React.createElement(I.play, null), " Enable ", cronSelected.size), /* @__PURE__ */ React.createElement("button", { className: "btn sm danger", onClick: () => bulkSetEnabled(false) }, /* @__PURE__ */ React.createElement(I.pause, null), " Disable ", cronSelected.size), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => setCronSelected(/* @__PURE__ */ new Set()), style: { marginLeft: "auto" } }, "Clear")), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { style: { width: 28 } }, /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "checkbox",
+      checked: cron.length > 0 && cronSelected.size === cron.length,
+      ref: (el) => {
+        if (el) el.indeterminate = cronSelected.size > 0 && cronSelected.size < cron.length;
+      },
+      onChange: toggleAllCron,
+      title: cronSelected.size === cron.length ? "Deselect all" : "Select all"
+    }
+  )), /* @__PURE__ */ React.createElement("th", null, "ID"), /* @__PURE__ */ React.createElement("th", null, "Schedule"), /* @__PURE__ */ React.createElement("th", null, "Action"), /* @__PURE__ */ React.createElement("th", null, "Next"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Fires"), /* @__PURE__ */ React.createElement("th", null, "Enabled"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, !cronResp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 8, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), cronResp && cron.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 8, style: { padding: "24px 14px", textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 12, marginBottom: 8 } }, "No cron jobs yet."), /* @__PURE__ */ React.createElement("button", { className: "btn primary sm", onClick: () => setShowCreate(true) }, /* @__PURE__ */ React.createElement(I.plus, null), " Schedule your first job"))), cron.map((c) => {
     const actionLabel = c.action_label || c.action_summary || c.action && (c.action.kind || c.action.type || JSON.stringify(c.action).slice(0, 60)) || "\u2014";
     const next = c.next_run || c.next_fire || c.next || "\u2014";
     const fires = c.fire_count != null ? c.fire_count : c.fires || 0;
-    return /* @__PURE__ */ React.createElement("tr", { key: c.id }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, c.id), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: "mono", style: { color: "var(--rust)" } }, c.schedule || c.cron || c.expression)), /* @__PURE__ */ React.createElement("td", { className: "mono", style: { maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, actionLabel), /* @__PURE__ */ React.createElement("td", { className: "mono muted" }, next === "\u2014" ? next : formatTime(next)), /* @__PURE__ */ React.createElement("td", { className: "num mono" }, Number(fires).toLocaleString()), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("div", { className: "switch " + (c.enabled ? "on" : ""), onClick: () => toggleCron(c.id, c.enabled) })), /* @__PURE__ */ React.createElement("td", { className: "right" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => runCronNow(c.id) }, "Run now")));
-  })))), tab === "triggers" && /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "ID"), /* @__PURE__ */ React.createElement("th", null, "Kind"), /* @__PURE__ */ React.createElement("th", null, "Target"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Fired"), /* @__PURE__ */ React.createElement("th", null, "Last"), /* @__PURE__ */ React.createElement("th", null, "Status"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, !trigResp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 7, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), trigResp && triggers.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 7, style: { padding: "24px 14px", textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 12, marginBottom: 8 } }, "No triggers configured."), /* @__PURE__ */ React.createElement("button", { className: "btn primary sm", onClick: () => setShowCreate(true) }, /* @__PURE__ */ React.createElement(I.plus, null), " Add your first trigger"))), triggers.map((t) => {
+    const isSel = cronSelected.has(c.id);
+    return /* @__PURE__ */ React.createElement("tr", { key: c.id, style: isSel ? { background: "var(--surface-2)" } : null }, /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "checkbox",
+        checked: isSel,
+        onChange: () => toggleCronSelect(c.id)
+      }
+    )), /* @__PURE__ */ React.createElement("td", { className: "mono" }, c.id), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: "mono", style: { color: "var(--rust)" } }, c.schedule || c.cron || c.expression)), /* @__PURE__ */ React.createElement("td", { className: "mono", style: { maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, actionLabel), /* @__PURE__ */ React.createElement("td", { className: "mono muted" }, next === "\u2014" ? next : formatTime(next)), /* @__PURE__ */ React.createElement("td", { className: "num mono" }, Number(fires).toLocaleString()), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("div", { className: "switch " + (c.enabled ? "on" : ""), onClick: () => toggleCron(c.id, c.enabled) })), /* @__PURE__ */ React.createElement("td", { className: "right" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => runCronNow(c.id) }, "Run now")));
+  }))))), tab === "triggers" && /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "ID"), /* @__PURE__ */ React.createElement("th", null, "Kind"), /* @__PURE__ */ React.createElement("th", null, "Target"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Fired"), /* @__PURE__ */ React.createElement("th", null, "Last"), /* @__PURE__ */ React.createElement("th", null, "Status"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, !trigResp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 7, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), trigResp && triggers.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 7, style: { padding: "24px 14px", textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 12, marginBottom: 8 } }, "No triggers configured."), /* @__PURE__ */ React.createElement("button", { className: "btn primary sm", onClick: () => setShowCreate(true) }, /* @__PURE__ */ React.createElement(I.plus, null), " Add your first trigger"))), triggers.map((t) => {
     const kind = (t.kind || t.type || "\u2014").toString();
     const target = t.target || t.agent_id || t.workflow_id || "\u2014";
     const fired = t.fire_count != null ? t.fire_count : t.fired || 0;
@@ -2785,9 +2861,30 @@ function AuditPage() {
       toastErr(`copy failed: ${e.message || e}`);
     }
   };
+  const [levelFilter, setLevelFilterState] = useState(() => {
+    try {
+      const stored = localStorage.getItem("rh.panel.auditLevel") || "all";
+      return ["all", "info", "warn", "error"].includes(stored) ? stored : "all";
+    } catch (e) {
+      return "all";
+    }
+  });
+  const setLevelFilter = (lvl) => {
+    setLevelFilterState(lvl);
+    try {
+      localStorage.setItem("rh.panel.auditLevel", lvl);
+    } catch (e) {
+    }
+  };
   const rawEntries = audit && audit.entries || [];
+  const levelCounts = { info: 0, warn: 0, error: 0 };
+  for (const e of rawEntries) {
+    const lvl = auditLevelOf(e);
+    levelCounts[lvl] = (levelCounts[lvl] || 0) + 1;
+  }
+  const levelFiltered = levelFilter === "all" ? rawEntries : rawEntries.filter((e) => auditLevelOf(e) === levelFilter);
   const ql = q.trim().toLowerCase();
-  const entries = !ql ? rawEntries : rawEntries.filter(
+  const entries = !ql ? levelFiltered : levelFiltered.filter(
     (e) => (e.action || "").toLowerCase().includes(ql) || (e.agent_name || "").toLowerCase().includes(ql) || (e.agent_id || "").toLowerCase().includes(ql) || (e.detail || "").toLowerCase().includes(ql) || (e.outcome || "").toLowerCase().includes(ql) || (e.hash || "").toLowerCase().includes(ql)
   );
   const actorCounts = {};
@@ -2803,7 +2900,25 @@ function AuditPage() {
     if (idx < 0) return text;
     return /* @__PURE__ */ React.createElement(React.Fragment, null, s.slice(0, idx), /* @__PURE__ */ React.createElement("mark", { className: "audit-match" }, s.slice(idx, idx + ql.length)), s.slice(idx + ql.length));
   }, [ql]);
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Audit log"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Merkle hash chain \xB7 ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "~/.rustyhand/data/audit.jsonl"), " \xB7 replayed on boot")), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("div", { className: "search-field", style: { minWidth: 260 } }, /* @__PURE__ */ React.createElement(I.search, null), /* @__PURE__ */ React.createElement("input", { placeholder: "filter by action / actor / hash / detail\u2026", value: q, onChange: (e) => setQ(e.target.value) }), q && /* @__PURE__ */ React.createElement("button", { className: "kbd", onClick: () => setQ(""), style: { cursor: "pointer" } }, "clear")), /* @__PURE__ */ React.createElement("div", { className: "seg", title: "Audit window size" }, [50, 200, 500, 1e3].map((n) => /* @__PURE__ */ React.createElement("button", { key: n, className: windowSize === n ? "on" : "", onClick: () => setWindow(n) }, n))), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => {
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Audit log"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Merkle hash chain \xB7 ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "~/.rustyhand/data/audit.jsonl"), " \xB7 replayed on boot")), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("div", { className: "search-field", style: { minWidth: 260 } }, /* @__PURE__ */ React.createElement(I.search, null), /* @__PURE__ */ React.createElement("input", { placeholder: "filter by action / actor / hash / detail\u2026", value: q, onChange: (e) => setQ(e.target.value) }), q && /* @__PURE__ */ React.createElement("button", { className: "kbd", onClick: () => setQ(""), style: { cursor: "pointer" } }, "clear")), /* @__PURE__ */ React.createElement("div", { className: "seg", title: "Filter by classified severity" }, /* @__PURE__ */ React.createElement("button", { className: levelFilter === "all" ? "on" : "", onClick: () => setLevelFilter("all") }, "all \xB7 ", rawEntries.length), /* @__PURE__ */ React.createElement("button", { className: levelFilter === "info" ? "on" : "", onClick: () => setLevelFilter("info") }, "info \xB7 ", levelCounts.info), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      className: levelFilter === "warn" ? "on" : "",
+      style: levelFilter === "warn" ? { color: "var(--amber)" } : {},
+      onClick: () => setLevelFilter("warn")
+    },
+    "warn \xB7 ",
+    levelCounts.warn
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      className: levelFilter === "error" ? "on" : "",
+      style: levelFilter === "error" ? { color: "var(--crimson)" } : {},
+      onClick: () => setLevelFilter("error")
+    },
+    "error \xB7 ",
+    levelCounts.error
+  )), /* @__PURE__ */ React.createElement("div", { className: "seg", title: "Audit window size" }, [50, 200, 500, 1e3].map((n) => /* @__PURE__ */ React.createElement("button", { key: n, className: windowSize === n ? "on" : "", onClick: () => setWindow(n) }, n))), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => {
     refresh();
     verifyRefresh();
   } }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: verifyRefresh }, /* @__PURE__ */ React.createElement(I.shield, null), " Verify chain"), /* @__PURE__ */ React.createElement(
@@ -2877,10 +2992,28 @@ function SettingsPage() {
   const users = usersResp && usersResp.users || [];
   const apiListen = config && (config.api_listen || config.api && config.api.listen) || "\u2014";
   const proxy = config && (config.proxy_url || config.proxy && config.proxy.url) || null;
-  const version = health && health.version || "0.7.57";
+  const version = health && health.version || "0.7.58";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "\u2014";
   const agentCount = health && health.agent_count != null ? health.agent_count : "\u2014";
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Settings"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Config at ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "~/.rustyhand/config.toml"), " \xB7 50+ fields with serde defaults \xB7 live from ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/config")))), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "LLM providers"), /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 11 } }, providers.length, " loaded \xB7 auto-probe at boot")), /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Provider"), /* @__PURE__ */ React.createElement("th", null, "Env var"), /* @__PURE__ */ React.createElement("th", null, "State"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Models"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, !providersResp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 5, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), providers.map((p) => {
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Settings"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Config at ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "~/.rustyhand/config.toml"), " \xB7 50+ fields with serde defaults \xB7 live from ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/config"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      className: "btn ghost",
+      title: "Download a copy of config.toml with secrets redacted",
+      onClick: async () => {
+        try {
+          const text = await rhFetch("/api/config/export");
+          const stamp = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+          downloadBlob(`rustyhand-config-${stamp}.toml`, text, "text/plain");
+          toastOk("Config exported (secrets redacted)");
+        } catch (e) {
+          toastErr(`export failed: ${e.message || e}`);
+        }
+      }
+    },
+    /* @__PURE__ */ React.createElement(I.download, null),
+    " Export config.toml"
+  ))), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "LLM providers"), /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 11 } }, providers.length, " loaded \xB7 auto-probe at boot")), /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Provider"), /* @__PURE__ */ React.createElement("th", null, "Env var"), /* @__PURE__ */ React.createElement("th", null, "State"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Models"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, !providersResp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 5, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), providers.map((p) => {
     const auth = (p.auth_status || "").toLowerCase();
     let badge;
     if (auth === "ok") badge = /* @__PURE__ */ React.createElement("span", { className: "badge live" }, "set");

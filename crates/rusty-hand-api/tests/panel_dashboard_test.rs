@@ -439,6 +439,11 @@ async fn dashboard_wires_write_paths() {
         ("bulkMoveToGroup", "Agents bulk move-to-group"),
         ("/api/onboarding/reset-demo", "Demo seed reset endpoint"),
         ("Re-seed on restart", "Settings demo reseed button"),
+        // Iter 65-67: cron bulk toggle + audit level chips + config export
+        ("bulkSetEnabled", "Cron bulk enable/disable"),
+        ("auditLevelOf", "Audit level classifier"),
+        ("rh.panel.auditLevel", "Audit level filter persistence"),
+        ("/api/config/export", "Config TOML export endpoint"),
     ];
     for (needle, what) in markers {
         assert!(

@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.57";
+  const version = (health && health.version) || "0.7.58";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -276,6 +276,17 @@ function actionColor(action) {
   if (a.includes("approval") || a.includes("denied") || a.includes("reject")) return "amber";
   if (a.includes("error") || a.includes("panic") || a.includes("crash")) return "muted";
   return "muted";
+}
+
+// Classify an audit entry into one of `error|warn|info` for the Audit
+// page's filter chips. Mirrors `classify_audit_level` on the kernel side
+// (used by /api/logs/stream's `level` query) so the chip choice on the
+// client matches what the kernel would say if asked.
+function auditLevelOf(entry) {
+  const a = ((entry && (entry.action || "")) + " " + (entry && entry.outcome || "")).toLowerCase();
+  if (a.includes("error") || a.includes("panic") || a.includes("crash") || a.includes("fail")) return "error";
+  if (a.includes("approval") || a.includes("denied") || a.includes("reject") || a.includes("warn")) return "warn";
+  return "info";
 }
 
 function formatTime(ts) {
@@ -2993,6 +3004,7 @@ function AutomationPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [cronResp, , refreshCron] = usePolling("/api/cron/jobs", 15000);
   const [trigResp, , refreshTrig] = usePolling("/api/triggers", 15000);
+  const [cronSelected, setCronSelected] = useState(() => new Set());
 
   React.useEffect(() => {
     const onNew = (e) => { if (e.detail && e.detail.page === "automation") setShowCreate(true); };
@@ -3034,6 +3046,56 @@ function AutomationPage() {
     }
   };
 
+  // Drop selections whose row disappeared (deleted elsewhere) so the
+  // bulk-bar count stays honest.
+  React.useEffect(() => {
+    if (cronSelected.size === 0) return;
+    const live = new Set(cron.map(c => c.id));
+    const next = new Set([...cronSelected].filter(id => live.has(id)));
+    if (next.size !== cronSelected.size) setCronSelected(next);
+  }, [cron.map(c => c.id).join(",")]);
+  const toggleCronSelect = (id) => {
+    setCronSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleAllCron = () => {
+    setCronSelected(prev => {
+      if (cron.length === 0) return prev;
+      if (prev.size === cron.length) return new Set();
+      return new Set(cron.map(c => c.id));
+    });
+  };
+  const bulkSetEnabled = async (target) => {
+    const ids = [...cronSelected];
+    if (ids.length === 0) return;
+    const label = target ? "Enable" : "Disable";
+    const ok = await confirmDialog({
+      title: `${label} ${ids.length} cron job(s)?`,
+      message: `${label} all selected jobs. Disabled jobs do not fire on their schedule until re-enabled.`,
+      confirmLabel: `${label} ${ids.length}`,
+      danger: !target,
+    });
+    if (!ok) return;
+    let okCount = 0, failCount = 0;
+    for (const id of ids) {
+      try {
+        await rhFetch(`/api/cron/jobs/${encodeURIComponent(id)}/enable`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: target }),
+        });
+        okCount++;
+      } catch (_) { failCount++; }
+    }
+    setCronSelected(new Set());
+    if (failCount > 0) toastErr(`${label.toLowerCase()}: ${okCount} ok / ${failCount} failed`);
+    else toastOk(`${label}d ${okCount} job(s)`);
+    refreshCron();
+  };
+
   return (
     <div>
       <div className="page-head">
@@ -3053,40 +3115,67 @@ function AutomationPage() {
       </div>
 
       {tab === "cron" && (
-        <div className="card flush">
-          <table className="tbl">
-            <thead><tr>
-              <th>ID</th><th>Schedule</th><th>Action</th><th>Next</th><th className="right">Fires</th><th>Enabled</th><th></th>
-            </tr></thead>
-            <tbody>
-              {!cronResp && (<tr><td colSpan={7} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>)}
-              {cronResp && cron.length === 0 && (
-                <tr><td colSpan={7} style={{padding:"24px 14px", textAlign:"center"}}>
-                  <div className="dim" style={{fontSize:12, marginBottom:8}}>No cron jobs yet.</div>
-                  <button className="btn primary sm" onClick={() => setShowCreate(true)}><I.plus/> Schedule your first job</button>
-                </td></tr>
-              )}
-              {cron.map(c => {
-                const actionLabel = c.action_label || c.action_summary
-                  || (c.action && (c.action.kind || c.action.type || JSON.stringify(c.action).slice(0, 60)))
-                  || "—";
-                const next = c.next_run || c.next_fire || c.next || "—";
-                const fires = c.fire_count != null ? c.fire_count : (c.fires || 0);
-                return (
-                  <tr key={c.id}>
-                    <td className="mono">{c.id}</td>
-                    <td><span className="mono" style={{color:"var(--rust)"}}>{c.schedule || c.cron || c.expression}</span></td>
-                    <td className="mono" style={{maxWidth:300, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{actionLabel}</td>
-                    <td className="mono muted">{next === "—" ? next : formatTime(next)}</td>
-                    <td className="num mono">{Number(fires).toLocaleString()}</td>
-                    <td><div className={"switch " + (c.enabled ? "on" : "")} onClick={() => toggleCron(c.id, c.enabled)}/></td>
-                    <td className="right"><button className="btn sm ghost" onClick={() => runCronNow(c.id)}>Run now</button></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <>
+          {cronSelected.size > 0 && (
+            <div className="bulk-bar">
+              <span className="mono" style={{fontSize:12}}>{cronSelected.size} selected</span>
+              <button className="btn sm primary" onClick={() => bulkSetEnabled(true)}>
+                <I.play/> Enable {cronSelected.size}
+              </button>
+              <button className="btn sm danger" onClick={() => bulkSetEnabled(false)}>
+                <I.pause/> Disable {cronSelected.size}
+              </button>
+              <button className="btn sm ghost" onClick={() => setCronSelected(new Set())} style={{marginLeft:"auto"}}>Clear</button>
+            </div>
+          )}
+          <div className="card flush">
+            <table className="tbl">
+              <thead><tr>
+                <th style={{width:28}}>
+                  <input type="checkbox"
+                         checked={cron.length > 0 && cronSelected.size === cron.length}
+                         ref={el => { if (el) el.indeterminate = cronSelected.size > 0 && cronSelected.size < cron.length; }}
+                         onChange={toggleAllCron}
+                         title={cronSelected.size === cron.length ? "Deselect all" : "Select all"}/>
+                </th>
+                <th>ID</th><th>Schedule</th><th>Action</th><th>Next</th><th className="right">Fires</th><th>Enabled</th><th></th>
+              </tr></thead>
+              <tbody>
+                {!cronResp && (<tr><td colSpan={8} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>)}
+                {cronResp && cron.length === 0 && (
+                  <tr><td colSpan={8} style={{padding:"24px 14px", textAlign:"center"}}>
+                    <div className="dim" style={{fontSize:12, marginBottom:8}}>No cron jobs yet.</div>
+                    <button className="btn primary sm" onClick={() => setShowCreate(true)}><I.plus/> Schedule your first job</button>
+                  </td></tr>
+                )}
+                {cron.map(c => {
+                  const actionLabel = c.action_label || c.action_summary
+                    || (c.action && (c.action.kind || c.action.type || JSON.stringify(c.action).slice(0, 60)))
+                    || "—";
+                  const next = c.next_run || c.next_fire || c.next || "—";
+                  const fires = c.fire_count != null ? c.fire_count : (c.fires || 0);
+                  const isSel = cronSelected.has(c.id);
+                  return (
+                    <tr key={c.id} style={isSel ? {background:"var(--surface-2)"} : null}>
+                      <td>
+                        <input type="checkbox"
+                               checked={isSel}
+                               onChange={() => toggleCronSelect(c.id)}/>
+                      </td>
+                      <td className="mono">{c.id}</td>
+                      <td><span className="mono" style={{color:"var(--rust)"}}>{c.schedule || c.cron || c.expression}</span></td>
+                      <td className="mono" style={{maxWidth:300, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{actionLabel}</td>
+                      <td className="mono muted">{next === "—" ? next : formatTime(next)}</td>
+                      <td className="num mono">{Number(fires).toLocaleString()}</td>
+                      <td><div className={"switch " + (c.enabled ? "on" : "")} onClick={() => toggleCron(c.id, c.enabled)}/></td>
+                      <td className="right"><button className="btn sm ghost" onClick={() => runCronNow(c.id)}>Run now</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {tab === "triggers" && (
@@ -4767,12 +4856,38 @@ function AuditPage() {
     } catch (e) { toastErr(`copy failed: ${e.message || e}`); }
   };
 
+  // Level filter chips (info/warn/error/all). Persisted in localStorage so
+  // operators investigating an incident return to the same filter on
+  // refresh. Chip choice is applied *before* the substring filter, so
+  // "level=error and q=panic" works the way you'd expect.
+  const [levelFilter, setLevelFilterState] = useState(() => {
+    try {
+      const stored = localStorage.getItem("rh.panel.auditLevel") || "all";
+      return ["all", "info", "warn", "error"].includes(stored) ? stored : "all";
+    } catch (e) { return "all"; }
+  });
+  const setLevelFilter = (lvl) => {
+    setLevelFilterState(lvl);
+    try { localStorage.setItem("rh.panel.auditLevel", lvl); } catch (e) {}
+  };
+
   const rawEntries = (audit && audit.entries) || [];
+  // Per-level counts derived from the unfiltered window so chip labels
+  // show "warn · 8" even when the active filter would exclude them.
+  const levelCounts = { info: 0, warn: 0, error: 0 };
+  for (const e of rawEntries) {
+    const lvl = auditLevelOf(e);
+    levelCounts[lvl] = (levelCounts[lvl] || 0) + 1;
+  }
+  const levelFiltered = levelFilter === "all"
+    ? rawEntries
+    : rawEntries.filter(e => auditLevelOf(e) === levelFilter);
+
   // Client-side substring filter across the loaded window. Real
   // full-text search would need a server-side index; for typical ops
   // windows of ~200 entries this is plenty fast and renders instantly.
   const ql = q.trim().toLowerCase();
-  const entries = !ql ? rawEntries : rawEntries.filter(e =>
+  const entries = !ql ? levelFiltered : levelFiltered.filter(e =>
     (e.action || "").toLowerCase().includes(ql) ||
     (e.agent_name || "").toLowerCase().includes(ql) ||
     (e.agent_id || "").toLowerCase().includes(ql) ||
@@ -4816,6 +4931,24 @@ function AuditPage() {
             <I.search/>
             <input placeholder="filter by action / actor / hash / detail…" value={q} onChange={e => setQ(e.target.value)}/>
             {q && <button className="kbd" onClick={() => setQ("")} style={{cursor:"pointer"}}>clear</button>}
+          </div>
+          <div className="seg" title="Filter by classified severity">
+            <button className={levelFilter === "all" ? "on" : ""} onClick={() => setLevelFilter("all")}>
+              all · {rawEntries.length}
+            </button>
+            <button className={levelFilter === "info" ? "on" : ""} onClick={() => setLevelFilter("info")}>
+              info · {levelCounts.info}
+            </button>
+            <button className={levelFilter === "warn" ? "on" : ""}
+                    style={levelFilter === "warn" ? {color:"var(--amber)"} : {}}
+                    onClick={() => setLevelFilter("warn")}>
+              warn · {levelCounts.warn}
+            </button>
+            <button className={levelFilter === "error" ? "on" : ""}
+                    style={levelFilter === "error" ? {color:"var(--crimson)"} : {}}
+                    onClick={() => setLevelFilter("error")}>
+              error · {levelCounts.error}
+            </button>
           </div>
           <div className="seg" title="Audit window size">
             {[50, 200, 500, 1000].map(n => (
@@ -4947,7 +5080,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.57";
+  const version = (health && health.version) || "0.7.58";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 
@@ -4957,6 +5090,20 @@ function SettingsPage() {
         <div>
           <h1 className="page-title">Settings</h1>
           <p className="page-sub">Config at <span className="mono">~/.rustyhand/config.toml</span> · 50+ fields with serde defaults · live from <span className="mono">/api/config</span></p>
+        </div>
+        <div className="page-actions">
+          <button className="btn ghost"
+                  title="Download a copy of config.toml with secrets redacted"
+                  onClick={async () => {
+                    try {
+                      const text = await rhFetch("/api/config/export");
+                      const stamp = new Date().toISOString().slice(0, 10);
+                      downloadBlob(`rustyhand-config-${stamp}.toml`, text, "text/plain");
+                      toastOk("Config exported (secrets redacted)");
+                    } catch (e) { toastErr(`export failed: ${e.message || e}`); }
+                  }}>
+            <I.download/> Export config.toml
+          </button>
         </div>
       </div>
 
