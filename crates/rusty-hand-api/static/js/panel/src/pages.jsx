@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.49";
+  const version = (health && health.version) || "0.7.50";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -325,13 +325,14 @@ const ActivityFeed = ({ entries }) => {
 // rows from /api/approvals come in this shape: { id, agent_id, agent_name,
 // action, risk, requested_at, status }. The design's mock used agent (string),
 // action, risk, age — we adapt below so this component accepts both.
-const ApprovalsTable = ({ rows, compact, onChange }) => {
+const ApprovalsTable = ({ rows, compact, onChange, onInspect }) => {
   const decide = async (id, verdict) => {
     try {
       await rhFetch(`/api/approvals/${id}/${verdict}`, { method: "POST" });
+      toastOk(`Approval ${verdict}d`);
       if (onChange) onChange();
     } catch (e) {
-      console.warn(`approval ${verdict} failed`, e);
+      toastErr(`${verdict} failed: ${e.message || e}`);
     }
   };
   return (
@@ -345,13 +346,16 @@ const ApprovalsTable = ({ rows, compact, onChange }) => {
           const age = r.age || relativeTime(r.requested_at || r.created_at);
           const risk = (r.risk || "low").toLowerCase();
           return (
-            <tr key={r.id}>
+            <tr key={r.id}
+                style={{cursor: onInspect ? "pointer" : "default"}}
+                onClick={() => onInspect && onInspect(r)}
+                title={onInspect ? "Click to inspect full payload" : ""}>
               <td className="mono">{r.id}</td>
               <td className="mono">{agent}</td>
               <td>{r.action}</td>
               <td><span className={`badge ${risk === "high" ? "error" : risk === "medium" ? "warn" : "idle"}`}>{risk}</span></td>
               <td className="mono muted">{age}</td>
-              <td className="right">
+              <td className="right" onClick={(e) => e.stopPropagation()}>
                 <button className="btn sm primary" style={{height:24,padding:"2px 8px"}} onClick={() => decide(r.id, "approve")}>Approve</button>
                 <button className="btn sm danger" style={{height:24,padding:"2px 8px",marginLeft:6}} onClick={() => decide(r.id, "reject")}>Reject</button>
               </td>
@@ -860,7 +864,8 @@ function AgentDrawer({ agent, onClose }) {
           {tab === "identity" && <AgentIdentityForm agent={agent} detail={detail} onSaved={refreshDetail}/>}
           {tab === "activity" && (
             <>
-              <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Recent turns</div>
+              <AgentActivityCharts agent={agent} budget={budget} turns={turns}/>
+              <div className="muted mono mb-8 mt-16" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Recent turns</div>
               <div className="col gap-6">
                 {!turns && <div className="dim mono" style={{fontSize:11.5, padding:"6px 8px"}}>loading audit…</div>}
                 {turns && turns.length === 0 && <div className="dim mono" style={{fontSize:11.5, padding:"6px 8px"}}>no audit entries for this agent yet.</div>}
@@ -880,46 +885,176 @@ function AgentDrawer({ agent, onClose }) {
   );
 }
 
+// Mini-charts for the agent drawer's Activity tab. We don't have a
+// pre-computed time series for any single agent, so we synthesize from
+// what's available: budget hourly/daily/monthly tiles + activity tally
+// per audit-action bucket. Best with `useApi("/api/agents/{id}/metrics")`
+// once that endpoint surfaces per-bucket history, but useful as-is for
+// an at-a-glance read.
+function AgentActivityCharts({ agent, budget, turns }) {
+  const [metricsResp] = useApi(agent ? `/api/agents/${agent.id}/metrics` : null);
+  const metrics = metricsResp || {};
+  const hourly = budget && budget.hourly ? budget.hourly : { spend: 0, limit: 0 };
+  const daily = budget && budget.daily ? budget.daily : { spend: 0, limit: 0 };
+  const monthly = budget && budget.monthly ? budget.monthly : { spend: 0, limit: 0 };
+
+  // Tally audit entries by action — gives a sparkline-style preview of
+  // what the agent has been doing. Useful for spotting hot-spots
+  // (e.g. agent stuck in a tool-call loop will show one action dominating).
+  const actionCounts = React.useMemo(() => {
+    if (!Array.isArray(turns)) return [];
+    const map = new Map();
+    for (const t of turns) {
+      const k = t.action || "(unknown)";
+      map.set(k, (map.get(k) || 0) + 1);
+    }
+    return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  }, [turns]);
+  const maxCount = Math.max(1, ...actionCounts.map(([, n]) => n));
+
+  // BudgetBar shows spend/limit fraction with a small color hint at risk.
+  const BudgetBar = ({ label, info }) => {
+    const spend = Number(info.spend || 0);
+    const limit = Number(info.limit || 0);
+    const pct = limit > 0 ? Math.min(100, Math.round((spend / limit) * 100)) : 0;
+    const danger = pct >= 80;
+    return (
+      <div className="row gap-8 mb-4">
+        <span className="dim mono" style={{fontSize:10.5, width:70, letterSpacing:".08em", textTransform:"uppercase"}}>{label}</span>
+        <span className="bar" style={{flex:1, height:8, background:"var(--bg-2)", border:"1px solid var(--border)", borderRadius:3, position:"relative", overflow:"hidden"}}>
+          <span style={{display:"block", height:"100%", width: `${pct}%`,
+            background: danger
+              ? "linear-gradient(90deg, var(--crimson), oklch(0.6 0.15 25))"
+              : "linear-gradient(90deg, var(--rust), var(--rust-2))"}}/>
+        </span>
+        <span className="mono nums" style={{fontSize:11, width:120, textAlign:"right"}}>
+          ${spend.toFixed(2)} / {limit > 0 ? `$${limit.toFixed(2)}` : "—"}
+        </span>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Budget usage</div>
+      <div className="card" style={{padding:10, marginBottom:12}}>
+        <BudgetBar label="hour" info={hourly}/>
+        <BudgetBar label="day" info={daily}/>
+        <BudgetBar label="month" info={monthly}/>
+      </div>
+      <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>
+        Activity histogram <span className="dim" style={{marginLeft:6, fontSize:10}}>(last {turns ? turns.length : 0} audit events)</span>
+      </div>
+      <div className="card" style={{padding:10}}>
+        {actionCounts.length === 0 && <div className="dim" style={{fontSize:11.5}}>no audit events to plot.</div>}
+        {actionCounts.map(([action, n]) => (
+          <div key={action} className="row gap-8 mb-4">
+            <span className="mono" style={{fontSize:11, width:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{action}</span>
+            <span style={{flex:1, height:8, background:"var(--bg-2)", border:"1px solid var(--border)", borderRadius:3, overflow:"hidden"}}>
+              <span style={{display:"block", height:"100%", width: `${(n / maxCount) * 100}%`, background:"linear-gradient(90deg, var(--violet), oklch(0.55 0.12 295))"}}/>
+            </span>
+            <span className="mono nums" style={{fontSize:11, width:30, textAlign:"right"}}>{n}</span>
+          </div>
+        ))}
+      </div>
+      {metrics && metrics.total_tokens != null && (
+        <div className="kv mt-12" style={{fontSize:12}}>
+          <dt>total tokens</dt><dd>{Number(metrics.total_tokens || 0).toLocaleString()}</dd>
+          <dt>messages</dt><dd>{Number(metrics.message_count || 0).toLocaleString()}</dd>
+          <dt>last activity</dt><dd className="mono dim">{metrics.last_activity ? relativeTime(metrics.last_activity) : "—"}</dd>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AgentConfigForm({ agent, detail, onSaved }) {
   const current = detail || {};
   const model = current.model || {};
-  const [name, setName] = useState(current.name || agent.name);
-  const [group, setGroup] = useState(current.group || agent.group || "");
-  const [description, setDescription] = useState(current.description || "");
-  const [systemPrompt, setSystemPrompt] = useState(model.system_prompt || "");
-  const [temperature, setTemperature] = useState(model.temperature != null ? String(model.temperature) : "0.4");
-  const [maxTokens, setMaxTokens] = useState(model.max_tokens != null ? String(model.max_tokens) : "2048");
-  const [thinkingEnabled, setThinkingEnabled] = useState(!!model.thinking);
-  const [modelName, setModelName] = useState(model.model || agent.model);
+  const initial = React.useMemo(() => ({
+    name: current.name || agent.name,
+    group: current.group || agent.group || "",
+    description: current.description || "",
+    system_prompt: model.system_prompt || "",
+    temperature: model.temperature != null ? String(model.temperature) : "0.4",
+    max_tokens: model.max_tokens != null ? String(model.max_tokens) : "2048",
+    thinking_enabled: !!model.thinking,
+    model: model.model || agent.model,
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [agent && agent.id, detail]);
+  const [name, setName] = useState(initial.name);
+  const [group, setGroup] = useState(initial.group);
+  const [description, setDescription] = useState(initial.description);
+  const [systemPrompt, setSystemPrompt] = useState(initial.system_prompt);
+  const [temperature, setTemperature] = useState(initial.temperature);
+  const [maxTokens, setMaxTokens] = useState(initial.max_tokens);
+  const [thinkingEnabled, setThinkingEnabled] = useState(initial.thinking_enabled);
+  const [modelName, setModelName] = useState(initial.model);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [ok, setOk] = useState(false);
 
-  // Reset form when active agent changes (parent remounts on agent id change).
-  // No re-fetch needed since detail prop changes drive useState re-init.
+  // Source available models for the dropdown. Filter to those whose
+  // provider matches the agent (so picking "gpt-4o-mini" on an
+  // anthropic-only agent doesn't appear as a viable option). If the
+  // current model isn't in the list (e.g. custom alias), it's still
+  // selectable as the first option so we don't lose data.
+  const [modelsResp] = useApi("/api/models");
+  const allModels = (modelsResp && modelsResp.models) || [];
+  const provider = (model && model.provider) || agent.provider;
+  const modelOptions = allModels
+    .filter(m => !provider || m.provider === provider)
+    .sort((a, b) => (a.display_name || a.id).localeCompare(b.display_name || b.id));
+
+  // Compute the diff between current state and the initial detail. The
+  // operator sees what's actually being saved before clicking — guards
+  // against accidental changes (especially in a long system prompt).
+  const diff = React.useMemo(() => {
+    const rows = [];
+    const push = (label, oldV, newV) => {
+      if (String(oldV ?? "") !== String(newV ?? "")) rows.push({ label, oldV, newV });
+    };
+    push("name", initial.name, name);
+    push("group", initial.group, group);
+    push("description", initial.description, description);
+    push("system_prompt", initial.system_prompt, systemPrompt);
+    push("temperature", initial.temperature, temperature);
+    push("max_tokens", initial.max_tokens, maxTokens);
+    push("thinking_enabled", initial.thinking_enabled, thinkingEnabled);
+    push("model", initial.model, modelName);
+    return rows;
+  }, [initial, name, group, description, systemPrompt, temperature, maxTokens, thinkingEnabled, modelName]);
 
   const save = async () => {
+    if (diff.length === 0) { setOk(true); return; }
     setBusy(true); setErr(null); setOk(false);
     try {
-      await rhFetch(`/api/agents/${agent.id}/config`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name, group, description,
-          system_prompt: systemPrompt,
-          temperature: Number(temperature),
-          max_tokens: Number(maxTokens),
-          thinking_enabled: thinkingEnabled,
-        }),
-      });
-      // Model is its own endpoint.
-      if (modelName && modelName !== model.model) {
+      // Only PATCH fields that actually changed — minimal blast radius
+      // if a downstream validator gets stricter about untouched fields.
+      const patch = {};
+      for (const r of diff) {
+        if (r.label === "temperature") patch.temperature = Number(r.newV);
+        else if (r.label === "max_tokens") patch.max_tokens = Number(r.newV);
+        else if (r.label === "thinking_enabled") patch.thinking_enabled = !!r.newV;
+        else if (r.label === "system_prompt") patch.system_prompt = r.newV;
+        else if (r.label !== "model") patch[r.label] = r.newV;
+      }
+      if (Object.keys(patch).length > 0) {
+        await rhFetch(`/api/agents/${agent.id}/config`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+      }
+      const modelChanged = diff.some(r => r.label === "model");
+      if (modelChanged && modelName) {
         await rhFetch(`/api/agents/${agent.id}/model`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ model: modelName }),
         });
       }
+      toastOk(`Saved ${diff.length} change${diff.length === 1 ? "" : "s"} to ${agent.name}`);
       setOk(true);
       onSaved();
     } catch (e) { setErr(String(e.message || e)); }
@@ -936,8 +1071,26 @@ function AgentConfigForm({ agent, detail, onSaved }) {
         <textarea className="modal-field modal-textarea" style={{minHeight:60}} value={description} onChange={e => setDescription(e.target.value)}/></label>
       <label className="t-row col"><span className="t-lbl">System prompt</span>
         <textarea className="modal-field modal-textarea" style={{minHeight:120}} value={systemPrompt} onChange={e => setSystemPrompt(e.target.value)}/></label>
-      <label className="t-row col"><span className="t-lbl">Model</span>
-        <input className="modal-field" value={modelName} onChange={e => setModelName(e.target.value)}/></label>
+      <label className="t-row col">
+        <span className="t-lbl">
+          Model
+          {modelOptions.length === 0 && modelsResp && <span className="dim" style={{marginLeft:6, fontSize:10}}>(catalog empty for provider {provider})</span>}
+        </span>
+        {modelOptions.length > 0 ? (
+          <select className="t-select" value={modelName} onChange={e => setModelName(e.target.value)}>
+            {!modelOptions.some(m => m.id === modelName) && modelName && (
+              <option value={modelName}>{modelName} (custom)</option>
+            )}
+            {modelOptions.map(m => (
+              <option key={m.id} value={m.id}>
+                {m.display_name || m.id}{m.tier ? ` · ${m.tier}` : ""}{m.available === false ? " · not configured" : ""}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input className="modal-field" value={modelName} onChange={e => setModelName(e.target.value)}/>
+        )}
+      </label>
       <div className="row gap-12">
         <label className="t-row col" style={{flex:1}}><span className="t-lbl">Temperature (0–2)</span>
           <input className="modal-field" type="number" step="0.05" min="0" max="2" value={temperature} onChange={e => setTemperature(e.target.value)}/></label>
@@ -948,14 +1101,37 @@ function AgentConfigForm({ agent, detail, onSaved }) {
         <span className="t-lbl">Thinking enabled</span>
         <div className={"switch " + (thinkingEnabled ? "on" : "")} onClick={() => setThinkingEnabled(v => !v)}/>
       </div>
+      {diff.length > 0 && (
+        <div className="config-diff">
+          <div className="config-diff-head">
+            <span className="mono" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--fg-3)"}}>
+              Pending changes · {diff.length}
+            </span>
+          </div>
+          {diff.map(r => (
+            <div key={r.label} className="config-diff-row">
+              <span className="mono" style={{fontSize:11.5, color:"var(--fg-2)", width:140}}>{r.label}</span>
+              <span className="mono" style={{fontSize:11, color:"var(--crimson)", flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
+                {String(r.oldV ?? "").slice(0, 80) || "—"}
+              </span>
+              <span style={{color:"var(--fg-4)"}}>→</span>
+              <span className="mono" style={{fontSize:11, color:"var(--live)", flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
+                {String(r.newV ?? "").slice(0, 80) || "—"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       {err && <div className="banner" style={{borderColor:"oklch(0.66 0.18 25 / .35)"}}>
         <span className="dot err"/><span className="banner-title">ERROR</span>
         <span className="banner-body mono" style={{fontSize:11}}>{err}</span></div>}
-      {ok && <div className="banner" style={{borderColor:"oklch(0.74 0.135 150 / .35)"}}>
-        <span className="dot live"/><span className="banner-title">SAVED</span>
-        <span className="banner-body" style={{fontSize:11.5}}>Hot-reloaded — next turn uses the new config.</span></div>}
+      {ok && diff.length === 0 && <div className="banner" style={{borderColor:"oklch(0.74 0.135 150 / .35)"}}>
+        <span className="dot live"/><span className="banner-title">UP TO DATE</span>
+        <span className="banner-body" style={{fontSize:11.5}}>No changes to save.</span></div>}
       <div className="row" style={{justifyContent:"flex-end", marginTop:8}}>
-        <button className="btn primary" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save config"}</button>
+        <button className="btn primary" onClick={save} disabled={busy}>
+          {busy ? "Saving…" : (diff.length === 0 ? "Up to date" : `Save ${diff.length} change${diff.length === 1 ? "" : "s"}`)}
+        </button>
       </div>
     </div>
   );
@@ -1413,6 +1589,7 @@ function WorkflowsPage() {
   const [activeId, setActiveId] = useState(null);
   const active = workflows.find(w => w.id === activeId) || workflows[0];
   const [showCreate, setShowCreate] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [showRunInput, setShowRunInput] = useState(false);
   const [inspectingRun, setInspectingRun] = useState(null);
 
@@ -1458,6 +1635,7 @@ function WorkflowsPage() {
         </div>
         <div className="page-actions">
           <button className="btn ghost" onClick={refreshList}><I.refresh/></button>
+          <button className="btn ghost" onClick={() => setShowImport(true)}><I.copy/> Import YAML</button>
           <button className="btn primary" onClick={() => setShowCreate(true)}><I.plus/> New workflow</button>
         </div>
       </div>
@@ -1580,8 +1758,70 @@ function WorkflowsPage() {
       </div>
 
       {showCreate && <WorkflowCreateModal onClose={() => setShowCreate(false)} onCreated={(id) => { setShowCreate(false); setActiveId(id); refreshList(); }}/>}
+      {showImport && <WorkflowImportModal onClose={() => setShowImport(false)} onImported={(id) => { setShowImport(false); if (id) setActiveId(id); refreshList(); }}/>}
       {showRunInput && active && <WorkflowRunModal workflow={active} onClose={() => setShowRunInput(false)} onRun={runWith}/>}
       {inspectingRun && <WorkflowRunInspector run={inspectingRun} onClose={() => setInspectingRun(null)}/>}
+    </div>
+  );
+}
+
+function WorkflowImportModal({ onClose, onImported }) {
+  useEscapeKey(onClose);
+  const [yamlText, setYamlText] = useState(`name: leadgen-funnel
+description: Sample pipeline imported from YAML
+steps:
+  - name: research
+    agent_name: rusty
+    prompt: "Find candidates matching {{input}}"
+    mode: sequential
+  - name: rank
+    agent_name: rusty
+    prompt: "Rank these: {{input}}"
+    mode: sequential
+`);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const submit = async () => {
+    if (!yamlText.trim()) { setErr("YAML is empty"); return; }
+    setBusy(true); setErr(null);
+    try {
+      const r = await rhFetch("/api/workflows/import-yaml", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ yaml: yamlText }),
+      });
+      toastOk("Workflow imported");
+      onImported(r && (r.workflow_id || r.id));
+    } catch (e) { setErr(String(e.message || e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal wide" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><b className="mono">Import workflow from YAML</b><button className="icon-btn" onClick={onClose}><I.close/></button></div>
+        <div className="modal-body">
+          <div className="dim" style={{fontSize:12, marginBottom:8}}>
+            Paste a YAML workflow definition. Same schema as JSON create:
+            <span className="mono"> name, description, steps:[{`{name, agent_id|agent_name, prompt, mode, ...}`}]</span>
+          </div>
+          <textarea
+            className="modal-field modal-textarea"
+            style={{minHeight:320, fontFamily:"var(--ff-mono)", fontSize:12}}
+            value={yamlText}
+            onChange={(e) => setYamlText(e.target.value)}
+            autoFocus/>
+          {err && <div className="banner mt-12" style={{borderColor:"oklch(0.66 0.18 25 / .35)"}}>
+            <span className="dot err"/><span className="banner-title">ERROR</span>
+            <span className="banner-body mono" style={{fontSize:11}}>{err}</span>
+          </div>}
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+          <button className="btn primary" onClick={submit} disabled={busy}>{busy ? "Importing…" : "Import"}</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3194,6 +3434,7 @@ function SkillInstallModal({ onClose, onInstalled }) {
 /* ============================== APPROVALS ============================== */
 function ApprovalsPage() {
   const [resp, , refresh] = usePolling("/api/approvals", 10000);
+  const [inspect, setInspect] = useState(null);
   const rows = (resp && resp.approvals) || [];
   return (
     <div>
@@ -3209,7 +3450,70 @@ function ApprovalsPage() {
       <div className="card flush">
         {!resp && <div className="muted mono" style={{padding:"16px 14px", fontSize:12}}>loading…</div>}
         {resp && rows.length === 0 && <div className="muted mono" style={{padding:"16px 14px", fontSize:12}}>No approvals waiting.</div>}
-        {rows.length > 0 && <ApprovalsTable rows={rows} onChange={refresh}/>}
+        {rows.length > 0 && <ApprovalsTable rows={rows} onChange={refresh} onInspect={setInspect}/>}
+      </div>
+      {inspect && <ApprovalContextModal approval={inspect} onClose={() => setInspect(null)} onChange={() => { setInspect(null); refresh(); }}/>}
+    </div>
+  );
+}
+
+// Context modal opened by clicking an approval row. Shows the full
+// payload as pretty-printed JSON + risk + age + decision buttons. The
+// existing ApprovalsTable already has inline Approve/Reject buttons, but
+// those don't surface what's actually being decided. This modal is the
+// place to read the full request before acting on it.
+function ApprovalContextModal({ approval, onClose, onChange }) {
+  useEscapeKey(onClose);
+  const r = approval || {};
+  const decide = async (verdict) => {
+    try {
+      await rhFetch(`/api/approvals/${r.id}/${verdict}`, { method: "POST" });
+      toastOk(`Approval ${verdict}d`);
+      onChange();
+    } catch (e) { toastErr(`${verdict} failed: ${e.message || e}`); }
+  };
+  const payload = r.payload || r.details || r.context;
+  const payloadStr = payload != null
+    ? (typeof payload === "string" ? payload : JSON.stringify(payload, null, 2))
+    : null;
+  const risk = (r.risk || "low").toLowerCase();
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <b className="mono">Approval · {r.id}</b>
+            <div className="dim mono" style={{fontSize:11, marginTop:2}}>
+              {(r.agent_name || r.agent || r.agent_id || "agent")} · requested {relativeTime(r.requested_at || r.created_at)}
+            </div>
+          </div>
+          <button className="icon-btn" onClick={onClose}><I.close/></button>
+        </div>
+        <div className="modal-body">
+          <div className="row gap-12 mb-12">
+            <span className={"badge " + (risk === "high" ? "error" : risk === "medium" ? "warn" : "idle")}>{risk} risk</span>
+            {r.status && <span className="badge plain">{r.status}</span>}
+          </div>
+          <div className="muted mono mb-8" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>Action</div>
+          <div className="codebox mb-16" style={{whiteSpace:"pre-wrap"}}>{r.action || "—"}</div>
+          {payloadStr && (
+            <>
+              <div className="muted mono mb-8" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>Payload</div>
+              <pre className="codebox mb-16" style={{maxHeight:240}}>{payloadStr}</pre>
+            </>
+          )}
+          {r.reason && (
+            <>
+              <div className="muted mono mb-8" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>Reason</div>
+              <div className="codebox mb-16" style={{whiteSpace:"pre-wrap"}}>{r.reason}</div>
+            </>
+          )}
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={onClose} style={{marginRight:"auto"}}>Close</button>
+          <button className="btn danger" onClick={() => decide("reject")}>Reject</button>
+          <button className="btn primary" onClick={() => decide("approve")}>Approve</button>
+        </div>
       </div>
     </div>
   );
@@ -3217,18 +3521,46 @@ function ApprovalsPage() {
 
 /* ============================== AUDIT ============================== */
 function AuditPage() {
-  const [audit, , refresh] = usePolling("/api/audit/recent?n=50", 8000);
+  const [audit, , refresh] = usePolling("/api/audit/recent?n=200", 8000);
   const [verify, verifyErr, verifyRefresh] = useApi("/api/audit/verify");
+  const [q, setQ] = useState("");
 
-  const entries = (audit && audit.entries) || [];
-  // Compute actor stats over the loaded window. Cheap heuristic — full
-  // historical aggregation would need a server endpoint.
+  const rawEntries = (audit && audit.entries) || [];
+  // Client-side substring filter across the loaded window. Real
+  // full-text search would need a server-side index; for typical ops
+  // windows of ~200 entries this is plenty fast and renders instantly.
+  const ql = q.trim().toLowerCase();
+  const entries = !ql ? rawEntries : rawEntries.filter(e =>
+    (e.action || "").toLowerCase().includes(ql) ||
+    (e.agent_name || "").toLowerCase().includes(ql) ||
+    (e.agent_id || "").toLowerCase().includes(ql) ||
+    (e.detail || "").toLowerCase().includes(ql) ||
+    (e.outcome || "").toLowerCase().includes(ql) ||
+    (e.hash || "").toLowerCase().includes(ql)
+  );
+
   const actorCounts = {};
   for (const e of entries) {
     const a = e.agent_name || e.agent_id || "kernel";
     actorCounts[a] = (actorCounts[a] || 0) + 1;
   }
   const topActor = Object.entries(actorCounts).sort((a, b) => b[1] - a[1])[0];
+
+  // Highlight matches inline. Tiny helper — splits a string around the
+  // (case-insensitive) needle so we can wrap matches in <mark>.
+  const highlight = React.useCallback((text) => {
+    if (!ql || !text) return text;
+    const s = String(text);
+    const idx = s.toLowerCase().indexOf(ql);
+    if (idx < 0) return text;
+    return (
+      <>
+        {s.slice(0, idx)}
+        <mark className="audit-match">{s.slice(idx, idx + ql.length)}</mark>
+        {s.slice(idx + ql.length)}
+      </>
+    );
+  }, [ql]);
 
   return (
     <div>
@@ -3238,6 +3570,11 @@ function AuditPage() {
           <p className="page-sub">Merkle hash chain · <span className="mono">~/.rustyhand/data/audit.jsonl</span> · replayed on boot</p>
         </div>
         <div className="page-actions">
+          <div className="search-field" style={{minWidth:260}}>
+            <I.search/>
+            <input placeholder="filter by action / actor / hash / detail…" value={q} onChange={e => setQ(e.target.value)}/>
+            {q && <button className="kbd" onClick={() => setQ("")} style={{cursor:"pointer"}}>clear</button>}
+          </div>
           <button className="btn ghost" onClick={() => { refresh(); verifyRefresh(); }}><I.refresh/></button>
           <button className="btn ghost" onClick={verifyRefresh}><I.shield/> Verify chain</button>
           <button className="btn ghost" onClick={() => {
@@ -3294,7 +3631,11 @@ function AuditPage() {
               <Skel w={50} h={10}/>
             </div>
           ))}
-          {audit && entries.length === 0 && <div className="muted mono" style={{padding:"16px 14px", fontSize:12}}>No audit entries yet.</div>}
+          {audit && entries.length === 0 && (
+            <div className="muted mono" style={{padding:"16px 14px", fontSize:12}}>
+              {ql ? `No entries matching "${q}" in the loaded window of ${rawEntries.length}.` : "No audit entries yet."}
+            </div>
+          )}
           {entries.map((a) => {
             const hash = a.hash ? String(a.hash).slice(0, 12) : "—";
             return (
@@ -3302,12 +3643,12 @@ function AuditPage() {
                 <div className="chain"/>
                 <span className="time">{formatTime(a.timestamp)}</span>
                 <span>
-                  <span className="action">{a.action}</span>{" "}
+                  <span className="action">{highlight(a.action)}</span>{" "}
                   <span className="dim">·</span>{" "}
-                  <span className="actor">{a.agent_name || a.agent_id || "kernel"}</span>
-                  <div className="dim" style={{fontSize:11,marginTop:2}}>{a.detail || a.outcome || ""}</div>
+                  <span className="actor">{highlight(a.agent_name || a.agent_id || "kernel")}</span>
+                  <div className="dim" style={{fontSize:11,marginTop:2}}>{highlight(a.detail || a.outcome || "")}</div>
                 </span>
-                <span className="hash">{hash}</span>
+                <span className="hash">{highlight(hash)}</span>
                 <span className="dim">seq {a.seq}</span>
               </div>
             );
@@ -3330,7 +3671,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.49";
+  const version = (health && health.version) || "0.7.50";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 

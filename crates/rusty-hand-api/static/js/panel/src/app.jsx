@@ -57,7 +57,7 @@ function Sidebar({ page, go }) {
         <div className="sb-mark">RH</div>
         <div>
           <div className="sb-title">Rusty Hand</div>
-          <div className="sb-sub">v0.7.49 · schema v8</div>
+          <div className="sb-sub">v0.7.50 · schema v8</div>
         </div>
       </div>
 

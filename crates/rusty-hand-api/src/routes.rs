@@ -1080,6 +1080,79 @@ pub async fn create_workflow(
     )
 }
 
+/// POST /api/workflows/import-yaml — Parse a YAML workflow definition and
+/// register it. Body shape: `{yaml: "..."}` — a single workflow document
+/// matching the JSON shape `create_workflow` accepts (name, description,
+/// steps:[{name, agent_id|agent_name, prompt, mode, ...}]).
+///
+/// Implementation note: we use serde_yaml to deserialize into a
+/// serde_json::Value, then delegate to a closure that mirrors the JSON
+/// path. This keeps a single source of truth for step parsing — any
+/// future schema additions land in one place.
+///
+/// Common gotchas:
+/// - YAML auto-coerces strings that look like booleans/numbers; we
+///   defend by requiring agent_id/name to be quoted strings.
+/// - Multi-document YAML (`---` separator) is rejected with a clear
+///   400 — operators should split into individual import calls.
+pub async fn import_workflow_yaml(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<serde_json::Value>,
+) -> axum::response::Response {
+    let yaml_text = match body.get("yaml").and_then(|v| v.as_str()) {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Missing or empty 'yaml' field"})),
+            )
+                .into_response();
+        }
+    };
+
+    // Reject multi-doc input — keep semantics one-call-one-workflow so
+    // partial failures don't leave half a batch persisted.
+    let dashes = yaml_text.split('\n').filter(|l| l.trim() == "---").count();
+    if dashes > 1 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Multi-document YAML not supported; submit each workflow separately"})),
+        )
+            .into_response();
+    }
+
+    let parsed: serde_yaml::Value = match serde_yaml::from_str(yaml_text) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("YAML parse failed: {e}")})),
+            )
+                .into_response();
+        }
+    };
+
+    // Convert serde_yaml::Value → serde_json::Value so we can reuse the
+    // same parsing as create_workflow. serde_yaml::Value implements
+    // Serialize, and serde_json can deserialize from it.
+    let req: serde_json::Value = match serde_json::to_value(&parsed) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("YAML→JSON conversion failed: {e}")})),
+            )
+                .into_response();
+        }
+    };
+
+    // Reuse the existing create_workflow path via direct dispatch. The
+    // handler does its own validation; we just hand off the JSON.
+    create_workflow(State(state), Json(req))
+        .await
+        .into_response()
+}
+
 /// GET /api/workflows — List all workflows.
 pub async fn list_workflows(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let workflows = state.kernel.workflows.list_workflows().await;

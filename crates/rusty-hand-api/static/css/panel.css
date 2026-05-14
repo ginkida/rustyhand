@@ -1192,6 +1192,14 @@ code, .mono { font-family: var(--ff-mono); }
 .palette-row.active { background: var(--surface-2); color: var(--fg); }
 .palette-row.active { box-shadow: inset 2px 0 0 var(--rust); }
 
+/* ---------- Search highlight (audit page) ---------- */
+.audit-match {
+  background: oklch(0.78 0.14 88 / .35);
+  color: var(--fg);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
 /* ---------- Inline tooltips (Tip component) ---------- */
 .tip-wrap {
   position: relative;
@@ -1233,6 +1241,27 @@ code, .mono { font-family: var(--ff-mono); }
   line-height: 1.4;
   white-space: normal;
   box-shadow: var(--shadow);
+}
+
+/* ---------- Config diff card (agent config edit form) ---------- */
+.config-diff {
+  border: 1px solid var(--border-hi);
+  border-radius: 8px;
+  background: var(--bg-2);
+  padding: 8px 10px;
+  display: flex; flex-direction: column;
+  gap: 4px;
+}
+.config-diff-head {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+}
+.config-diff-row {
+  display: flex; align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  font-family: var(--ff-mono);
 }
 
 /* ---------- Bulk-actions toolbar (appears when rows are selected) ---------- */

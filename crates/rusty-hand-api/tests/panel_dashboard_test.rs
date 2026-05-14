@@ -131,6 +131,16 @@ async fn dashboard_includes_all_panel_modules() {
         ("HelpOverlay", "shortcuts help overlay must be present"),
         ("rh:hotkey:new", "hotkey dispatch wired"),
         ("Tip", "tooltip primitive must be exposed"),
+        // Iter 35-37
+        ("config-diff", "agent config diff card must render"),
+        ("WorkflowImportModal", "workflow YAML import modal"),
+        (
+            "/api/workflows/import-yaml",
+            "workflow YAML import endpoint",
+        ),
+        ("AgentActivityCharts", "agent drawer charts"),
+        ("ApprovalContextModal", "approvals context modal"),
+        ("audit-match", "audit search highlight"),
     ];
     for (needle, msg) in markers {
         assert!(body.contains(needle), "{msg} (missing `{needle}`)");

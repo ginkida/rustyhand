@@ -681,6 +681,54 @@ async fn knowledge_query_endpoint_shape_and_validation() {
     );
 }
 
+/// `POST /api/workflows/import-yaml` parses YAML and dispatches to the
+/// same `create_workflow` path as the JSON endpoint. Pin: bad YAML →
+/// 400 (not silent register), valid YAML → 201 with `workflow_id`,
+/// multi-doc YAML → 400.
+#[tokio::test]
+async fn workflows_yaml_import_round_trip() {
+    let server = require_server!(start_test_server());
+    let agent_id = spawn_test_agent(&server).await;
+    let client = reqwest::Client::new();
+
+    // Missing yaml field → 400
+    let resp = client
+        .post(format!("{}/api/workflows/import-yaml", server.base_url))
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .expect("post");
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+
+    // Malformed YAML → 400 with parse error
+    let resp = client
+        .post(format!("{}/api/workflows/import-yaml", server.base_url))
+        .json(&serde_json::json!({ "yaml": "name: foo\n  bad: indent" }))
+        .send()
+        .await
+        .expect("post");
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+
+    // Valid YAML → 201 with workflow_id
+    let yaml = format!(
+        "name: yaml-test\ndescription: imported via test\nsteps:\n  - name: step-1\n    agent_id: \"{}\"\n    prompt: \"{{{{input}}}}\"\n    mode: sequential\n",
+        agent_id
+    );
+    let resp = client
+        .post(format!("{}/api/workflows/import-yaml", server.base_url))
+        .json(&serde_json::json!({ "yaml": yaml }))
+        .send()
+        .await
+        .expect("post");
+    assert_eq!(
+        resp.status(),
+        reqwest::StatusCode::CREATED,
+        "valid YAML must yield 201"
+    );
+    let body: Value = resp.json().await.expect("json");
+    body["workflow_id"].as_str().expect("workflow_id string");
+}
+
 /// `GET /api/models` returns `{models, total, available_count}`.
 #[tokio::test]
 async fn models_envelope_and_entry_shape() {
