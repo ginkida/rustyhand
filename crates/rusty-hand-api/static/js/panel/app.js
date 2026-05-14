@@ -32,10 +32,14 @@ const NAV = [
   { id: "knowledge", label: "Knowledge", icon: /* @__PURE__ */ React.createElement(I.knowledge, null), count: null },
   { id: "memory", label: "Memory", icon: /* @__PURE__ */ React.createElement(I.audit, null), count: null },
   { id: "audit", label: "Audit log", icon: /* @__PURE__ */ React.createElement(I.audit, null), count: null },
+  { kind: "section", label: "System" },
+  { id: "mcp", label: "MCP servers", icon: /* @__PURE__ */ React.createElement(I.cpu, null), count: null },
+  { id: "network", label: "Network", icon: /* @__PURE__ */ React.createElement(I.link, null), count: null },
+  { id: "bindings", label: "Bindings", icon: /* @__PURE__ */ React.createElement(I.link, null), count: null },
   { id: "settings", label: "Settings", icon: /* @__PURE__ */ React.createElement(I.settings, null), count: null }
 ];
 function Sidebar({ page, go }) {
-  return /* @__PURE__ */ React.createElement("nav", { className: "sidebar" }, /* @__PURE__ */ React.createElement("div", { className: "sb-brand" }, /* @__PURE__ */ React.createElement("div", { className: "sb-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sb-title" }, "Rusty Hand"), /* @__PURE__ */ React.createElement("div", { className: "sb-sub" }, "v0.7.45 \xB7 schema v8"))), /* @__PURE__ */ React.createElement("div", { className: "sb-nav", style: { flex: 1, overflow: "auto", padding: "6px 6px" } }, NAV.map((it, i) => {
+  return /* @__PURE__ */ React.createElement("nav", { className: "sidebar" }, /* @__PURE__ */ React.createElement("div", { className: "sb-brand" }, /* @__PURE__ */ React.createElement("div", { className: "sb-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sb-title" }, "Rusty Hand"), /* @__PURE__ */ React.createElement("div", { className: "sb-sub" }, "v0.7.46 \xB7 schema v8"))), /* @__PURE__ */ React.createElement("div", { className: "sb-nav", style: { flex: 1, overflow: "auto", padding: "6px 6px" } }, NAV.map((it, i) => {
     if (it.kind === "section") return /* @__PURE__ */ React.createElement("div", { key: i, className: "sb-section-label", style: { marginTop: i === 0 ? 4 : 10 } }, it.label);
     const active = page === it.id;
     return /* @__PURE__ */ React.createElement("div", { key: it.id, className: "sb-item " + (active ? "active" : ""), onClick: () => go(it.id) }, /* @__PURE__ */ React.createElement("span", { className: "sb-icon" }, it.icon), /* @__PURE__ */ React.createElement("span", null, it.label), it.count != null && /* @__PURE__ */ React.createElement("span", { className: "sb-count", style: it.badge === "warn" ? { color: "var(--amber)", borderColor: "oklch(0.78 0.14 88 / .35)" } : {} }, it.count));
@@ -54,6 +58,9 @@ const CRUMBS = {
   skills: ["RustyHand", "Skills"],
   approvals: ["RustyHand", "Approvals"],
   audit: ["RustyHand", "Audit log"],
+  mcp: ["RustyHand", "MCP servers"],
+  network: ["RustyHand", "Network"],
+  bindings: ["RustyHand", "Bindings"],
   settings: ["RustyHand", "Settings"]
 };
 function Topbar({ page, onOpenPalette }) {
@@ -203,6 +210,9 @@ function App() {
   else if (page === "analytics") pageEl = /* @__PURE__ */ React.createElement(AnalyticsPage, null);
   else if (page === "knowledge") pageEl = /* @__PURE__ */ React.createElement(KnowledgePage, null);
   else if (page === "memory") pageEl = /* @__PURE__ */ React.createElement(MemoryPage, null);
+  else if (page === "mcp") pageEl = /* @__PURE__ */ React.createElement(McpPage, null);
+  else if (page === "network") pageEl = /* @__PURE__ */ React.createElement(NetworkPage, null);
+  else if (page === "bindings") pageEl = /* @__PURE__ */ React.createElement(BindingsPage, null);
   else if (page === "skills") pageEl = /* @__PURE__ */ React.createElement(SkillsPage, null);
   else if (page === "approvals") pageEl = /* @__PURE__ */ React.createElement(ApprovalsPage, null);
   else if (page === "audit") pageEl = /* @__PURE__ */ React.createElement(AuditPage, null);
@@ -227,5 +237,5 @@ function App() {
   ), /* @__PURE__ */ React.createElement(TweakSection, { label: "UI" }), /* @__PURE__ */ React.createElement(TweakToggle, { label: "Demo banner", value: t.showDemoBanner, onChange: (v) => setTweak("showDemoBanner", v) })));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(
-  /* @__PURE__ */ React.createElement(AuthGate, null, /* @__PURE__ */ React.createElement(App, null))
+  /* @__PURE__ */ React.createElement(ErrorBoundary, null, /* @__PURE__ */ React.createElement(AuthGate, null, /* @__PURE__ */ React.createElement(App, null)), /* @__PURE__ */ React.createElement(ToastHost, null))
 );

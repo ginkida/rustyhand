@@ -308,6 +308,133 @@ function renderInline(text, keyBase) {
   return out;
 }
 
+// usePagination(prefix, pageSize) — small hook that returns a tuple
+// {offset, page, total, setTotal, setPage, prev, next, hasPrev, hasNext}.
+// Avoids the page-bounce race: when the user clicks next then prev faster
+// than the fetch resolves, we discard the stale response. The hook tracks
+// `requestedOffset` and pages.jsx consumers check it before applying data.
+function usePagination(pageSize) {
+  const [offset, setOffset] = React.useState(0);
+  const [total, setTotal] = React.useState(0);
+  const page = Math.floor(offset / pageSize) + 1;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const next = React.useCallback(() => {
+    setOffset((o) => {
+      if (o + pageSize >= total) return o;
+      return o + pageSize;
+    });
+  }, [pageSize, total]);
+  const prev = React.useCallback(() => {
+    setOffset((o) => Math.max(0, o - pageSize));
+  }, [pageSize]);
+  const reset = React.useCallback(() => setOffset(0), []);
+  return {
+    offset, pageSize, page, totalPages, total,
+    setTotal, setOffset, prev, next, reset,
+    hasPrev: offset > 0,
+    hasNext: offset + pageSize < total,
+  };
+}
+
+// useEscapeKey(handler) — register a window keydown listener that fires
+// `handler()` on Escape. Used by modals to close on Esc. Cleans up on
+// unmount so closed modals don't leak listeners.
+function useEscapeKey(handler) {
+  React.useEffect(() => {
+    if (!handler) return;
+    const onKey = (e) => { if (e.key === "Escape") handler(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handler]);
+}
+
+// Toast system — small, dependency-free. Components call `toast(...)`
+// or shortcut helpers; a single `<ToastHost/>` mounted by App renders
+// the queue. State lives in module scope so any caller can dispatch
+// without prop drilling.
+const __TOASTS = { items: [], subs: new Set(), nextId: 1 };
+function toast(msg, opts) {
+  const id = __TOASTS.nextId++;
+  const t = {
+    id,
+    msg: String(msg),
+    kind: (opts && opts.kind) || "info",  // info | ok | warn | err
+    ttl: (opts && opts.ttl) != null ? opts.ttl : 4500,
+  };
+  __TOASTS.items = __TOASTS.items.concat([t]);
+  __TOASTS.subs.forEach((fn) => fn(__TOASTS.items));
+  if (t.ttl > 0) setTimeout(() => dismissToast(id), t.ttl);
+  return id;
+}
+function dismissToast(id) {
+  __TOASTS.items = __TOASTS.items.filter((t) => t.id !== id);
+  __TOASTS.subs.forEach((fn) => fn(__TOASTS.items));
+}
+function toastOk(msg, opts) { return toast(msg, { ...(opts || {}), kind: "ok" }); }
+function toastWarn(msg, opts) { return toast(msg, { ...(opts || {}), kind: "warn" }); }
+function toastErr(msg, opts) { return toast(msg, { ...(opts || {}), kind: "err", ttl: 7000 }); }
+
+function ToastHost() {
+  const [items, setItems] = React.useState(__TOASTS.items);
+  React.useEffect(() => {
+    __TOASTS.subs.add(setItems);
+    return () => { __TOASTS.subs.delete(setItems); };
+  }, []);
+  if (!items || items.length === 0) return null;
+  return (
+    <div className="toast-host">
+      {items.map((t) => (
+        <div key={t.id} className={`toast toast-${t.kind}`}>
+          <span className={`dot ${t.kind === "ok" ? "live" : t.kind === "err" ? "err" : t.kind === "warn" ? "warn" : "idle"}`}/>
+          <span className="toast-msg">{t.msg}</span>
+          <button className="toast-x" onClick={() => dismissToast(t.id)}>✕</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ErrorBoundary — wraps the app so a runtime crash in any page shows a
+// recovery card instead of a blank `<div id="root">`. Uses
+// `getDerivedStateFromError` (React docs pattern). We deliberately
+// shape this as a class component because hooks can't catch render
+// errors yet.
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { err: null };
+  }
+  static getDerivedStateFromError(err) {
+    return { err };
+  }
+  componentDidCatch(err, info) {
+    // Surface to console for ops; the user sees the recovery card.
+    // eslint-disable-next-line no-console
+    console.error("[panel] component crashed", err, info);
+  }
+  reset() { this.setState({ err: null }); }
+  render() {
+    if (this.state.err) {
+      const e = this.state.err;
+      return (
+        <div className="auth-splash">
+          <div className="auth-card">
+            <div className="auth-mark">!</div>
+            <div className="auth-title">Panel crashed</div>
+            <div className="auth-sub">A React component threw during render. The kernel is unaffected — refresh to retry.</div>
+            <pre className="codebox" style={{ maxHeight: 200, fontSize: 11 }}>{String(e && (e.stack || e.message || e))}</pre>
+            <div className="row gap-8">
+              <button className="btn" onClick={() => this.reset()}>Reset</button>
+              <button className="btn primary" onClick={() => window.location.reload()}>Reload page</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // downloadBlob(filename, content, type) — trigger a browser download for
 // in-memory data. Used for "Export CSV" / "Export audit" buttons.
 function downloadBlob(filename, content, type) {
@@ -333,4 +460,10 @@ function rowsToCsv(rows, columns) {
   return head + "\n" + body + "\n";
 }
 
-Object.assign(window, { rhFetch, useApi, usePolling, useAgentWs, mapAgentState, hueFromId, relativeTime, normalizeAgent, renderMarkdown, downloadBlob, rowsToCsv, getApiKey, setApiKey, clearApiKey });
+Object.assign(window, {
+  rhFetch, useApi, usePolling, useAgentWs, usePagination, useEscapeKey,
+  mapAgentState, hueFromId, relativeTime, normalizeAgent,
+  renderMarkdown, downloadBlob, rowsToCsv,
+  getApiKey, setApiKey, clearApiKey,
+  toast, toastOk, toastWarn, toastErr, dismissToast, ToastHost, ErrorBoundary,
+});

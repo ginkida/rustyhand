@@ -22,7 +22,7 @@ function OverviewPage({ go }) {
     refreshApprovals();
   };
   const approvalRows = approvalsResp && approvalsResp.approvals || D.approvals;
-  const version = health && health.version || "0.7.45";
+  const version = health && health.version || "0.7.46";
   const uptime = health && health.uptime_seconds ? formatUptime(health.uptime_seconds) : null;
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(Banner, { go, onboarding }), /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Overview"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "System pulse \xB7 kernel ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v", version), uptime && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 uptime ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, uptime)), " ", "\xB7 schema ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v8"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null), " Refresh"), /* @__PURE__ */ React.createElement("button", { className: "btn primary" }, /* @__PURE__ */ React.createElement(I.plus, null), " New agent"))), /* @__PURE__ */ React.createElement("div", { className: "tiles" }, /* @__PURE__ */ React.createElement(Tile, { label: "Agents running", value: `${live}`, foot: `of ${totalAgents} total`, spark: sparkOf(agents.map((_, i) => live + (i % 3 - 1)), 12) }), /* @__PURE__ */ React.createElement(Tile, { label: "Cost \xB7 today", value: `$${(cost24 || 0).toFixed(2)}`, foot: usage ? "from /api/usage/daily" : "loading\u2026", spark: days.slice(-12).map((d) => d.cost_usd || 0) }), /* @__PURE__ */ React.createElement(Tile, { label: "Audit entries", value: audit && audit.total != null ? audit.total.toLocaleString() : "\u2014", foot: audit && audit.tip_hash ? `tip ${String(audit.tip_hash).slice(0, 8)}` : "loading\u2026", spark: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] }), /* @__PURE__ */ React.createElement(Tile, { label: "Errors \xB7 agents", value: `${errors}`, foot: errors ? `${errors} crashed agent(s)` : "all green", spark: [0, 0, 1, 0, 0, 0, 0, 0, errors, 0, 0, 0], deltaCls: "up", warn: errors > 0 })), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 col" }, /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Live activity"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: refreshAudit }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost" }, /* @__PURE__ */ React.createElement(I.download, null), " Export"))), /* @__PURE__ */ React.createElement(ActivityFeed, { entries: audit && audit.entries })), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Approvals \xB7 waiting"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("approvals") }, "Open queue"))), approvalRows.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, "No approvals waiting.") : /* @__PURE__ */ React.createElement(ApprovalsTable, { rows: approvalRows.slice(0, 3), compact: true, onChange: refreshApprovals }))), /* @__PURE__ */ React.createElement("div", { className: "col-4 col" }, onboarding && onboarding.demo_mode && /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Demo seed"), /* @__PURE__ */ React.createElement("span", { className: "badge demo" }, /* @__PURE__ */ React.createElement("span", { className: "dot demo" }), "active")), /* @__PURE__ */ React.createElement("div", { className: "col gap-8" }, /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.agents, null), title: "rusty", sub: "welcome agent \xB7 chat-ready", onClick: () => go("chat") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.workflows, null), title: "demo-pipeline", sub: "2-step sample workflow \xB7 click to run", onClick: () => go("workflows") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.event, null), title: "sample trigger", sub: "agent-spawn on webhook", onClick: () => go("automation") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.cron, null), title: "demo-daily-ping", sub: "cron 0 9 * * * \xB7 disabled", onClick: () => go("automation") }))), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Providers"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("settings") }, "Manage")), /* @__PURE__ */ React.createElement(ProvidersList, { providers: providersResp && providersResp.providers })), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Audit chain"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("audit") }, "View")), /* @__PURE__ */ React.createElement("div", { className: "col gap-4" }, /* @__PURE__ */ React.createElement(AuditSummary, { audit }))))));
 }
@@ -146,12 +146,23 @@ const ApprovalsTable = ({ rows, compact, onChange }) => {
     return /* @__PURE__ */ React.createElement("tr", { key: r.id }, /* @__PURE__ */ React.createElement("td", { className: "mono" }, r.id), /* @__PURE__ */ React.createElement("td", { className: "mono" }, agent), /* @__PURE__ */ React.createElement("td", null, r.action), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: `badge ${risk === "high" ? "error" : risk === "medium" ? "warn" : "idle"}` }, risk)), /* @__PURE__ */ React.createElement("td", { className: "mono muted" }, age), /* @__PURE__ */ React.createElement("td", { className: "right" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm primary", style: { height: 24, padding: "2px 8px" }, onClick: () => decide(r.id, "approve") }, "Approve"), /* @__PURE__ */ React.createElement("button", { className: "btn sm danger", style: { height: 24, padding: "2px 8px", marginLeft: 6 }, onClick: () => decide(r.id, "reject") }, "Reject")));
   })));
 };
+function Pagination({ pg }) {
+  if (!pg || pg.total === 0) return null;
+  return /* @__PURE__ */ React.createElement("div", { className: "row gap-8", style: { padding: "10px 14px", borderTop: "1px solid var(--border)", justifyContent: "flex-end" } }, /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 11 } }, pg.offset + 1, "\u2013", Math.min(pg.offset + pg.pageSize, pg.total), " of ", pg.total.toLocaleString()), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: pg.prev, disabled: !pg.hasPrev }, "\u2190 Prev"), /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 11.5, minWidth: 60, textAlign: "center" } }, pg.page, " / ", pg.totalPages), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: pg.next, disabled: !pg.hasNext }, "Next \u2192"));
+}
 function AgentsPage({ openAgent }) {
   const [filter, setFilter] = useState("all");
   const [q, setQ] = useState("");
   const [showSpawn, setShowSpawn] = useState(false);
   const [rowMenu, setRowMenu] = useState(null);
-  const [resp, fetchErr, refresh] = usePolling("/api/agents?limit=200", 15e3);
+  const pg = usePagination(50);
+  const [resp, fetchErr, refresh] = usePolling(
+    `/api/agents?limit=${pg.pageSize}&offset=${pg.offset}`,
+    15e3
+  );
+  React.useEffect(() => {
+    if (resp && resp.total != null) pg.setTotal(resp.total);
+  }, [resp && resp.total]);
   const agents = resp && resp.agents ? resp.agents.map(normalizeAgent) : D.agents;
   const filtered = agents.filter((a) => {
     if (filter !== "all" && a.state !== filter && !(filter === "running" && a.state === "running")) return false;
@@ -164,7 +175,7 @@ function AgentsPage({ openAgent }) {
       await rhFetch(`/api/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
       refresh();
     } catch (e) {
-      alert(`kill failed: ${e.message || e}`);
+      toastErr(`kill failed: ${e.message || e}`);
     }
   };
   const restartAgent = async (id) => {
@@ -172,7 +183,7 @@ function AgentsPage({ openAgent }) {
       await rhFetch(`/api/agents/${encodeURIComponent(id)}/restart`, { method: "POST" });
       refresh();
     } catch (e) {
-      alert(`restart failed: ${e.message || e}`);
+      toastErr(`restart failed: ${e.message || e}`);
     }
   };
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Agents ", /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 14 } }, "\xB7 ", agents.length)), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Manifests live in ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "agents/<name>/agent.toml"), ". Hot-reloaded on save.")), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => setShowSpawn(true) }, /* @__PURE__ */ React.createElement(I.copy, null), " Templates"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setShowSpawn(true) }, /* @__PURE__ */ React.createElement(I.plus, null), " Spawn agent"))), fetchErr && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "API ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body" }, "Failed to load agents from kernel: ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, fetchErr))), /* @__PURE__ */ React.createElement("div", { className: "filter-bar" }, /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: filter === "all" ? "on" : "", onClick: () => setFilter("all") }, "All \xB7 ", agents.length), /* @__PURE__ */ React.createElement("button", { className: filter === "running" ? "on" : "", onClick: () => setFilter("running") }, "Live \xB7 ", agents.filter((a) => a.state === "running").length), /* @__PURE__ */ React.createElement("button", { className: filter === "error" ? "on" : "", onClick: () => setFilter("error") }, "Errors \xB7 ", agents.filter((a) => a.state === "error").length), /* @__PURE__ */ React.createElement("button", { className: filter === "idle" ? "on" : "", onClick: () => setFilter("idle") }, "Idle \xB7 ", agents.filter((a) => a.state === "idle").length)), /* @__PURE__ */ React.createElement("div", { className: "search-field" }, /* @__PURE__ */ React.createElement(I.search, null), /* @__PURE__ */ React.createElement("input", { placeholder: "Find agent, group, model\u2026", value: q, onChange: (e) => setQ(e.target.value) }), /* @__PURE__ */ React.createElement("span", { className: "kbd" }, "\u2318K"))), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Agent"), /* @__PURE__ */ React.createElement("th", null, "Group"), /* @__PURE__ */ React.createElement("th", null, "Model"), /* @__PURE__ */ React.createElement("th", null, "State"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Msgs"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Cost \xB7 24h"), /* @__PURE__ */ React.createElement("th", null, "Last activity"), /* @__PURE__ */ React.createElement("th", null, "Updated"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, filtered.map((a) => /* @__PURE__ */ React.createElement("tr", { key: a.id, style: { cursor: "pointer" }, onClick: () => openAgent(a) }, /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("div", { className: "agent-row" }, /* @__PURE__ */ React.createElement(Avatar, { agent: a }), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "name" }, a.name), /* @__PURE__ */ React.createElement("div", { className: "meta" }, a.id)))), /* @__PURE__ */ React.createElement("td", { className: "muted mono" }, a.group), /* @__PURE__ */ React.createElement("td", { className: "mono" }, a.model, /* @__PURE__ */ React.createElement("div", { className: "meta dim" }, a.provider)), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(StateBadge, { state: a.state })), /* @__PURE__ */ React.createElement("td", { className: "num mono" }, a.messages.toLocaleString()), /* @__PURE__ */ React.createElement("td", { className: "num mono" }, "$", a.cost.toFixed(2)), /* @__PURE__ */ React.createElement("td", { className: "muted", style: { maxWidth: 280, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, a.last), /* @__PURE__ */ React.createElement("td", { className: "mono muted" }, a.updated), /* @__PURE__ */ React.createElement("td", { style: { position: "relative" } }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: (e) => {
@@ -184,12 +195,13 @@ function AgentsPage({ openAgent }) {
   } }, /* @__PURE__ */ React.createElement(I.refresh, null), " Restart"), /* @__PURE__ */ React.createElement("button", { onClick: () => {
     setRowMenu(null);
     killAgent(a.id);
-  }, style: { color: "var(--crimson)" } }, /* @__PURE__ */ React.createElement(I.close, null), " Kill")))))))), showSpawn && /* @__PURE__ */ React.createElement(SpawnAgentModal, { onClose: () => setShowSpawn(false), onSpawned: () => {
+  }, style: { color: "var(--crimson)" } }, /* @__PURE__ */ React.createElement(I.close, null), " Kill"))))))), /* @__PURE__ */ React.createElement(Pagination, { pg })), showSpawn && /* @__PURE__ */ React.createElement(SpawnAgentModal, { onClose: () => setShowSpawn(false), onSpawned: () => {
     setShowSpawn(false);
     refresh();
   } }));
 }
 function SpawnAgentModal({ onClose, onSpawned }) {
+  useEscapeKey(onClose);
   const [templates] = useApi("/api/templates");
   const [profiles] = useApi("/api/profiles");
   const [mode, setMode] = useState("template");
@@ -526,7 +538,7 @@ function WorkflowsPage() {
       setShowRunInput(false);
       refreshRuns();
     } catch (e) {
-      alert(`run failed: ${e.message || e}`);
+      toastErr(`run failed: ${e.message || e}`);
     }
   };
   const runNow = () => setShowRunInput(true);
@@ -563,6 +575,7 @@ function WorkflowsPage() {
   } }), showRunInput && active && /* @__PURE__ */ React.createElement(WorkflowRunModal, { workflow: active, onClose: () => setShowRunInput(false), onRun: runWith }));
 }
 function WorkflowCreateModal({ onClose, onCreated }) {
+  useEscapeKey(onClose);
   const [agentsResp] = useApi("/api/agents?limit=200");
   const agents = agentsResp && agentsResp.agents || [];
   const [name, setName] = useState("");
@@ -772,6 +785,7 @@ function WorkflowStepCard({
   );
 }
 function WorkflowRunModal({ workflow, onClose, onRun }) {
+  useEscapeKey(onClose);
   const [inputJson, setInputJson] = useState("{}");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -857,7 +871,7 @@ function AutomationPage() {
       await rhFetch(`/api/cron/jobs/${encodeURIComponent(id)}/run`, { method: "POST" });
       refreshCron();
     } catch (e) {
-      alert(`run failed: ${e.message || e}`);
+      toastErr(`run failed: ${e.message || e}`);
     }
   };
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Automation"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Cron jobs survive restart \xB7 3 CronAction variants \xB7 trigger fire-counts persisted")), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => (tab === "cron" ? refreshCron : refreshTrig)() }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setShowCreate(true) }, /* @__PURE__ */ React.createElement(I.plus, null), " New ", tab === "cron" ? "job" : "trigger"))), /* @__PURE__ */ React.createElement("div", { className: "tabs" }, /* @__PURE__ */ React.createElement("button", { className: tab === "cron" ? "on" : "", onClick: () => setTab("cron") }, "Cron jobs \xB7 ", cron.length), /* @__PURE__ */ React.createElement("button", { className: tab === "triggers" ? "on" : "", onClick: () => setTab("triggers") }, "Triggers \xB7 ", triggers.length)), tab === "cron" && /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "ID"), /* @__PURE__ */ React.createElement("th", null, "Schedule"), /* @__PURE__ */ React.createElement("th", null, "Action"), /* @__PURE__ */ React.createElement("th", null, "Next"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Fires"), /* @__PURE__ */ React.createElement("th", null, "Enabled"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, !cronResp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 7, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), cronResp && cron.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 7, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "No cron jobs yet.")), cron.map((c) => {
@@ -881,6 +895,7 @@ function AutomationPage() {
   } }));
 }
 function CronJobModal({ onClose, onCreated }) {
+  useEscapeKey(onClose);
   const [agentsResp] = useApi("/api/agents?limit=200");
   const [workflowsResp] = useApi("/api/workflows");
   const agents = agentsResp && agentsResp.agents || [];
@@ -947,6 +962,7 @@ function CronJobModal({ onClose, onCreated }) {
   return /* @__PURE__ */ React.createElement("div", { className: "modal-back", onClick: onClose }, /* @__PURE__ */ React.createElement("div", { className: "modal wide", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "modal-head" }, /* @__PURE__ */ React.createElement("b", { className: "mono" }, "New cron job"), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", onClick: onClose }, /* @__PURE__ */ React.createElement(I.close, null))), /* @__PURE__ */ React.createElement("div", { className: "modal-body" }, /* @__PURE__ */ React.createElement("div", { className: "col gap-8" }, /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Name"), /* @__PURE__ */ React.createElement("input", { className: "modal-field", value: name, onChange: (e) => setName(e.target.value), placeholder: "daily-digest" })), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Owning agent"), /* @__PURE__ */ React.createElement("select", { className: "t-select", value: agentId, onChange: (e) => setAgentId(e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014 pick agent \u2014"), agents.map((a) => /* @__PURE__ */ React.createElement("option", { key: a.id, value: a.id }, a.name, " (", String(a.id).slice(0, 8), ")")))), /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase", marginTop: 6 } }, "Schedule"), /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: scheduleKind === "cron" ? "on" : "", onClick: () => setScheduleKind("cron") }, "Cron"), /* @__PURE__ */ React.createElement("button", { className: scheduleKind === "every" ? "on" : "", onClick: () => setScheduleKind("every") }, "Every"), /* @__PURE__ */ React.createElement("button", { className: scheduleKind === "at" ? "on" : "", onClick: () => setScheduleKind("at") }, "At")), scheduleKind === "cron" && /* @__PURE__ */ React.createElement("input", { className: "modal-field", placeholder: "0 9 * * *", value: cronExpr, onChange: (e) => setCronExpr(e.target.value) }), scheduleKind === "every" && /* @__PURE__ */ React.createElement("input", { className: "modal-field", type: "number", min: 60, value: everySecs, onChange: (e) => setEverySecs(e.target.value), placeholder: "seconds (60..86400)" }), scheduleKind === "at" && /* @__PURE__ */ React.createElement("input", { className: "modal-field", type: "datetime-local", value: atIso, onChange: (e) => setAtIso(e.target.value) }), /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase", marginTop: 6 } }, "Action"), /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: actionKind === "system_event" ? "on" : "", onClick: () => setActionKind("system_event") }, "System event"), /* @__PURE__ */ React.createElement("button", { className: actionKind === "agent_turn" ? "on" : "", onClick: () => setActionKind("agent_turn") }, "Agent turn"), /* @__PURE__ */ React.createElement("button", { className: actionKind === "workflow_run" ? "on" : "", onClick: () => setActionKind("workflow_run") }, "Workflow run")), actionKind === "system_event" && /* @__PURE__ */ React.createElement("input", { className: "modal-field", value: systemText, onChange: (e) => setSystemText(e.target.value), placeholder: "event text" }), actionKind === "agent_turn" && /* @__PURE__ */ React.createElement("textarea", { className: "modal-field modal-textarea", value: message, onChange: (e) => setMessage(e.target.value), placeholder: "message to send" }), actionKind === "workflow_run" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("select", { className: "t-select", value: workflowId, onChange: (e) => setWorkflowId(e.target.value) }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014 pick workflow \u2014"), workflows.map((w) => /* @__PURE__ */ React.createElement("option", { key: w.id, value: w.id }, w.name || w.id))), /* @__PURE__ */ React.createElement("textarea", { className: "modal-field modal-textarea", value: workflowInput, onChange: (e) => setWorkflowInput(e.target.value), placeholder: "workflow input (text)" }))), err && /* @__PURE__ */ React.createElement("div", { className: "banner mt-12", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, err))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: onClose }, "Cancel"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: submit, disabled: busy }, busy ? "Creating\u2026" : "Create"))));
 }
 function TriggerModal({ onClose, onCreated }) {
+  useEscapeKey(onClose);
   const [agentsResp] = useApi("/api/agents?limit=200");
   const agents = agentsResp && agentsResp.agents || [];
   const [agentId, setAgentId] = useState("");
@@ -1030,7 +1046,7 @@ function ChannelsPage() {
       await rhFetch("/api/channels/reload", { method: "POST" });
       refresh();
     } catch (e) {
-      alert(`reload failed: ${e.message || e}`);
+      toastErr(`reload failed: ${e.message || e}`);
     }
   };
   const removeChannel = async (name) => {
@@ -1039,7 +1055,7 @@ function ChannelsPage() {
       await rhFetch(`/api/channels/${encodeURIComponent(name)}/configure`, { method: "DELETE" });
       refresh();
     } catch (e) {
-      alert(`disconnect failed: ${e.message || e}`);
+      toastErr(`disconnect failed: ${e.message || e}`);
     }
   };
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Channels ", /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 14 } }, "\xB7 ", channels.filter((c) => c.configured).length, " of ", channels.length, " configured")), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Telegram-first \xB7 streaming via editMessageText \xB7 500ms throttle \xB7 Discord + Slack adapters available")), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: reload }, "Reload"))), !chResp && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "24px", fontSize: 12 } }, "loading\u2026"), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, channels.map((ch) => {
@@ -1053,6 +1069,7 @@ function ChannelsPage() {
   } }));
 }
 function ChannelConfigModal({ channel, onClose, onSaved }) {
+  useEscapeKey(onClose);
   const [values, setValues] = useState({});
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -1301,7 +1318,7 @@ function SkillsPage() {
       });
       refresh();
     } catch (e) {
-      alert(`uninstall failed: ${e.message || e}`);
+      toastErr(`uninstall failed: ${e.message || e}`);
     }
   };
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Skills ", /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 14 } }, "\xB7 ", skills.length)), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Bundled + ", /* @__PURE__ */ React.createElement("span", { className: "mono", style: { color: "var(--rust)" } }, "ClawHub"), " marketplace \xB7 WASM sandbox \xB7 capability gating")), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, "Reload"), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => setShowCustom(true) }, /* @__PURE__ */ React.createElement(I.plus, null), " Install custom"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setShowClawHub(true) }, /* @__PURE__ */ React.createElement(I.plus, null), " ClawHub"))), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Skill"), /* @__PURE__ */ React.createElement("th", null, "Origin"), /* @__PURE__ */ React.createElement("th", null, "Runtime"), /* @__PURE__ */ React.createElement("th", null, "Version"), /* @__PURE__ */ React.createElement("th", null, "Enabled"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, !skillsResp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 6, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), skillsResp && skills.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 6, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "No skills installed.")), skills.map((s) => {
@@ -1323,6 +1340,7 @@ function SkillsPage() {
   } }));
 }
 function ClawHubModal({ onClose, onInstalled }) {
+  useEscapeKey(onClose);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("trending");
   const path = query.trim() ? `/api/clawhub/search?q=${encodeURIComponent(query)}&limit=30` : `/api/clawhub/browse?sort=${encodeURIComponent(sort)}&limit=30`;
@@ -1356,6 +1374,7 @@ function ClawHubModal({ onClose, onInstalled }) {
   })), result && !result.ok && /* @__PURE__ */ React.createElement("div", { className: "banner mt-12", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "FAIL"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, result.message))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: onClose }, "Close"))));
 }
 function SkillInstallModal({ onClose, onInstalled }) {
+  useEscapeKey(onClose);
   const [name, setName] = useState("");
   const [language, setLanguage] = useState("python");
   const [description, setDescription] = useState("");
@@ -1430,7 +1449,7 @@ function SettingsPage() {
   const providers = providersResp && providersResp.providers || [];
   const apiListen = config && (config.api_listen || config.api && config.api.listen) || "\u2014";
   const proxy = config && (config.proxy_url || config.proxy && config.proxy.url) || null;
-  const version = health && health.version || "0.7.45";
+  const version = health && health.version || "0.7.46";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "\u2014";
   const agentCount = health && health.agent_count != null ? health.agent_count : "\u2014";
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Settings"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Config at ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "~/.rustyhand/config.toml"), " \xB7 50+ fields with serde defaults \xB7 live from ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/config")))), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "LLM providers"), /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 11 } }, providers.length, " loaded \xB7 auto-probe at boot")), /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Provider"), /* @__PURE__ */ React.createElement("th", null, "Env var"), /* @__PURE__ */ React.createElement("th", null, "State"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Models"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, !providersResp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 5, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), providers.map((p) => {
@@ -1448,6 +1467,7 @@ function SettingsPage() {
   } }));
 }
 function ProviderKeyModal({ provider, onClose, onSaved }) {
+  useEscapeKey(onClose);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -1502,7 +1522,14 @@ function ProviderKeyModal({ provider, onClose, onSaved }) {
   return /* @__PURE__ */ React.createElement("div", { className: "modal-back", onClick: onClose }, /* @__PURE__ */ React.createElement("div", { className: "modal", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "modal-head" }, /* @__PURE__ */ React.createElement("b", { className: "mono" }, "Edit provider \xB7 ", provider.display_name || name), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", onClick: onClose }, /* @__PURE__ */ React.createElement(I.close, null))), /* @__PURE__ */ React.createElement("div", { className: "modal-body" }, /* @__PURE__ */ React.createElement("div", { className: "kv mb-12" }, /* @__PURE__ */ React.createElement("dt", null, "id"), /* @__PURE__ */ React.createElement("dd", { className: "mono" }, name), /* @__PURE__ */ React.createElement("dt", null, "env var"), /* @__PURE__ */ React.createElement("dd", { className: "mono" }, provider.api_key_env || "\u2014"), /* @__PURE__ */ React.createElement("dt", null, "auth status"), /* @__PURE__ */ React.createElement("dd", { className: "mono" }, provider.auth_status || "\u2014"), /* @__PURE__ */ React.createElement("dt", null, "models"), /* @__PURE__ */ React.createElement("dd", null, provider.model_count != null ? provider.model_count : "\u2014")), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "New API key (will overwrite stored value, zeroized after use)"), /* @__PURE__ */ React.createElement("input", { className: "modal-field", type: "password", placeholder: provider.api_key_env || "sk-\u2026", value: key, onChange: (e) => setKey(e.target.value) })), testResult && /* @__PURE__ */ React.createElement("div", { className: "banner mt-12", style: { borderColor: testResult.ok ? "oklch(0.74 0.135 150 / .35)" : "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot " + (testResult.ok ? "live" : "err") }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, testResult.ok ? "OK" : "FAIL"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, testResult.message || testResult.detail || JSON.stringify(testResult).slice(0, 200))), err && /* @__PURE__ */ React.createElement("div", { className: "banner mt-12", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, err))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: clear, disabled: busy, style: { marginRight: "auto", color: "var(--crimson)" } }, "Delete key"), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: test, disabled: busy }, "Test"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: save, disabled: busy || !key.trim() }, busy ? "Saving\u2026" : "Save"))));
 }
 function MemoryPage() {
-  const [resp, fetchErr, refresh] = usePolling("/api/sessions?limit=200", 2e4);
+  const pg = usePagination(50);
+  const [resp, fetchErr, refresh] = usePolling(
+    `/api/sessions?limit=${pg.pageSize}&offset=${pg.offset}`,
+    2e4
+  );
+  React.useEffect(() => {
+    if (resp && resp.total != null) pg.setTotal(resp.total);
+  }, [resp && resp.total]);
   const sessions = resp && resp.sessions || [];
   const [labelEditing, setLabelEditing] = useState(null);
   const [labelDraft, setLabelDraft] = useState("");
@@ -1513,7 +1540,7 @@ function MemoryPage() {
       await rhFetch(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
       refresh();
     } catch (e) {
-      alert(`delete failed: ${e.message || e}`);
+      toastErr(`delete failed: ${e.message || e}`);
     }
   };
   const saveLabel = async (id) => {
@@ -1526,17 +1553,17 @@ function MemoryPage() {
       setLabelEditing(null);
       refresh();
     } catch (e) {
-      alert(`label set failed: ${e.message || e}`);
+      toastErr(`label set failed: ${e.message || e}`);
     }
   };
   const exportMarkdown = (id) => {
-    rhFetch(`/api/sessions/${encodeURIComponent(id)}/export.md`).then((md) => downloadBlob(`session-${String(id).slice(0, 8)}.md`, md, "text/markdown")).catch((e) => alert(`export failed: ${e.message || e}`));
+    rhFetch(`/api/sessions/${encodeURIComponent(id)}/export.md`).then((md) => downloadBlob(`session-${String(id).slice(0, 8)}.md`, md, "text/markdown")).catch((e) => toastErr(`export failed: ${e.message || e}`));
   };
   const backupMemory = () => {
     rhFetch("/api/memory/export?format=json").then((data) => {
       const blob = typeof data === "string" ? data : JSON.stringify(data, null, 2);
       downloadBlob(`rustyhand-memory-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.json`, blob, "application/json");
-    }).catch((e) => alert(`export failed: ${e.message || e}`));
+    }).catch((e) => toastErr(`export failed: ${e.message || e}`));
   };
   const importMemory = async (file) => {
     if (!file) return;
@@ -1547,10 +1574,10 @@ function MemoryPage() {
         headers: { "Content-Type": "application/json" },
         body: text
       });
-      alert(`Imported: ${r.imported || r.message || "ok"}`);
+      toastOk(`Imported: ${r.imported || r.message || "ok"}`);
       refresh();
     } catch (e) {
-      alert(`import failed: ${e.message || e}`);
+      toastErr(`import failed: ${e.message || e}`);
     }
   };
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Memory ", /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 14 } }, "\xB7 ", sessions.length, " session(s)")), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "SQLite-backed sessions \xB7 backup at ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/memory/export"), " \xB7 restore at ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/memory/import"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => fileInputRef.current && fileInputRef.current.click() }, /* @__PURE__ */ React.createElement(I.copy, null), " Restore"), /* @__PURE__ */ React.createElement(
@@ -1578,7 +1605,42 @@ function MemoryPage() {
   ), /* @__PURE__ */ React.createElement("button", { className: "btn sm", onClick: () => saveLabel(s.session_id) }, "save")) : /* @__PURE__ */ React.createElement("span", { style: { cursor: "pointer" }, onClick: () => {
     setLabelEditing(s.session_id);
     setLabelDraft(s.label || "");
-  } }, s.label || /* @__PURE__ */ React.createElement("span", { className: "dim" }, "\u2014 click to set \u2014"))), /* @__PURE__ */ React.createElement("td", { className: "num mono" }, Number(s.message_count || 0).toLocaleString()), /* @__PURE__ */ React.createElement("td", { className: "mono muted" }, relativeTime(s.created_at)), /* @__PURE__ */ React.createElement("td", { className: "mono muted" }, relativeTime(s.updated_at)), /* @__PURE__ */ React.createElement("td", { className: "right" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => exportMarkdown(s.session_id), title: "Export markdown" }, /* @__PURE__ */ React.createElement(I.download, null)), /* @__PURE__ */ React.createElement("button", { className: "btn sm danger", onClick: () => remove(s.session_id), title: "Delete" }, /* @__PURE__ */ React.createElement(I.close, null)))))))));
+  } }, s.label || /* @__PURE__ */ React.createElement("span", { className: "dim" }, "\u2014 click to set \u2014"))), /* @__PURE__ */ React.createElement("td", { className: "num mono" }, Number(s.message_count || 0).toLocaleString()), /* @__PURE__ */ React.createElement("td", { className: "mono muted" }, relativeTime(s.created_at)), /* @__PURE__ */ React.createElement("td", { className: "mono muted" }, relativeTime(s.updated_at)), /* @__PURE__ */ React.createElement("td", { className: "right" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => exportMarkdown(s.session_id), title: "Export markdown" }, /* @__PURE__ */ React.createElement(I.download, null)), /* @__PURE__ */ React.createElement("button", { className: "btn sm danger", onClick: () => remove(s.session_id), title: "Delete" }, /* @__PURE__ */ React.createElement(I.close, null))))))), /* @__PURE__ */ React.createElement(Pagination, { pg })));
+}
+function McpPage() {
+  const [resp, fetchErr, refresh] = usePolling("/api/mcp/servers", 3e4);
+  const configured = resp && resp.configured || [];
+  const connected = resp && resp.connected || [];
+  const connectedNames = new Set(connected.map((c) => c.name));
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "MCP servers ", /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 14 } }, "\xB7 ", configured.length, " configured \xB7 ", connected.length, " connected")), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Model-Context-Protocol bridges \xB7 live from ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/mcp/servers"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null)))), fetchErr && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "API ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, fetchErr)), !resp && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "24px", fontSize: 12 } }, "loading\u2026"), resp && configured.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "24px", fontSize: 12 } }, "No MCP servers configured. Add them in ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "~/.rustyhand/config.toml"), " under ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "[[mcp.servers]]"), "."), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, configured.map((s) => {
+    const isConnected = connectedNames.has(s.name);
+    const transport = s.transport || {};
+    return /* @__PURE__ */ React.createElement("div", { key: s.name, className: "col-6 card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 14, fontWeight: 500 } }, s.name), /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, transport.type || "\u2014", " \xB7 ", s.timeout_secs ? `${s.timeout_secs}s timeout` : "no timeout")), /* @__PURE__ */ React.createElement("span", { className: "badge " + (isConnected ? "live" : "idle") }, isConnected ? "connected" : "idle")), /* @__PURE__ */ React.createElement("div", { className: "kv" }, transport.type === "stdio" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("dt", null, "command"), /* @__PURE__ */ React.createElement("dd", { className: "mono" }, transport.command), /* @__PURE__ */ React.createElement("dt", null, "args"), /* @__PURE__ */ React.createElement("dd", { className: "mono" }, (transport.args || []).join(" ") || "\u2014")), transport.type === "sse" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("dt", null, "url"), /* @__PURE__ */ React.createElement("dd", { className: "mono" }, transport.url)), s.env && Object.keys(s.env).length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("dt", null, "env"), /* @__PURE__ */ React.createElement("dd", { className: "mono dim" }, Object.keys(s.env).join(", ")))));
+  })));
+}
+function NetworkPage() {
+  const [status, , refreshStatus] = usePolling("/api/network/status", 15e3);
+  const [peersResp, , refreshPeers] = usePolling("/api/peers", 15e3);
+  const peers = peersResp && peersResp.peers || [];
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Network"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "RHP peer-to-peer protocol (JSON-RPC over TCP) \xB7 live from ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/network/status"), " \xB7 ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/peers"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => {
+    refreshStatus();
+    refreshPeers();
+  } }, /* @__PURE__ */ React.createElement(I.refresh, null)))), /* @__PURE__ */ React.createElement("div", { className: "tiles" }, /* @__PURE__ */ React.createElement(Tile, { label: "Network state", value: status ? status.enabled ? "enabled" : "disabled" : "\u2026", foot: status && status.node_id ? `node ${String(status.node_id).slice(0, 12)}` : "no node id", spark: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }), /* @__PURE__ */ React.createElement(Tile, { label: "Listen address", value: status && status.listen_address ? String(status.listen_address) : "\u2014", foot: status ? "TCP" : "loading\u2026", spark: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }), /* @__PURE__ */ React.createElement(Tile, { label: "Connected peers", value: status ? status.connected_peers != null ? String(status.connected_peers) : "\u2014" : "\u2026", foot: status ? `${status.total_peers || 0} known` : "loading\u2026", spark: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }), /* @__PURE__ */ React.createElement(Tile, { label: "Loaded peers", value: `${peers.length}`, foot: peers.length === 0 ? "no peers" : "see below", spark: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] })), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Known peers")), /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Node ID"), /* @__PURE__ */ React.createElement("th", null, "Address"), /* @__PURE__ */ React.createElement("th", null, "State"), /* @__PURE__ */ React.createElement("th", null, "Last seen"))), /* @__PURE__ */ React.createElement("tbody", null, !peersResp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 4, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), peersResp && peers.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 4, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "No peers \u2014 network may be disabled or no peer has connected yet.")), peers.map((p, i) => /* @__PURE__ */ React.createElement("tr", { key: p.node_id || p.id || i }, /* @__PURE__ */ React.createElement("td", { className: "mono", style: { maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" } }, p.node_id || p.id || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "mono" }, p.address || p.endpoint || "\u2014"), /* @__PURE__ */ React.createElement("td", null, p.state ? /* @__PURE__ */ React.createElement("span", { className: "badge " + (String(p.state).toLowerCase() === "connected" ? "live" : "idle") }, p.state) : /* @__PURE__ */ React.createElement("span", { className: "badge idle" }, "\u2014")), /* @__PURE__ */ React.createElement("td", { className: "mono muted" }, p.last_seen ? relativeTime(p.last_seen) : "\u2014")))))));
+}
+function BindingsPage() {
+  const [resp, fetchErr, refresh] = usePolling("/api/bindings", 3e4);
+  const bindings = resp && resp.bindings || [];
+  const remove = async (index) => {
+    if (!confirm(`Remove binding #${index}?`)) return;
+    try {
+      await rhFetch(`/api/bindings/${index}`, { method: "DELETE" });
+      toastOk("Binding removed");
+      refresh();
+    } catch (e) {
+      toastErr(`Remove failed: ${e.message || e}`);
+    }
+  };
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Bindings ", /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 14 } }, "\xB7 ", bindings.length)), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Agent \u2192 channel/trigger bindings \xB7 live from ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/bindings"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null)))), fetchErr && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "API ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, fetchErr)), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "#"), /* @__PURE__ */ React.createElement("th", null, "Agent"), /* @__PURE__ */ React.createElement("th", null, "Kind"), /* @__PURE__ */ React.createElement("th", null, "Target"), /* @__PURE__ */ React.createElement("th", null, "Pattern"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, !resp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 6, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), resp && bindings.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 6, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "No bindings configured.")), bindings.map((b, i) => /* @__PURE__ */ React.createElement("tr", { key: i }, /* @__PURE__ */ React.createElement("td", { className: "num mono" }, i), /* @__PURE__ */ React.createElement("td", { className: "mono" }, b.agent_id || b.agent || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "mono" }, b.kind || b.type || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "mono" }, b.target || b.channel || b.trigger || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "mono dim", style: { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" } }, b.pattern ? JSON.stringify(b.pattern) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "right" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm danger", onClick: () => remove(i), title: "Remove" }, /* @__PURE__ */ React.createElement(I.close, null)))))))));
 }
 Object.assign(window, {
   OverviewPage,
@@ -1594,5 +1656,8 @@ Object.assign(window, {
   ApprovalsPage,
   AuditPage,
   SettingsPage,
-  MemoryPage
+  MemoryPage,
+  McpPage,
+  NetworkPage,
+  BindingsPage
 });

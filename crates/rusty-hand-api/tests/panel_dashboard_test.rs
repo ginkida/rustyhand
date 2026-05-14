@@ -101,6 +101,14 @@ async fn dashboard_includes_all_panel_modules() {
         ("AuditPage", "pages.js must expose AuditPage"),
         ("SettingsPage", "pages.js must expose SettingsPage"),
         ("MemoryPage", "pages.js must expose MemoryPage"),
+        ("McpPage", "pages.js must expose McpPage"),
+        ("NetworkPage", "pages.js must expose NetworkPage"),
+        ("BindingsPage", "pages.js must expose BindingsPage"),
+        ("ToastHost", "api.js must expose ToastHost"),
+        ("ErrorBoundary", "api.js must expose ErrorBoundary"),
+        ("usePagination", "api.js must expose usePagination"),
+        ("useEscapeKey", "api.js must expose useEscapeKey"),
+        ("Pagination", "pages.js must expose Pagination component"),
     ];
     for (needle, msg) in markers {
         assert!(body.contains(needle), "{msg} (missing `{needle}`)");
@@ -182,6 +190,11 @@ async fn dashboard_wires_every_kernel_endpoint_it_uses() {
         "/api/knowledge/query",
         "/api/config",
         "/api/audit/verify",
+        // System pages (iter 20)
+        "/api/mcp/servers",
+        "/api/network/status",
+        "/api/peers",
+        "/api/bindings",
     ];
     for path in endpoints {
         assert!(

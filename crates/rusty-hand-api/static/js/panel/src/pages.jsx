@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.45";
+  const version = (health && health.version) || "0.7.46";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -363,13 +363,39 @@ const ApprovalsTable = ({ rows, compact, onChange }) => {
   );
 };
 
+// Tiny pagination chip-row used by Agents / Memory / Audit. Driven by the
+// `usePagination` hook from api.jsx.
+function Pagination({ pg }) {
+  if (!pg || pg.total === 0) return null;
+  return (
+    <div className="row gap-8" style={{padding:"10px 14px", borderTop:"1px solid var(--border)", justifyContent:"flex-end"}}>
+      <span className="dim mono" style={{fontSize:11}}>
+        {pg.offset + 1}–{Math.min(pg.offset + pg.pageSize, pg.total)} of {pg.total.toLocaleString()}
+      </span>
+      <button className="btn sm ghost" onClick={pg.prev} disabled={!pg.hasPrev}>← Prev</button>
+      <span className="mono" style={{fontSize:11.5, minWidth:60, textAlign:"center"}}>{pg.page} / {pg.totalPages}</span>
+      <button className="btn sm ghost" onClick={pg.next} disabled={!pg.hasNext}>Next →</button>
+    </div>
+  );
+}
+
 /* ============================== AGENTS ============================== */
 function AgentsPage({ openAgent }) {
   const [filter, setFilter] = useState("all");
   const [q, setQ] = useState("");
   const [showSpawn, setShowSpawn] = useState(false);
   const [rowMenu, setRowMenu] = useState(null);
-  const [resp, fetchErr, refresh] = usePolling("/api/agents?limit=200", 15000);
+  const pg = usePagination(50);
+  // Snapshot the requested offset before the fetch so a slow response from
+  // the previous page doesn't overwrite the current page (gotcha from
+  // CLAUDE.md). usePolling drops stale responses automatically because the
+  // path key changes, but we still update the pagination total from the
+  // latest envelope.
+  const [resp, fetchErr, refresh] = usePolling(
+    `/api/agents?limit=${pg.pageSize}&offset=${pg.offset}`, 15000);
+  React.useEffect(() => {
+    if (resp && resp.total != null) pg.setTotal(resp.total);
+  }, [resp && resp.total]);
   const agents = (resp && resp.agents) ? resp.agents.map(normalizeAgent) : D.agents;
   const filtered = agents.filter(a => {
     if (filter !== "all" && a.state !== filter && !(filter === "running" && a.state === "running")) return false;
@@ -382,13 +408,13 @@ function AgentsPage({ openAgent }) {
     try {
       await rhFetch(`/api/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
       refresh();
-    } catch (e) { alert(`kill failed: ${e.message || e}`); }
+    } catch (e) { toastErr(`kill failed: ${e.message || e}`); }
   };
   const restartAgent = async (id) => {
     try {
       await rhFetch(`/api/agents/${encodeURIComponent(id)}/restart`, { method: "POST" });
       refresh();
-    } catch (e) { alert(`restart failed: ${e.message || e}`); }
+    } catch (e) { toastErr(`restart failed: ${e.message || e}`); }
   };
 
   return (
@@ -467,6 +493,7 @@ function AgentsPage({ openAgent }) {
             ))}
           </tbody>
         </table>
+        <Pagination pg={pg}/>
       </div>
 
       {showSpawn && <SpawnAgentModal onClose={() => setShowSpawn(false)} onSpawned={() => { setShowSpawn(false); refresh(); }}/>}
@@ -475,6 +502,7 @@ function AgentsPage({ openAgent }) {
 }
 
 function SpawnAgentModal({ onClose, onSpawned }) {
+  useEscapeKey(onClose);
   const [templates] = useApi("/api/templates");
   const [profiles] = useApi("/api/profiles");
   const [mode, setMode] = useState("template"); // "template" | "custom"
@@ -1179,7 +1207,7 @@ function WorkflowsPage() {
       setShowRunInput(false);
       refreshRuns();
     } catch (e) {
-      alert(`run failed: ${e.message || e}`);
+      toastErr(`run failed: ${e.message || e}`);
     }
   };
   const runNow = () => setShowRunInput(true);
@@ -1301,6 +1329,7 @@ function WorkflowsPage() {
 // error_mode, output_var, condition?, max_iterations?, until?, max_retries?}`.
 // We carry an internal `steps` array of those records and serialize on submit.
 function WorkflowCreateModal({ onClose, onCreated }) {
+  useEscapeKey(onClose);
   const [agentsResp] = useApi("/api/agents?limit=200");
   const agents = (agentsResp && agentsResp.agents) || [];
   const [name, setName] = useState("");
@@ -1561,6 +1590,7 @@ function WorkflowStepCard({
 }
 
 function WorkflowRunModal({ workflow, onClose, onRun }) {
+  useEscapeKey(onClose);
   const [inputJson, setInputJson] = useState("{}");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -1686,7 +1716,7 @@ function AutomationPage() {
       await rhFetch(`/api/cron/jobs/${encodeURIComponent(id)}/run`, { method: "POST" });
       refreshCron();
     } catch (e) {
-      alert(`run failed: ${e.message || e}`);
+      toastErr(`run failed: ${e.message || e}`);
     }
   };
 
@@ -1784,6 +1814,7 @@ function AutomationPage() {
 }
 
 function CronJobModal({ onClose, onCreated }) {
+  useEscapeKey(onClose);
   const [agentsResp] = useApi("/api/agents?limit=200");
   const [workflowsResp] = useApi("/api/workflows");
   const agents = (agentsResp && agentsResp.agents) || [];
@@ -1893,6 +1924,7 @@ function CronJobModal({ onClose, onCreated }) {
 }
 
 function TriggerModal({ onClose, onCreated }) {
+  useEscapeKey(onClose);
   const [agentsResp] = useApi("/api/agents?limit=200");
   const agents = (agentsResp && agentsResp.agents) || [];
   const [agentId, setAgentId] = useState("");
@@ -1994,12 +2026,12 @@ function ChannelsPage() {
   };
   const reload = async () => {
     try { await rhFetch("/api/channels/reload", { method: "POST" }); refresh(); }
-    catch (e) { alert(`reload failed: ${e.message || e}`); }
+    catch (e) { toastErr(`reload failed: ${e.message || e}`); }
   };
   const removeChannel = async (name) => {
     if (!confirm(`Disconnect ${name}?`)) return;
     try { await rhFetch(`/api/channels/${encodeURIComponent(name)}/configure`, { method: "DELETE" }); refresh(); }
-    catch (e) { alert(`disconnect failed: ${e.message || e}`); }
+    catch (e) { toastErr(`disconnect failed: ${e.message || e}`); }
   };
 
   return (
@@ -2068,6 +2100,7 @@ function ChannelsPage() {
 }
 
 function ChannelConfigModal({ channel, onClose, onSaved }) {
+  useEscapeKey(onClose);
   const [values, setValues] = useState({});
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -2529,7 +2562,7 @@ function SkillsPage() {
         body: JSON.stringify({ name }),
       });
       refresh();
-    } catch (e) { alert(`uninstall failed: ${e.message || e}`); }
+    } catch (e) { toastErr(`uninstall failed: ${e.message || e}`); }
   };
 
   return (
@@ -2593,6 +2626,7 @@ function SkillsPage() {
 }
 
 function ClawHubModal({ onClose, onInstalled }) {
+  useEscapeKey(onClose);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("trending");
   const path = query.trim()
@@ -2690,6 +2724,7 @@ function ClawHubModal({ onClose, onInstalled }) {
 }
 
 function SkillInstallModal({ onClose, onInstalled }) {
+  useEscapeKey(onClose);
   const [name, setName] = useState("");
   const [language, setLanguage] = useState("python");
   const [description, setDescription] = useState("");
@@ -2880,7 +2915,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.45";
+  const version = (health && health.version) || "0.7.46";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 
@@ -2964,6 +2999,7 @@ function SettingsPage() {
 }
 
 function ProviderKeyModal({ provider, onClose, onSaved }) {
+  useEscapeKey(onClose);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -3045,7 +3081,10 @@ function ProviderKeyModal({ provider, onClose, onSaved }) {
 
 /* ============================== MEMORY ============================== */
 function MemoryPage() {
-  const [resp, fetchErr, refresh] = usePolling("/api/sessions?limit=200", 20000);
+  const pg = usePagination(50);
+  const [resp, fetchErr, refresh] = usePolling(
+    `/api/sessions?limit=${pg.pageSize}&offset=${pg.offset}`, 20000);
+  React.useEffect(() => { if (resp && resp.total != null) pg.setTotal(resp.total); }, [resp && resp.total]);
   const sessions = (resp && resp.sessions) || [];
   const [labelEditing, setLabelEditing] = useState(null);
   const [labelDraft, setLabelDraft] = useState("");
@@ -3054,7 +3093,7 @@ function MemoryPage() {
   const remove = async (id) => {
     if (!confirm(`Delete session ${String(id).slice(0, 8)}? This cannot be undone.`)) return;
     try { await rhFetch(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }); refresh(); }
-    catch (e) { alert(`delete failed: ${e.message || e}`); }
+    catch (e) { toastErr(`delete failed: ${e.message || e}`); }
   };
   const saveLabel = async (id) => {
     try {
@@ -3065,13 +3104,13 @@ function MemoryPage() {
       });
       setLabelEditing(null);
       refresh();
-    } catch (e) { alert(`label set failed: ${e.message || e}`); }
+    } catch (e) { toastErr(`label set failed: ${e.message || e}`); }
   };
   const exportMarkdown = (id) => {
     // Server returns markdown directly; just hit the URL with the auth header.
     rhFetch(`/api/sessions/${encodeURIComponent(id)}/export.md`)
       .then(md => downloadBlob(`session-${String(id).slice(0, 8)}.md`, md, "text/markdown"))
-      .catch(e => alert(`export failed: ${e.message || e}`));
+      .catch(e => toastErr(`export failed: ${e.message || e}`));
   };
   const backupMemory = () => {
     rhFetch("/api/memory/export?format=json")
@@ -3079,7 +3118,7 @@ function MemoryPage() {
         const blob = typeof data === "string" ? data : JSON.stringify(data, null, 2);
         downloadBlob(`rustyhand-memory-${new Date().toISOString().slice(0, 10)}.json`, blob, "application/json");
       })
-      .catch(e => alert(`export failed: ${e.message || e}`));
+      .catch(e => toastErr(`export failed: ${e.message || e}`));
   };
   const importMemory = async (file) => {
     if (!file) return;
@@ -3090,9 +3129,9 @@ function MemoryPage() {
         headers: { "Content-Type": "application/json" },
         body: text,
       });
-      alert(`Imported: ${r.imported || r.message || "ok"}`);
+      toastOk(`Imported: ${r.imported || r.message || "ok"}`);
       refresh();
-    } catch (e) { alert(`import failed: ${e.message || e}`); }
+    } catch (e) { toastErr(`import failed: ${e.message || e}`); }
   };
 
   return (
@@ -3156,6 +3195,161 @@ function MemoryPage() {
             ))}
           </tbody>
         </table>
+        <Pagination pg={pg}/>
+      </div>
+    </div>
+  );
+}
+
+/* ============================== MCP ============================== */
+function McpPage() {
+  const [resp, fetchErr, refresh] = usePolling("/api/mcp/servers", 30000);
+  const configured = (resp && resp.configured) || [];
+  const connected = (resp && resp.connected) || [];
+  const connectedNames = new Set(connected.map(c => c.name));
+  return (
+    <div>
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">MCP servers <span className="dim mono" style={{fontSize:14}}>· {configured.length} configured · {connected.length} connected</span></h1>
+          <p className="page-sub">Model-Context-Protocol bridges · live from <span className="mono">/api/mcp/servers</span></p>
+        </div>
+        <div className="page-actions">
+          <button className="btn ghost" onClick={refresh}><I.refresh/></button>
+        </div>
+      </div>
+      {fetchErr && <div className="banner" style={{borderColor:"oklch(0.66 0.18 25 / .35)"}}>
+        <span className="dot err"/><span className="banner-title">API ERROR</span>
+        <span className="banner-body mono" style={{fontSize:11}}>{fetchErr}</span>
+      </div>}
+      {!resp && <div className="muted mono" style={{padding:"24px", fontSize:12}}>loading…</div>}
+      {resp && configured.length === 0 && <div className="muted mono" style={{padding:"24px", fontSize:12}}>No MCP servers configured. Add them in <span className="mono">~/.rustyhand/config.toml</span> under <span className="mono">[[mcp.servers]]</span>.</div>}
+      <div className="grid-12">
+        {configured.map(s => {
+          const isConnected = connectedNames.has(s.name);
+          const transport = s.transport || {};
+          return (
+            <div key={s.name} className="col-6 card">
+              <div className="row between mb-12">
+                <div>
+                  <div className="mono" style={{fontSize:14, fontWeight:500}}>{s.name}</div>
+                  <div className="dim mono" style={{fontSize:11}}>{transport.type || "—"} · {s.timeout_secs ? `${s.timeout_secs}s timeout` : "no timeout"}</div>
+                </div>
+                <span className={"badge " + (isConnected ? "live" : "idle")}>{isConnected ? "connected" : "idle"}</span>
+              </div>
+              <div className="kv">
+                {transport.type === "stdio" && <>
+                  <dt>command</dt><dd className="mono">{transport.command}</dd>
+                  <dt>args</dt><dd className="mono">{(transport.args || []).join(" ") || "—"}</dd>
+                </>}
+                {transport.type === "sse" && <>
+                  <dt>url</dt><dd className="mono">{transport.url}</dd>
+                </>}
+                {s.env && Object.keys(s.env).length > 0 && <>
+                  <dt>env</dt><dd className="mono dim">{Object.keys(s.env).join(", ")}</dd>
+                </>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ============================== NETWORK ============================== */
+function NetworkPage() {
+  const [status, , refreshStatus] = usePolling("/api/network/status", 15000);
+  const [peersResp, , refreshPeers] = usePolling("/api/peers", 15000);
+  const peers = (peersResp && peersResp.peers) || [];
+  return (
+    <div>
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">Network</h1>
+          <p className="page-sub">RHP peer-to-peer protocol (JSON-RPC over TCP) · live from <span className="mono">/api/network/status</span> · <span className="mono">/api/peers</span></p>
+        </div>
+        <div className="page-actions">
+          <button className="btn ghost" onClick={() => { refreshStatus(); refreshPeers(); }}><I.refresh/></button>
+        </div>
+      </div>
+      <div className="tiles">
+        <Tile label="Network state" value={status ? (status.enabled ? "enabled" : "disabled") : "…"} foot={status && status.node_id ? `node ${String(status.node_id).slice(0, 12)}` : "no node id"} spark={[0,0,0,0,0,0,0,0,0,0,0,0]}/>
+        <Tile label="Listen address" value={status && status.listen_address ? String(status.listen_address) : "—"} foot={status ? "TCP" : "loading…"} spark={[0,0,0,0,0,0,0,0,0,0,0,0]}/>
+        <Tile label="Connected peers" value={status ? (status.connected_peers != null ? String(status.connected_peers) : "—") : "…"} foot={status ? `${status.total_peers || 0} known` : "loading…"} spark={[0,0,0,0,0,0,0,0,0,0,0,0]}/>
+        <Tile label="Loaded peers" value={`${peers.length}`} foot={peers.length === 0 ? "no peers" : "see below"} spark={[0,0,0,0,0,0,0,0,0,0,0,0]}/>
+      </div>
+      <div className="card flush">
+        <div className="card-head"><span>Known peers</span></div>
+        <table className="tbl">
+          <thead><tr><th>Node ID</th><th>Address</th><th>State</th><th>Last seen</th></tr></thead>
+          <tbody>
+            {!peersResp && <tr><td colSpan={4} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>}
+            {peersResp && peers.length === 0 && <tr><td colSpan={4} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>No peers — network may be disabled or no peer has connected yet.</td></tr>}
+            {peers.map((p, i) => (
+              <tr key={p.node_id || p.id || i}>
+                <td className="mono" style={{maxWidth:200, overflow:"hidden", textOverflow:"ellipsis"}}>{p.node_id || p.id || "—"}</td>
+                <td className="mono">{p.address || p.endpoint || "—"}</td>
+                <td>{p.state ? <span className={"badge " + (String(p.state).toLowerCase() === "connected" ? "live" : "idle")}>{p.state}</span> : <span className="badge idle">—</span>}</td>
+                <td className="mono muted">{p.last_seen ? relativeTime(p.last_seen) : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ============================== BINDINGS ============================== */
+function BindingsPage() {
+  const [resp, fetchErr, refresh] = usePolling("/api/bindings", 30000);
+  const bindings = (resp && resp.bindings) || [];
+
+  const remove = async (index) => {
+    if (!confirm(`Remove binding #${index}?`)) return;
+    try {
+      await rhFetch(`/api/bindings/${index}`, { method: "DELETE" });
+      toastOk("Binding removed");
+      refresh();
+    } catch (e) { toastErr(`Remove failed: ${e.message || e}`); }
+  };
+
+  return (
+    <div>
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">Bindings <span className="dim mono" style={{fontSize:14}}>· {bindings.length}</span></h1>
+          <p className="page-sub">Agent → channel/trigger bindings · live from <span className="mono">/api/bindings</span></p>
+        </div>
+        <div className="page-actions">
+          <button className="btn ghost" onClick={refresh}><I.refresh/></button>
+        </div>
+      </div>
+      {fetchErr && <div className="banner" style={{borderColor:"oklch(0.66 0.18 25 / .35)"}}>
+        <span className="dot err"/><span className="banner-title">API ERROR</span>
+        <span className="banner-body mono" style={{fontSize:11}}>{fetchErr}</span>
+      </div>}
+      <div className="card flush">
+        <table className="tbl">
+          <thead><tr><th>#</th><th>Agent</th><th>Kind</th><th>Target</th><th>Pattern</th><th></th></tr></thead>
+          <tbody>
+            {!resp && <tr><td colSpan={6} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>}
+            {resp && bindings.length === 0 && <tr><td colSpan={6} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>No bindings configured.</td></tr>}
+            {bindings.map((b, i) => (
+              <tr key={i}>
+                <td className="num mono">{i}</td>
+                <td className="mono">{b.agent_id || b.agent || "—"}</td>
+                <td className="mono">{b.kind || b.type || "—"}</td>
+                <td className="mono">{b.target || b.channel || b.trigger || "—"}</td>
+                <td className="mono dim" style={{maxWidth:280, overflow:"hidden", textOverflow:"ellipsis"}}>{b.pattern ? JSON.stringify(b.pattern) : "—"}</td>
+                <td className="right">
+                  <button className="btn sm danger" onClick={() => remove(i)} title="Remove"><I.close/></button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -3165,4 +3359,5 @@ Object.assign(window, {
   OverviewPage, AgentsPage, AgentDrawer, ChatPage, WorkflowsPage,
   AutomationPage, ChannelsPage, AnalyticsPage, KnowledgePage,
   SkillsPage, ApprovalsPage, AuditPage, SettingsPage, MemoryPage,
+  McpPage, NetworkPage, BindingsPage,
 });

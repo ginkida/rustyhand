@@ -282,6 +282,107 @@ function renderInline(text, keyBase) {
   if (cursor < text.length) out.push(text.slice(cursor));
   return out;
 }
+function usePagination(pageSize) {
+  const [offset, setOffset] = React.useState(0);
+  const [total, setTotal] = React.useState(0);
+  const page = Math.floor(offset / pageSize) + 1;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const next = React.useCallback(() => {
+    setOffset((o) => {
+      if (o + pageSize >= total) return o;
+      return o + pageSize;
+    });
+  }, [pageSize, total]);
+  const prev = React.useCallback(() => {
+    setOffset((o) => Math.max(0, o - pageSize));
+  }, [pageSize]);
+  const reset = React.useCallback(() => setOffset(0), []);
+  return {
+    offset,
+    pageSize,
+    page,
+    totalPages,
+    total,
+    setTotal,
+    setOffset,
+    prev,
+    next,
+    reset,
+    hasPrev: offset > 0,
+    hasNext: offset + pageSize < total
+  };
+}
+function useEscapeKey(handler) {
+  React.useEffect(() => {
+    if (!handler) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") handler();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handler]);
+}
+const __TOASTS = { items: [], subs: /* @__PURE__ */ new Set(), nextId: 1 };
+function toast(msg, opts) {
+  const id = __TOASTS.nextId++;
+  const t = {
+    id,
+    msg: String(msg),
+    kind: opts && opts.kind || "info",
+    // info | ok | warn | err
+    ttl: (opts && opts.ttl) != null ? opts.ttl : 4500
+  };
+  __TOASTS.items = __TOASTS.items.concat([t]);
+  __TOASTS.subs.forEach((fn) => fn(__TOASTS.items));
+  if (t.ttl > 0) setTimeout(() => dismissToast(id), t.ttl);
+  return id;
+}
+function dismissToast(id) {
+  __TOASTS.items = __TOASTS.items.filter((t) => t.id !== id);
+  __TOASTS.subs.forEach((fn) => fn(__TOASTS.items));
+}
+function toastOk(msg, opts) {
+  return toast(msg, { ...opts || {}, kind: "ok" });
+}
+function toastWarn(msg, opts) {
+  return toast(msg, { ...opts || {}, kind: "warn" });
+}
+function toastErr(msg, opts) {
+  return toast(msg, { ...opts || {}, kind: "err", ttl: 7e3 });
+}
+function ToastHost() {
+  const [items, setItems] = React.useState(__TOASTS.items);
+  React.useEffect(() => {
+    __TOASTS.subs.add(setItems);
+    return () => {
+      __TOASTS.subs.delete(setItems);
+    };
+  }, []);
+  if (!items || items.length === 0) return null;
+  return /* @__PURE__ */ React.createElement("div", { className: "toast-host" }, items.map((t) => /* @__PURE__ */ React.createElement("div", { key: t.id, className: `toast toast-${t.kind}` }, /* @__PURE__ */ React.createElement("span", { className: `dot ${t.kind === "ok" ? "live" : t.kind === "err" ? "err" : t.kind === "warn" ? "warn" : "idle"}` }), /* @__PURE__ */ React.createElement("span", { className: "toast-msg" }, t.msg), /* @__PURE__ */ React.createElement("button", { className: "toast-x", onClick: () => dismissToast(t.id) }, "\u2715"))));
+}
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { err: null };
+  }
+  static getDerivedStateFromError(err) {
+    return { err };
+  }
+  componentDidCatch(err, info) {
+    console.error("[panel] component crashed", err, info);
+  }
+  reset() {
+    this.setState({ err: null });
+  }
+  render() {
+    if (this.state.err) {
+      const e = this.state.err;
+      return /* @__PURE__ */ React.createElement("div", { className: "auth-splash" }, /* @__PURE__ */ React.createElement("div", { className: "auth-card" }, /* @__PURE__ */ React.createElement("div", { className: "auth-mark" }, "!"), /* @__PURE__ */ React.createElement("div", { className: "auth-title" }, "Panel crashed"), /* @__PURE__ */ React.createElement("div", { className: "auth-sub" }, "A React component threw during render. The kernel is unaffected \u2014 refresh to retry."), /* @__PURE__ */ React.createElement("pre", { className: "codebox", style: { maxHeight: 200, fontSize: 11 } }, String(e && (e.stack || e.message || e))), /* @__PURE__ */ React.createElement("div", { className: "row gap-8" }, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => this.reset() }, "Reset"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => window.location.reload() }, "Reload page"))));
+    }
+    return this.props.children;
+  }
+}
 function downloadBlob(filename, content, type) {
   const blob = new Blob([content], { type: type || "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -304,4 +405,28 @@ function rowsToCsv(rows, columns) {
   const body = rows.map((r) => cols.map((c) => escape(c.format ? c.format(r[c.key], r) : r[c.key])).join(",")).join("\n");
   return head + "\n" + body + "\n";
 }
-Object.assign(window, { rhFetch, useApi, usePolling, useAgentWs, mapAgentState, hueFromId, relativeTime, normalizeAgent, renderMarkdown, downloadBlob, rowsToCsv, getApiKey, setApiKey, clearApiKey });
+Object.assign(window, {
+  rhFetch,
+  useApi,
+  usePolling,
+  useAgentWs,
+  usePagination,
+  useEscapeKey,
+  mapAgentState,
+  hueFromId,
+  relativeTime,
+  normalizeAgent,
+  renderMarkdown,
+  downloadBlob,
+  rowsToCsv,
+  getApiKey,
+  setApiKey,
+  clearApiKey,
+  toast,
+  toastOk,
+  toastWarn,
+  toastErr,
+  dismissToast,
+  ToastHost,
+  ErrorBoundary
+});

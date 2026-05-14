@@ -34,6 +34,10 @@ const NAV = [
   { id: "knowledge",  label: "Knowledge",  icon: <I.knowledge/>,  count: null },
   { id: "memory",     label: "Memory",     icon: <I.audit/>,      count: null },
   { id: "audit",      label: "Audit log",  icon: <I.audit/>,      count: null },
+  { kind: "section", label: "System" },
+  { id: "mcp",        label: "MCP servers",icon: <I.cpu/>,        count: null },
+  { id: "network",    label: "Network",    icon: <I.link/>,       count: null },
+  { id: "bindings",   label: "Bindings",   icon: <I.link/>,       count: null },
   { id: "settings",   label: "Settings",   icon: <I.settings/>,   count: null },
 ];
 
@@ -44,7 +48,7 @@ function Sidebar({ page, go }) {
         <div className="sb-mark">RH</div>
         <div>
           <div className="sb-title">Rusty Hand</div>
-          <div className="sb-sub">v0.7.45 · schema v8</div>
+          <div className="sb-sub">v0.7.46 · schema v8</div>
         </div>
       </div>
 
@@ -96,6 +100,9 @@ const CRUMBS = {
   skills:     ["RustyHand", "Skills"],
   approvals:  ["RustyHand", "Approvals"],
   audit:      ["RustyHand", "Audit log"],
+  mcp:        ["RustyHand", "MCP servers"],
+  network:    ["RustyHand", "Network"],
+  bindings:   ["RustyHand", "Bindings"],
   settings:   ["RustyHand", "Settings"],
 };
 
@@ -307,6 +314,9 @@ function App() {
   else if (page === "analytics") pageEl = <AnalyticsPage/>;
   else if (page === "knowledge") pageEl = <KnowledgePage/>;
   else if (page === "memory") pageEl = <MemoryPage/>;
+  else if (page === "mcp") pageEl = <McpPage/>;
+  else if (page === "network") pageEl = <NetworkPage/>;
+  else if (page === "bindings") pageEl = <BindingsPage/>;
   else if (page === "skills") pageEl = <SkillsPage/>;
   else if (page === "approvals") pageEl = <ApprovalsPage/>;
   else if (page === "audit") pageEl = <AuditPage/>;
@@ -345,5 +355,8 @@ function App() {
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(
-  <AuthGate><App/></AuthGate>
+  <ErrorBoundary>
+    <AuthGate><App/></AuthGate>
+    <ToastHost/>
+  </ErrorBoundary>
 );

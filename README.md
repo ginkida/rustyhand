@@ -852,23 +852,44 @@ Full REST/WS/SSE endpoints cover agents, memory, workflows, channels, models, sk
 
 ## Dashboard
 
-The web dashboard is served at `http://localhost:4200` when the daemon is running. Built with Alpine.js — no build step, no node_modules.
+The web dashboard is served at `http://localhost:4200` when the daemon is running. Since v0.7.45 it's a React 18 control panel (industrial-rust palette, 15 pages); React + ReactDOM UMD bundles and the precompiled JSX are inlined into the binary at compile time, so the dashboard ships single-binary like before — no CDN, no `node_modules` at runtime.
 
 ### Sections
 
 | Section | What you see |
 |---------|-------------|
-| **Chat** | Real-time agent conversations |
-| **Monitor** | Overview, analytics charts, system logs |
-| **Agents** | Session history, pending approval requests |
-| **Automation** | Workflows, event triggers, scheduled cron jobs |
-| **Security** | RBAC management, audit trail |
-| **Network** | Connected RHP peers, external A2A agents |
-| **Templates** | Prebuilt agent presets and autonomous starters |
-| **Skills** | Skill browser, marketplace search |
-| **Settings** | API keys, channel tokens, model selection, theme |
+| **Overview** | Live tiles (running agents, cost, audit entries, errors), recent activity, approvals waiting, demo-seed shortcuts, providers, audit chain head |
+| **Agents** | Spawn (template or custom), kill / restart, drawer with Info / Config / Identity / Activity tabs editing the agent's manifest live |
+| **Chat** | WebSocket streaming with HTTP fallback, markdown rendering, tool-trace cards, sessions list per agent |
+| **Workflows** | Visual step builder with HTML5 drag-and-drop reorder, fan-out / collect / conditional / loop modes, runs history, run-with-JSON-input |
+| **Automation** | Cron jobs (3 schedule × 3 action variants), triggers (9 pattern variants), toggle / run-now / delete |
+| **Channels** | Configure modal generated from `/api/channels` field metadata, test / reload / disconnect |
+| **Skills** | Custom install via inline editor, ClawHub browse + search + install, uninstall |
+| **Analytics** | Cost, requests, cache hit-rate, p95 latency, top agents, provider state, CSV export |
+| **Knowledge** | Live graph viz + mini-cypher query (`source:foo relation:works_at depth:3` → POST `/api/knowledge/query`) |
+| **Memory** | Sessions list with label edit + delete, export to markdown, full backup / restore via `/api/memory/{export,import}` |
+| **Approvals** | Pending decisions with one-click approve / reject |
+| **Audit log** | Recent + chain-verify + JSON export |
+| **MCP servers** | Configured + connected MCP bridges from `/api/mcp/servers` |
+| **Network** | RHP P2P status + known peers (`/api/network/status`, `/api/peers`) |
+| **Bindings** | Agent → channel/trigger bindings (`/api/bindings`) |
+| **Settings** | Provider key set / delete / test, demo-mode info, build info |
 
-Connects via WebSocket with HTTP fallback. Supports dark/light/system themes.
+Other niceties: ⌘K / Ctrl-K command palette, toast notifications, tweaks fab (theme dark/light, accent rust/copper/amber/forest/electric, density), `AuthGate` + `LoginScreen` for remote deployments, error boundary so a component crash shows a recovery card instead of a blank `#root`.
+
+### Maintaining the panel
+
+JSX sources live in `crates/rusty-hand-api/static/js/panel/src/*.jsx`; compiled outputs sit one level up at `static/js/panel/*.js`. After editing JSX, recompile via:
+
+```bash
+cd crates/rusty-hand-api/static/js/panel/src && ./build.sh
+```
+
+The build needs Node + esbuild (`npm i -g esbuild` or use `ESBUILD="npx --yes esbuild@0.24.0" ./build.sh`). The Rust build itself doesn't touch Node — it `include_str!`s the `.js` files. A `build.rs` checks JSX/JS mtimes and emits a `cargo:warning=` if you forget to recompile.
+
+Tests pinning the panel contract:
+- `tests/panel_dashboard_test.rs` — 10 tests asserting HTML response, React inlined, every page component + endpoint wired, no Alpine residue, bundle size 100 KB ≤ x ≤ 1 MB
+- `tests/panel_jsx_smoke.rs` — runs the compiled bundle under Node with a React shim and asserts every page component instantiates without throwing (catches JSX runtime errors that string-match tests miss)
 
 ---
 
