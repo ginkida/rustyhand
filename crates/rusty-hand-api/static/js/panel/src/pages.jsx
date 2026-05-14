@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.50";
+  const version = (health && health.version) || "0.7.51";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -392,6 +392,18 @@ function AgentsPage({ openAgent }) {
   const [selected, setSelected] = useState(() => new Set());
   const [grouped, setGrouped] = useState(true);
   const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
+  // Per-page density override. Persists to localStorage so an operator
+  // who always wants compact rows doesn't reset the global tweak.
+  const [compact, setCompactState] = useState(() => {
+    try { return localStorage.getItem("rh.panel.agentsCompact") === "1"; } catch (e) { return false; }
+  });
+  const setCompact = React.useCallback((v) => {
+    setCompactState(prev => {
+      const next = typeof v === "function" ? v(prev) : v;
+      try { localStorage.setItem("rh.panel.agentsCompact", next ? "1" : "0"); } catch (e) {}
+      return next;
+    });
+  }, []);
 
   const [resp, fetchErr, refresh] = usePolling("/api/agents?limit=200", 15000);
   // `n` opens the spawn modal, `r` refreshes — listeners scoped to this
@@ -556,6 +568,9 @@ function AgentsPage({ openAgent }) {
         <button className="btn ghost" onClick={() => setGrouped(g => !g)} title={grouped ? "Show flat list" : "Group by team"}>
           {grouped ? "Flat" : "Group"}
         </button>
+        <button className="btn ghost" onClick={() => setCompact(c => !c)} title={compact ? "Comfortable rows" : "Dense rows"}>
+          {compact ? "Compact" : "Cosy"}
+        </button>
       </div>
 
       {selected.size > 0 && (
@@ -567,7 +582,7 @@ function AgentsPage({ openAgent }) {
         </div>
       )}
 
-      <div className="card flush">
+      <div className="card flush" data-density={compact ? "compact" : ""}>
         <table className="tbl">
           <thead><tr>
             <th style={{width:30}}>
@@ -1171,7 +1186,24 @@ function AgentIdentityForm({ agent, detail, onSaved }) {
         <label className="t-row col" style={{flex:1}}><span className="t-lbl">Emoji</span>
           <input className="modal-field" value={emoji} maxLength={4} onChange={e => setEmoji(e.target.value)} placeholder="🦀"/></label>
         <label className="t-row col" style={{flex:1}}><span className="t-lbl">Color (hex, optional)</span>
-          <input className="modal-field" value={color} onChange={e => setColor(e.target.value)} placeholder="#d4541b"/></label>
+          <div className="row gap-6">
+            <input className="modal-field" style={{flex:1}} value={color} onChange={e => setColor(e.target.value)} placeholder="#d4541b"/>
+            <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(color) ? color : "#d4541b"}
+                   onChange={e => setColor(e.target.value)}
+                   style={{width:32, height:32, padding:0, border:"1px solid var(--border)", borderRadius:6, background:"var(--bg-2)"}}
+                   title="Pick color"/>
+          </div>
+          <div className="row gap-4 mt-4">
+            {["#d4541b", "#e0a52e", "#5d9c4d", "#3b82c0", "#9b6cd1", "#c44a73", "#6b6f74"].map(swatch => (
+              <button key={swatch}
+                      type="button"
+                      onClick={() => setColor(swatch)}
+                      className="swatch"
+                      style={{background: swatch, outline: color === swatch ? "2px solid var(--rust)" : "none"}}
+                      title={swatch}/>
+            ))}
+          </div>
+        </label>
       </div>
       <label className="t-row col"><span className="t-lbl">Avatar URL (http/https/data)</span>
         <input className="modal-field" value={avatarUrl} onChange={e => setAvatarUrl(e.target.value)} placeholder="https://…"/></label>
@@ -2711,11 +2743,7 @@ function ChannelsPage() {
               </div>
               <div className="dim" style={{fontSize:11.5, marginBottom:12}}>{ch.description}</div>
               {testResult && testResult.name === ch.name && (
-                <div className="banner mb-12" style={{borderColor: testResult.ok ? "oklch(0.74 0.135 150 / .35)" : "oklch(0.66 0.18 25 / .35)"}}>
-                  <span className={"dot " + (testResult.busy ? "warn" : testResult.ok ? "live" : "err")}/>
-                  <span className="banner-title">{testResult.busy ? "TESTING" : testResult.ok ? "OK" : "FAIL"}</span>
-                  <span className="banner-body mono" style={{fontSize:11}}>{testResult.message || testResult.detail || (testResult.busy ? "…" : "")}</span>
-                </div>
+                <ChannelTestCard result={testResult}/>
               )}
               <div className="row gap-6">
                 {ch.configured ? (
@@ -2734,6 +2762,60 @@ function ChannelsPage() {
       </div>
 
       {configuring && <ChannelConfigModal channel={configuring} onClose={() => setConfiguring(null)} onSaved={() => { setConfiguring(null); refresh(); }}/>}
+    </div>
+  );
+}
+
+// Channel test result rendered as a structured card. The server returns
+// adapter-specific shapes (telegram: {ok, me:{username,first_name}};
+// discord: {ok, gateway:{ms}}; webhook: {status, latency_ms}) — we
+// surface known fields with labels and fall through to a JSON dump for
+// anything we don't recognize, instead of showing raw stringified JSON.
+function ChannelTestCard({ result }) {
+  const r = result || {};
+  const ok = !!r.ok;
+  const known = [];
+  if (r.latency_ms != null) known.push(["Latency", `${r.latency_ms} ms`]);
+  if (r.status != null) known.push(["HTTP status", String(r.status)]);
+  if (r.me) {
+    if (r.me.username) known.push(["Bot username", `@${r.me.username}`]);
+    if (r.me.first_name) known.push(["Bot name", r.me.first_name]);
+    if (r.me.id != null) known.push(["Bot ID", String(r.me.id)]);
+  }
+  if (r.gateway) {
+    if (r.gateway.ms != null) known.push(["Gateway latency", `${r.gateway.ms} ms`]);
+    if (r.gateway.session_id) known.push(["Session", r.gateway.session_id]);
+  }
+  if (r.workspace) known.push(["Workspace", r.workspace]);
+  // Anything else worth pretty-printing (e.g. echo of a sample message).
+  const otherKnown = new Set(["ok", "busy", "name", "message", "detail", "latency_ms", "status", "me", "gateway", "workspace"]);
+  const extras = Object.entries(r).filter(([k]) => !otherKnown.has(k) && r[k] != null);
+  const message = r.message || r.detail;
+  return (
+    <div className="banner mb-12" style={{
+      flexDirection:"column", alignItems:"stretch", gap:6,
+      borderColor: r.busy ? "var(--border-hi)" : (ok ? "oklch(0.74 0.135 150 / .35)" : "oklch(0.66 0.18 25 / .35)"),
+    }}>
+      <div className="row gap-8">
+        <span className={"dot " + (r.busy ? "warn" : ok ? "live" : "err")}/>
+        <span className="banner-title">{r.busy ? "TESTING" : ok ? "OK" : "FAIL"}</span>
+        {message && <span className="banner-body" style={{fontSize:11.5}}>{message}</span>}
+      </div>
+      {known.length > 0 && (
+        <div className="kv" style={{gridTemplateColumns:"110px 1fr", fontSize:11.5, padding:"4px 0 0 16px"}}>
+          {known.map(([k, v]) => (
+            <React.Fragment key={k}>
+              <dt style={{fontFamily:"var(--ff-mono)", color:"var(--fg-4)"}}>{k}</dt>
+              <dd className="mono">{v}</dd>
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+      {extras.length > 0 && (
+        <pre className="codebox" style={{fontSize:10.5, marginTop:6, maxHeight:120, marginLeft:16}}>
+{extras.map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v, null, 2)}`).join("\n")}
+        </pre>
+      )}
     </div>
   );
 }
@@ -3191,6 +3273,7 @@ function SkillsPage() {
   const [showCustom, setShowCustom] = useState(false);
   const [showClawHub, setShowClawHub] = useState(false);
   const [rowMenu, setRowMenu] = useState(null);
+  const [inspect, setInspect] = useState(null);
 
   const uninstall = async (name) => {
     if (!(await confirmDialog({ title: "Uninstall skill", message: `Uninstall skill ${name}?`, danger: true, confirmLabel: "Uninstall" }))) return;
@@ -3239,7 +3322,7 @@ function SkillsPage() {
               const en = s.enabled !== false;
               const isBundled = origin === "bundled" || origin === "builtin";
               return (
-                <tr key={s.name}>
+                <tr key={s.name} style={{cursor:"pointer"}} onClick={() => setInspect(s)}>
                   <td><span className="mono"><span style={{color:"var(--rust)"}}>›</span> {s.name}</span></td>
                   <td>
                     {origin === "clawhub" || origin === "claw" ? <span className="badge violet">ClawHub</span>
@@ -3249,7 +3332,7 @@ function SkillsPage() {
                   <td className="muted mono">{s.runtime || cat}</td>
                   <td className="mono">{ver}</td>
                   <td><div className={"switch " + (en ? "on" : "")}/></td>
-                  <td className="right" style={{position:"relative"}}>
+                  <td className="right" style={{position:"relative"}} onClick={(e) => e.stopPropagation()}>
                     <button className="btn sm ghost" onClick={() => setRowMenu(rowMenu === s.name ? null : s.name)}><I.more/></button>
                     {rowMenu === s.name && (
                       <div className="row-menu" onClick={e => e.stopPropagation()}>
@@ -3268,6 +3351,77 @@ function SkillsPage() {
 
       {showCustom && <SkillInstallModal onClose={() => setShowCustom(false)} onInstalled={() => { setShowCustom(false); refresh(); }}/>}
       {showClawHub && <ClawHubModal onClose={() => setShowClawHub(false)} onInstalled={() => { setShowClawHub(false); refresh(); }}/>}
+      {inspect && <SkillDetailModal skill={inspect} onClose={() => setInspect(null)} onUninstall={uninstall}/>}
+    </div>
+  );
+}
+
+// Skill detail modal — surfaces every field the list endpoint exposes,
+// plus a quick "Recent invocations" list scoped to this skill via audit
+// substring (best-effort: the audit action format isn't pinned, so we
+// match on the skill name appearing in `action`).
+function SkillDetailModal({ skill, onClose, onUninstall }) {
+  useEscapeKey(onClose);
+  const s = skill || {};
+  const source = (s.source && typeof s.source === "object") ? s.source : { type: s.source || "—" };
+  const sourceType = (source.type || "").toLowerCase();
+  const isBundled = sourceType === "bundled" || sourceType === "builtin";
+  const [audit] = useApi(s.name ? `/api/audit/recent?n=50` : null);
+  const recent = ((audit && audit.entries) || [])
+    .filter(e => (e.action || "").toLowerCase().includes(String(s.name).toLowerCase()))
+    .slice(0, 8);
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <b className="mono">{s.name}</b>
+            <div className="dim mono" style={{fontSize:11, marginTop:2}}>{s.author || "—"} · v{s.version || "—"}</div>
+          </div>
+          <button className="icon-btn" onClick={onClose}><I.close/></button>
+        </div>
+        <div className="modal-body">
+          <div className="row gap-8 mb-12">
+            {sourceType === "clawhub" && <span className="badge violet">ClawHub</span>}
+            {sourceType === "openclaw" && <span className="badge violet">OpenClaw</span>}
+            {isBundled && <span className="badge plain">bundled</span>}
+            {!isBundled && sourceType === "local" && <span className="badge plain">local</span>}
+            <span className="badge plain">{s.runtime || "—"}</span>
+            <span className={"badge " + (s.enabled !== false ? "live" : "idle")}>{s.enabled !== false ? "enabled" : "disabled"}</span>
+            {s.has_prompt_context && <span className="badge sky">prompt context</span>}
+          </div>
+          <div className="muted mono mb-8" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>Description</div>
+          <div className="codebox mb-16" style={{whiteSpace:"pre-wrap"}}>{s.description || "(no description)"}</div>
+          <div className="kv mb-16">
+            <dt>tools exposed</dt><dd>{s.tools_count != null ? s.tools_count : "—"}</dd>
+            <dt>tags</dt><dd className="mono">{(s.tags && s.tags.length) ? s.tags.join(", ") : "—"}</dd>
+            {source.slug && <><dt>clawhub slug</dt><dd className="mono">{source.slug}</dd></>}
+            {source.version && <><dt>clawhub version</dt><dd className="mono">{source.version}</dd></>}
+          </div>
+          <div className="muted mono mb-8" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>
+            Recent invocations <span className="dim" style={{marginLeft:6, fontSize:10}}>(audit substring match)</span>
+          </div>
+          <div className="col gap-4" style={{maxHeight:200, overflow:"auto"}}>
+            {!audit && <div className="dim mono" style={{fontSize:11, padding:"6px 8px"}}>loading audit…</div>}
+            {audit && recent.length === 0 && <div className="dim mono" style={{fontSize:11, padding:"6px 8px"}}>No recent invocations in the loaded window.</div>}
+            {recent.map((e, i) => (
+              <div key={e.hash || e.seq || i} className="row" style={{padding:"5px 8px", background:"var(--bg-2)", borderRadius:5}}>
+                <span className="mono dim" style={{fontSize:11, width:70}}>{formatTime(e.timestamp)}</span>
+                <span className="mono" style={{fontSize:12, flex:1}}>{e.action}</span>
+                <span className="mono dim" style={{fontSize:11}}>{e.agent_name || e.agent_id || "—"}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="modal-foot">
+          {!isBundled && (
+            <button className="btn danger" onClick={() => onUninstall(s.name).then(onClose)} style={{marginRight:"auto"}}>
+              <I.close/> Uninstall
+            </button>
+          )}
+          <button className="btn primary" onClick={onClose}>Close</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3665,13 +3819,15 @@ function SettingsPage() {
   const [config] = useApi("/api/config");
   const [health] = useApi("/api/health/detail");
   const [onboarding] = useApi("/api/onboarding");
+  const [usersResp] = usePolling("/api/auth/users", 30000);
   const [editing, setEditing] = useState(null);
 
   const providers = (providersResp && providersResp.providers) || [];
+  const users = (usersResp && usersResp.users) || [];
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.50";
+  const version = (health && health.version) || "0.7.51";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 
@@ -3709,6 +3865,34 @@ function SettingsPage() {
                     <td>{badge}</td>
                     <td className="num mono">{p.model_count != null ? p.model_count : "—"}</td>
                     <td className="right"><button className="btn sm ghost" onClick={() => setEditing(p)}>Edit</button></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          <div className="row between mb-12 mt-16">
+            <span className="mono dim" style={{fontSize:11,letterSpacing:".12em",textTransform:"uppercase"}}>Authorized users</span>
+            <span className="dim mono" style={{fontSize:11}}>{users.length} configured · read-only here</span>
+          </div>
+          <table className="tbl">
+            <thead><tr><th>Name</th><th>User ID</th><th>Role</th></tr></thead>
+            <tbody>
+              {!usersResp && (<tr><td colSpan={3} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>)}
+              {usersResp && users.length === 0 && (
+                <tr><td colSpan={3} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>
+                  No RBAC users — auth is in localhost-only mode. Add users in <span className="mono">~/.rustyhand/config.toml</span> under <span className="mono">[[auth.users]]</span>.
+                </td></tr>
+              )}
+              {users.map((u) => {
+                const role = (u.role || "viewer").toLowerCase();
+                return (
+                  <tr key={u.user_id || u.name}>
+                    <td className="mono">{u.name || "—"}</td>
+                    <td className="mono muted" style={{maxWidth:200, overflow:"hidden", textOverflow:"ellipsis"}}>{u.user_id || "—"}</td>
+                    <td>
+                      <span className={"badge " + (role === "owner" || role === "admin" ? "violet" : role === "operator" ? "live" : "plain")}>{role}</span>
+                    </td>
                   </tr>
                 );
               })}

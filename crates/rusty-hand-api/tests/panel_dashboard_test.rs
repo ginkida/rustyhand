@@ -141,6 +141,14 @@ async fn dashboard_includes_all_panel_modules() {
         ("AgentActivityCharts", "agent drawer charts"),
         ("ApprovalContextModal", "approvals context modal"),
         ("audit-match", "audit search highlight"),
+        // Iter 39-41
+        ("OnboardingWizard", "first-launch onboarding wizard"),
+        ("shouldShowOnboarding", "onboarding gating logic"),
+        ("SkillDetailModal", "skill detail modal"),
+        ("ChannelTestCard", "structured channel-test renderer"),
+        ("Authorized users", "RBAC users section in Settings"),
+        ("swatch", "identity color picker swatches"),
+        ("rh.panel.agentsCompact", "Agents compact density toggle"),
     ];
     for (needle, msg) in markers {
         assert!(body.contains(needle), "{msg} (missing `{needle}`)");

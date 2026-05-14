@@ -44,7 +44,7 @@ function Sidebar({ page, go }) {
   const [approvalsResp] = usePolling("/api/approvals", 1e4);
   const approvalsCount = approvalsResp && Array.isArray(approvalsResp.approvals) ? approvalsResp.approvals.length : null;
   const uptime = health && health.uptime_seconds != null ? formatUptimeShort(health.uptime_seconds) : null;
-  return /* @__PURE__ */ React.createElement("nav", { className: "sidebar" }, /* @__PURE__ */ React.createElement("div", { className: "sb-brand" }, /* @__PURE__ */ React.createElement("div", { className: "sb-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sb-title" }, "Rusty Hand"), /* @__PURE__ */ React.createElement("div", { className: "sb-sub" }, "v0.7.50 \xB7 schema v8"))), /* @__PURE__ */ React.createElement("div", { className: "sb-nav", style: { flex: 1, overflow: "auto", padding: "6px 6px" } }, NAV.map((it, i) => {
+  return /* @__PURE__ */ React.createElement("nav", { className: "sidebar" }, /* @__PURE__ */ React.createElement("div", { className: "sb-brand" }, /* @__PURE__ */ React.createElement("div", { className: "sb-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sb-title" }, "Rusty Hand"), /* @__PURE__ */ React.createElement("div", { className: "sb-sub" }, "v0.7.51 \xB7 schema v8"))), /* @__PURE__ */ React.createElement("div", { className: "sb-nav", style: { flex: 1, overflow: "auto", padding: "6px 6px" } }, NAV.map((it, i) => {
     if (it.kind === "section") return /* @__PURE__ */ React.createElement("div", { key: i, className: "sb-section-label", style: { marginTop: i === 0 ? 4 : 10 } }, it.label);
     const active = page === it.id;
     const liveCount = it.id === "approvals" && approvalsCount != null ? approvalsCount : it.count;
@@ -249,6 +249,124 @@ function LoginScreen({ onLogin }) {
   };
   return /* @__PURE__ */ React.createElement("div", { className: "auth-splash" }, /* @__PURE__ */ React.createElement("form", { className: "auth-card", onSubmit: submit }, /* @__PURE__ */ React.createElement("div", { className: "auth-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", { className: "auth-title" }, "RustyHand \xB7 Control Panel"), /* @__PURE__ */ React.createElement("div", { className: "auth-sub" }, "Enter your API key to continue. Configure it in ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "~/.rustyhand/config.toml"), " under ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "api_key"), " or via per-user RBAC."), /* @__PURE__ */ React.createElement("input", { className: "modal-field", type: "password", autoFocus: true, placeholder: "rh_\u2026", value: key, onChange: (e) => setKey(e.target.value) }), err && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, err)), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn primary", disabled: busy || !key.trim(), style: { width: "100%" } }, busy ? "Verifying\u2026" : "Sign in"), /* @__PURE__ */ React.createElement("div", { className: "dim mono auth-foot" }, "Running on localhost? Auth is auto-granted \u2014 this screen shouldn't appear.")));
 }
+const __ONBOARDED_KEY = "rh.panel.onboarded";
+function shouldShowOnboarding(onb, agentsResp) {
+  if (!onb || !agentsResp) return false;
+  try {
+    if (localStorage.getItem(__ONBOARDED_KEY)) return false;
+  } catch (e) {
+  }
+  if (!onb.demo_mode) return false;
+  const total = (agentsResp && agentsResp.total) != null ? agentsResp.total : (agentsResp.agents || []).length;
+  return total <= 1;
+}
+function OnboardingWizard({ onClose }) {
+  const [step, setStep] = useState(0);
+  const [providersResp] = useApi("/api/providers");
+  const providers = providersResp && providersResp.providers || [];
+  const defaultProvider = providers.find((p) => p.key_required !== false && (p.auth_status || "").toLowerCase() !== "ok");
+  const [providerName, setProviderName] = useState(defaultProvider ? defaultProvider.id : "anthropic");
+  React.useEffect(() => {
+    if (!providerName && providers.length) setProviderName(providers[0].id);
+  }, [providers.length]);
+  const [apiKey, setApiKey2] = useState("");
+  const [savingKey, setSavingKey] = useState(false);
+  const [keyErr, setKeyErr] = useState(null);
+  const [keySaved, setKeySaved] = useState(false);
+  const [agentName, setAgentName] = useState("my-agent");
+  const [spawning, setSpawning] = useState(false);
+  const [spawnErr, setSpawnErr] = useState(null);
+  const dismiss = () => {
+    try {
+      localStorage.setItem(__ONBOARDED_KEY, "1");
+    } catch (e) {
+    }
+    onClose();
+  };
+  const saveKey = async () => {
+    if (!apiKey.trim()) {
+      setKeyErr("Key required");
+      return;
+    }
+    setSavingKey(true);
+    setKeyErr(null);
+    try {
+      await rhFetch(`/api/providers/${encodeURIComponent(providerName)}/key`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: apiKey })
+      });
+      setKeySaved(true);
+      toastOk(`${providerName} key saved`);
+      setStep(2);
+    } catch (e) {
+      setKeyErr(String(e.message || e));
+    } finally {
+      setSavingKey(false);
+    }
+  };
+  const skipKey = () => {
+    setStep(2);
+  };
+  const spawn = async () => {
+    if (!agentName.trim()) {
+      setSpawnErr("Name required");
+      return;
+    }
+    setSpawning(true);
+    setSpawnErr(null);
+    try {
+      const provider = providers.find((p) => p.id === providerName) || providers[0] || { id: "anthropic" };
+      const defaultModel = providerName === "anthropic" ? "claude-sonnet-4" : providerName === "openai" ? "gpt-4o-mini" : providerName === "deepseek" ? "deepseek-chat" : "claude-sonnet-4";
+      const manifest_toml = `name = "${agentName.trim()}"
+version = "0.1.0"
+description = "Spawned from RustyHand onboarding wizard"
+author = "operator"
+module = "builtin:chat"
+
+[model]
+provider = "${provider.id}"
+model = "${defaultModel}"
+system_prompt = "You are a helpful agent."
+temperature = 0.4
+max_tokens = 2048
+
+[capabilities]
+tools = ["research"]
+`;
+      await rhFetch("/api/agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ manifest_toml })
+      });
+      toastOk(`Spawned ${agentName.trim()}`);
+      dismiss();
+    } catch (e) {
+      setSpawnErr(String(e.message || e));
+    } finally {
+      setSpawning(false);
+    }
+  };
+  const skipSpawn = () => dismiss();
+  return /* @__PURE__ */ React.createElement("div", { className: "modal-back", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "modal wide onboarding", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "modal-head" }, /* @__PURE__ */ React.createElement("div", { className: "row gap-12" }, /* @__PURE__ */ React.createElement("div", { className: "auth-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("b", { className: "mono", style: { fontSize: 14 } }, "Welcome to RustyHand"), /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11, marginTop: 2 } }, "Step ", step + 1, " of 3"))), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", onClick: dismiss, title: "Skip and don't show again" }, /* @__PURE__ */ React.createElement(I.close, null))), /* @__PURE__ */ React.createElement("div", { className: "modal-body" }, step === 0 && /* @__PURE__ */ React.createElement("div", { className: "col gap-12" }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, lineHeight: 1.55 } }, "RustyHand is a self-hostable agent operating system. This panel runs against the kernel listening at ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, window.location.host), ". In the next two steps we'll set up a real LLM provider and spawn your first agent \u2014 about 30 seconds."), /* @__PURE__ */ React.createElement("div", { className: "card", style: { padding: 12 } }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "What you get"), /* @__PURE__ */ React.createElement("ul", { className: "md-ul", style: { margin: 0, paddingLeft: 18 } }, /* @__PURE__ */ React.createElement("li", null, "Multi-agent orchestration with a single kernel \u2014 workflows, triggers, cron jobs, channels (Telegram/Discord/Slack)."), /* @__PURE__ */ React.createElement("li", null, "Persistent memory with knowledge graph + vector embeddings."), /* @__PURE__ */ React.createElement("li", null, "16-layer security: capability gates, WASM sandbox, Merkle-chained audit, Ed25519-signed manifests."), /* @__PURE__ */ React.createElement("li", null, "26 supported LLM providers, auto-detected at boot."))), /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 12 } }, "You're currently in ", /* @__PURE__ */ React.createElement("b", { style: { color: "var(--rust)" } }, "Demo mode"), " \u2014 the mock driver echoes input back so the UI is interactive without any LLM cost. Add a real API key to use Claude / GPT / etc.")), step === 1 && /* @__PURE__ */ React.createElement("div", { className: "col gap-12" }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13 } }, "Pick an LLM provider and paste the API key. The key is stored encrypted in", /* @__PURE__ */ React.createElement("span", { className: "mono" }, " ~/.rustyhand/config.toml"), " and zeroized after each use."), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Provider"), /* @__PURE__ */ React.createElement("select", { className: "t-select", value: providerName, onChange: (e) => setProviderName(e.target.value) }, providers.filter((p) => p.key_required !== false).map((p) => /* @__PURE__ */ React.createElement("option", { key: p.id, value: p.id }, p.display_name || p.id, (p.auth_status || "").toLowerCase() === "ok" ? "  \u2014 configured" : "")))), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "API key"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      className: "modal-field",
+      type: "password",
+      placeholder: "sk-\u2026",
+      value: apiKey,
+      onChange: (e) => setApiKey2(e.target.value),
+      onKeyDown: (e) => {
+        if (e.key === "Enter") saveKey();
+      },
+      autoFocus: true
+    }
+  )), keyErr && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, keyErr)), keySaved && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.74 0.135 150 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot live" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "SAVED"), /* @__PURE__ */ React.createElement("span", { className: "banner-body", style: { fontSize: 11.5 } }, providerName, " key stored. Continuing\u2026")), /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 11.5 } }, "Don't have a key? ", /* @__PURE__ */ React.createElement("a", { href: "https://console.anthropic.com/settings/keys", target: "_blank", rel: "noreferrer" }, "Get one from Anthropic"), " \xB7 skip this step to stay in demo mode.")), step === 2 && /* @__PURE__ */ React.createElement("div", { className: "col gap-12" }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13 } }, "Spawn an agent that uses the provider you just configured. You can rename it, change the system prompt, swap models \u2014 everything is editable in the agent's drawer after spawn."), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Agent name"), /* @__PURE__ */ React.createElement("input", { className: "modal-field", value: agentName, onChange: (e) => setAgentName(e.target.value), autoFocus: true })), /* @__PURE__ */ React.createElement("pre", { className: "codebox", style: { maxHeight: 160 } }, `name = "${agentName || "my-agent"}"
+provider = "${providerName}"
+tools = ["research"]   # web_search, web_fetch, etc.
+temperature = 0.4
+max_tokens = 2048`), spawnErr && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, spawnErr)))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: dismiss, style: { marginRight: "auto" } }, "Skip setup"), step > 0 && /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => setStep(step - 1) }, "Back"), step === 0 && /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setStep(1) }, "Get started"), step === 1 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: skipKey }, "Stay in demo mode"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: saveKey, disabled: savingKey || !apiKey.trim() }, savingKey ? "Saving\u2026" : "Save key")), step === 2 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: skipSpawn }, "Skip"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: spawn, disabled: spawning || !agentName.trim() }, spawning ? "Spawning\u2026" : "Spawn agent")))));
+}
 function HelpOverlay({ open, onClose }) {
   useEscapeKey(open ? onClose : null);
   if (!open) return null;
@@ -326,6 +444,12 @@ function App() {
   const setPage = React.useCallback((p) => route.navigate(p, {}), [route]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [t, setTweak] = useTweaks(TWEAKS_DEFAULTS);
+  const [onbResp] = useApi("/api/onboarding");
+  const [agentsListResp] = useApi("/api/agents?limit=2");
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  React.useEffect(() => {
+    if (shouldShowOnboarding(onbResp, agentsListResp)) setOnboardingOpen(true);
+  }, [onbResp, agentsListResp]);
   const drawerId = page === "agents" && route.params.id ? route.params.id : null;
   const [drawerResp] = useApi(drawerId ? `/api/agents/${drawerId}` : null);
   const drawerAgent = drawerId && drawerResp ? drawerResp.id ? normalizeAgent(drawerResp) : null : null;
@@ -407,7 +531,7 @@ function App() {
   else if (page === "audit") pageEl = /* @__PURE__ */ React.createElement(AuditPage, null);
   else if (page === "settings") pageEl = /* @__PURE__ */ React.createElement(SettingsPage, null);
   else pageEl = /* @__PURE__ */ React.createElement(OverviewPage, { go: setPage });
-  return /* @__PURE__ */ React.createElement("div", { className: "app", "data-screen-label": `Page \xB7 ${page}` }, /* @__PURE__ */ React.createElement(Sidebar, { page, go: setPage }), /* @__PURE__ */ React.createElement("div", { className: "main" }, /* @__PURE__ */ React.createElement(Topbar, { page, onOpenPalette: () => setPaletteOpen(true), onOpenHelp: () => setHelpOpen(true) }), /* @__PURE__ */ React.createElement("div", { className: "content", style: { position: "relative" } }, /* @__PURE__ */ React.createElement(PageErrorBoundary, { pageId: page }, pageEl), /* @__PURE__ */ React.createElement(AgentDrawer, { agent: drawerAgent, onClose: closeDrawer }))), /* @__PURE__ */ React.createElement(CommandPalette, { open: paletteOpen, onClose: () => setPaletteOpen(false), go: setPage, openAgent }), /* @__PURE__ */ React.createElement(HelpOverlay, { open: helpOpen, onClose: () => setHelpOpen(false) }), /* @__PURE__ */ React.createElement(TweaksPanel, null, /* @__PURE__ */ React.createElement(TweakSection, { label: "Theme" }), /* @__PURE__ */ React.createElement(TweakRadio, { label: "Mode", value: t.theme, options: ["dark", "light"], onChange: (v) => setTweak("theme", v) }), /* @__PURE__ */ React.createElement(TweakSection, { label: "Accent" }), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "app", "data-screen-label": `Page \xB7 ${page}` }, /* @__PURE__ */ React.createElement(Sidebar, { page, go: setPage }), /* @__PURE__ */ React.createElement("div", { className: "main" }, /* @__PURE__ */ React.createElement(Topbar, { page, onOpenPalette: () => setPaletteOpen(true), onOpenHelp: () => setHelpOpen(true) }), /* @__PURE__ */ React.createElement("div", { className: "content", style: { position: "relative" } }, /* @__PURE__ */ React.createElement(PageErrorBoundary, { pageId: page }, pageEl), /* @__PURE__ */ React.createElement(AgentDrawer, { agent: drawerAgent, onClose: closeDrawer }))), /* @__PURE__ */ React.createElement(CommandPalette, { open: paletteOpen, onClose: () => setPaletteOpen(false), go: setPage, openAgent }), /* @__PURE__ */ React.createElement(HelpOverlay, { open: helpOpen, onClose: () => setHelpOpen(false) }), onboardingOpen && /* @__PURE__ */ React.createElement(OnboardingWizard, { onClose: () => setOnboardingOpen(false) }), /* @__PURE__ */ React.createElement(TweaksPanel, null, /* @__PURE__ */ React.createElement(TweakSection, { label: "Theme" }), /* @__PURE__ */ React.createElement(TweakRadio, { label: "Mode", value: t.theme, options: ["dark", "light"], onChange: (v) => setTweak("theme", v) }), /* @__PURE__ */ React.createElement(TweakSection, { label: "Accent" }), /* @__PURE__ */ React.createElement(
     TweakSelect,
     {
       label: "Color",

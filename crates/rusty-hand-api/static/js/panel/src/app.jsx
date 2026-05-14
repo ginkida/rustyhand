@@ -57,7 +57,7 @@ function Sidebar({ page, go }) {
         <div className="sb-mark">RH</div>
         <div>
           <div className="sb-title">Rusty Hand</div>
-          <div className="sb-sub">v0.7.50 · schema v8</div>
+          <div className="sb-sub">v0.7.51 · schema v8</div>
         </div>
       </div>
 
@@ -380,6 +380,230 @@ function LoginScreen({ onLogin }) {
   );
 }
 
+// Onboarding wizard: shows once on a fresh install (demo_mode=true,
+// agent_count<=1 — meaning the kernel only has the welcome seed). After
+// dismissal we store a `rh.panel.onboarded` flag so it never reappears.
+//
+// Three steps: welcome → add provider key → spawn first agent. Steps 2-3
+// reuse `ProviderKeyModal` and `SpawnAgentModal` semantics via small
+// inline forms so the wizard fits the modal's narrative flow (one
+// "Next" button per step instead of separate modals).
+const __ONBOARDED_KEY = "rh.panel.onboarded";
+function shouldShowOnboarding(onb, agentsResp) {
+  // Defer until both probes resolved so we don't flash the wizard.
+  if (!onb || !agentsResp) return false;
+  // Already dismissed by the user.
+  try { if (localStorage.getItem(__ONBOARDED_KEY)) return false; } catch (e) { /* private mode */ }
+  // Fresh install signal: kernel reports demo mode (no real API key) AND
+  // the agent registry is the seeded default (1 demo agent at most).
+  if (!onb.demo_mode) return false;
+  const total = (agentsResp && agentsResp.total) != null ? agentsResp.total : (agentsResp.agents || []).length;
+  return total <= 1;
+}
+
+function OnboardingWizard({ onClose }) {
+  const [step, setStep] = useState(0);
+  const [providersResp] = useApi("/api/providers");
+  const providers = (providersResp && providersResp.providers) || [];
+  // Default to the first provider that requires a key but doesn't have
+  // one — that's the most likely setup gap. Falls back to anthropic.
+  const defaultProvider = providers.find(p => p.key_required !== false && (p.auth_status || "").toLowerCase() !== "ok");
+  const [providerName, setProviderName] = useState(defaultProvider ? defaultProvider.id : "anthropic");
+  React.useEffect(() => {
+    if (!providerName && providers.length) setProviderName(providers[0].id);
+  }, [providers.length]);
+
+  const [apiKey, setApiKey] = useState("");
+  const [savingKey, setSavingKey] = useState(false);
+  const [keyErr, setKeyErr] = useState(null);
+  const [keySaved, setKeySaved] = useState(false);
+
+  const [agentName, setAgentName] = useState("my-agent");
+  const [spawning, setSpawning] = useState(false);
+  const [spawnErr, setSpawnErr] = useState(null);
+
+  const dismiss = () => {
+    try { localStorage.setItem(__ONBOARDED_KEY, "1"); } catch (e) {}
+    onClose();
+  };
+
+  const saveKey = async () => {
+    if (!apiKey.trim()) { setKeyErr("Key required"); return; }
+    setSavingKey(true); setKeyErr(null);
+    try {
+      await rhFetch(`/api/providers/${encodeURIComponent(providerName)}/key`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: apiKey }),
+      });
+      setKeySaved(true);
+      toastOk(`${providerName} key saved`);
+      setStep(2);
+    } catch (e) { setKeyErr(String(e.message || e)); }
+    finally { setSavingKey(false); }
+  };
+  const skipKey = () => { setStep(2); };
+
+  const spawn = async () => {
+    if (!agentName.trim()) { setSpawnErr("Name required"); return; }
+    setSpawning(true); setSpawnErr(null);
+    try {
+      const provider = providers.find(p => p.id === providerName) || providers[0] || { id: "anthropic" };
+      const defaultModel = providerName === "anthropic" ? "claude-sonnet-4"
+        : providerName === "openai" ? "gpt-4o-mini"
+        : providerName === "deepseek" ? "deepseek-chat"
+        : "claude-sonnet-4";
+      const manifest_toml = `name = "${agentName.trim()}"
+version = "0.1.0"
+description = "Spawned from RustyHand onboarding wizard"
+author = "operator"
+module = "builtin:chat"
+
+[model]
+provider = "${provider.id}"
+model = "${defaultModel}"
+system_prompt = "You are a helpful agent."
+temperature = 0.4
+max_tokens = 2048
+
+[capabilities]
+tools = ["research"]
+`;
+      await rhFetch("/api/agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ manifest_toml }),
+      });
+      toastOk(`Spawned ${agentName.trim()}`);
+      dismiss();
+    } catch (e) { setSpawnErr(String(e.message || e)); }
+    finally { setSpawning(false); }
+  };
+  const skipSpawn = () => dismiss();
+
+  return (
+    <div className="modal-back" onClick={(e) => e.stopPropagation()}>
+      <div className="modal wide onboarding" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div className="row gap-12">
+            <div className="auth-mark">RH</div>
+            <div>
+              <b className="mono" style={{fontSize:14}}>Welcome to RustyHand</b>
+              <div className="dim mono" style={{fontSize:11, marginTop:2}}>Step {step + 1} of 3</div>
+            </div>
+          </div>
+          <button className="icon-btn" onClick={dismiss} title="Skip and don't show again"><I.close/></button>
+        </div>
+        <div className="modal-body">
+          {step === 0 && (
+            <div className="col gap-12">
+              <div style={{fontSize:13, lineHeight:1.55}}>
+                RustyHand is a self-hostable agent operating system. This panel runs against the kernel
+                listening at <span className="mono">{window.location.host}</span>. In the next two steps
+                we'll set up a real LLM provider and spawn your first agent — about 30 seconds.
+              </div>
+              <div className="card" style={{padding:12}}>
+                <div className="muted mono mb-8" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>What you get</div>
+                <ul className="md-ul" style={{margin:0, paddingLeft:18}}>
+                  <li>Multi-agent orchestration with a single kernel — workflows, triggers, cron jobs, channels (Telegram/Discord/Slack).</li>
+                  <li>Persistent memory with knowledge graph + vector embeddings.</li>
+                  <li>16-layer security: capability gates, WASM sandbox, Merkle-chained audit, Ed25519-signed manifests.</li>
+                  <li>26 supported LLM providers, auto-detected at boot.</li>
+                </ul>
+              </div>
+              <div className="dim" style={{fontSize:12}}>
+                You're currently in <b style={{color:"var(--rust)"}}>Demo mode</b> — the mock driver echoes input back so the
+                UI is interactive without any LLM cost. Add a real API key to use Claude / GPT / etc.
+              </div>
+            </div>
+          )}
+          {step === 1 && (
+            <div className="col gap-12">
+              <div style={{fontSize:13}}>
+                Pick an LLM provider and paste the API key. The key is stored encrypted in
+                <span className="mono"> ~/.rustyhand/config.toml</span> and zeroized after each use.
+              </div>
+              <label className="t-row col">
+                <span className="t-lbl">Provider</span>
+                <select className="t-select" value={providerName} onChange={(e) => setProviderName(e.target.value)}>
+                  {providers.filter(p => p.key_required !== false).map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.display_name || p.id}
+                      {(p.auth_status || "").toLowerCase() === "ok" ? "  — configured" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="t-row col">
+                <span className="t-lbl">API key</span>
+                <input className="modal-field" type="password" placeholder="sk-…"
+                       value={apiKey} onChange={(e) => setApiKey(e.target.value)}
+                       onKeyDown={(e) => { if (e.key === "Enter") saveKey(); }}
+                       autoFocus/>
+              </label>
+              {keyErr && <div className="banner" style={{borderColor:"oklch(0.66 0.18 25 / .35)"}}>
+                <span className="dot err"/><span className="banner-title">ERROR</span>
+                <span className="banner-body mono" style={{fontSize:11}}>{keyErr}</span>
+              </div>}
+              {keySaved && <div className="banner" style={{borderColor:"oklch(0.74 0.135 150 / .35)"}}>
+                <span className="dot live"/><span className="banner-title">SAVED</span>
+                <span className="banner-body" style={{fontSize:11.5}}>{providerName} key stored. Continuing…</span>
+              </div>}
+              <div className="dim" style={{fontSize:11.5}}>
+                Don't have a key? <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">Get one from Anthropic</a> · skip this step to stay in demo mode.
+              </div>
+            </div>
+          )}
+          {step === 2 && (
+            <div className="col gap-12">
+              <div style={{fontSize:13}}>
+                Spawn an agent that uses the provider you just configured. You can rename it, change the
+                system prompt, swap models — everything is editable in the agent's drawer after spawn.
+              </div>
+              <label className="t-row col">
+                <span className="t-lbl">Agent name</span>
+                <input className="modal-field" value={agentName} onChange={(e) => setAgentName(e.target.value)} autoFocus/>
+              </label>
+              <pre className="codebox" style={{maxHeight:160}}>
+{`name = "${agentName || "my-agent"}"
+provider = "${providerName}"
+tools = ["research"]   # web_search, web_fetch, etc.
+temperature = 0.4
+max_tokens = 2048`}
+              </pre>
+              {spawnErr && <div className="banner" style={{borderColor:"oklch(0.66 0.18 25 / .35)"}}>
+                <span className="dot err"/><span className="banner-title">ERROR</span>
+                <span className="banner-body mono" style={{fontSize:11}}>{spawnErr}</span>
+              </div>}
+            </div>
+          )}
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={dismiss} style={{marginRight:"auto"}}>Skip setup</button>
+          {step > 0 && <button className="btn ghost" onClick={() => setStep(step - 1)}>Back</button>}
+          {step === 0 && <button className="btn primary" onClick={() => setStep(1)}>Get started</button>}
+          {step === 1 && (
+            <>
+              <button className="btn" onClick={skipKey}>Stay in demo mode</button>
+              <button className="btn primary" onClick={saveKey} disabled={savingKey || !apiKey.trim()}>
+                {savingKey ? "Saving…" : "Save key"}
+              </button>
+            </>
+          )}
+          {step === 2 && (
+            <>
+              <button className="btn" onClick={skipSpawn}>Skip</button>
+              <button className="btn primary" onClick={spawn} disabled={spawning || !agentName.trim()}>
+                {spawning ? "Spawning…" : "Spawn agent"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // HelpOverlay — keyboard shortcut cheat sheet. Opened by `?`. Pure
 // data-driven so adding a shortcut means adding a row, not editing
 // a template string.
@@ -513,6 +737,16 @@ function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [t, setTweak] = useTweaks(TWEAKS_DEFAULTS);
 
+  // Onboarding probe — small, low-frequency reads that decide whether
+  // to overlay the welcome wizard. After dismissal the wizard never
+  // re-renders even if `demo_mode` flips again.
+  const [onbResp] = useApi("/api/onboarding");
+  const [agentsListResp] = useApi("/api/agents?limit=2");
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  React.useEffect(() => {
+    if (shouldShowOnboarding(onbResp, agentsListResp)) setOnboardingOpen(true);
+  }, [onbResp, agentsListResp]);
+
   // The drawer is route-driven. When `#/agents/{uuid}` is in the URL,
   // we fetch that single agent and hand it to `<AgentDrawer/>`. On
   // close we navigate back to `#/agents`.
@@ -620,6 +854,7 @@ function App() {
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} go={setPage} openAgent={openAgent}/>
       <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)}/>
+      {onboardingOpen && <OnboardingWizard onClose={() => setOnboardingOpen(false)}/>}
 
       <TweaksPanel>
         <TweakSection label="Theme"/>

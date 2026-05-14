@@ -1192,6 +1192,27 @@ code, .mono { font-family: var(--ff-mono); }
 .palette-row.active { background: var(--surface-2); color: var(--fg); }
 .palette-row.active { box-shadow: inset 2px 0 0 var(--rust); }
 
+/* ---------- Per-page density override (Agents compact toggle) ---------- */
+.card[data-density="compact"] .tbl th,
+.card[data-density="compact"] .tbl td {
+  padding: 5px 14px;
+  font-size: 11.5px;
+}
+.card[data-density="compact"] .tbl .meta { display: none; }
+.card[data-density="compact"] .agent-row .avatar { width: 22px; height: 22px; font-size: 9.5px; border-radius: 5px; }
+
+/* ---------- Color picker swatches (agent identity form) ---------- */
+.swatch {
+  width: 22px; height: 22px;
+  border-radius: 5px;
+  border: 1px solid var(--border-hi);
+  cursor: pointer;
+  padding: 0;
+  outline-offset: 2px;
+  transition: transform .12s;
+}
+.swatch:hover { transform: scale(1.1); }
+
 /* ---------- Search highlight (audit page) ---------- */
 .audit-match {
   background: oklch(0.78 0.14 88 / .35);
