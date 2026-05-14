@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.52";
+  const version = (health && health.version) || "0.7.53";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -1542,8 +1542,54 @@ function ChatPage() {
     }
   };
 
+  // Operator-resizable chat columns. Widths persist to localStorage so
+  // the same operator sees their preferred layout next visit. We use
+  // mousedown→mousemove on document to drag — keeps the handle cheap
+  // and avoids the React state churn of onMouseMove on the element.
+  const chatWrapRef = React.useRef(null);
+  const startResize = (side) => (e) => {
+    const wrap = chatWrapRef.current;
+    if (!wrap) return;
+    e.preventDefault();
+    const rect = wrap.getBoundingClientRect();
+    const startX = e.clientX;
+    const startWidth = parseInt(getComputedStyle(wrap).getPropertyValue(`--chat-${side}`)) || (side === "left" ? 280 : 340);
+    document.body.style.cursor = "col-resize";
+    const onMove = (ev) => {
+      const delta = ev.clientX - startX;
+      // Left handle grows on rightward drag; right handle shrinks on
+      // rightward drag (the column lives to the right of the handle).
+      const next = side === "left"
+        ? Math.max(180, Math.min(560, startWidth + delta))
+        : Math.max(220, Math.min(560, startWidth - delta));
+      wrap.style.setProperty(`--chat-${side}`, `${next}px`);
+    };
+    const onUp = () => {
+      document.body.style.cursor = "";
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      try {
+        localStorage.setItem(`rh.panel.chat${side === "left" ? "Left" : "Right"}`,
+          wrap.style.getPropertyValue(`--chat-${side}`));
+      } catch (_) {}
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+  // Restore persisted widths on mount.
+  React.useEffect(() => {
+    const wrap = chatWrapRef.current;
+    if (!wrap) return;
+    try {
+      const l = localStorage.getItem("rh.panel.chatLeft");
+      const r = localStorage.getItem("rh.panel.chatRight");
+      if (l) wrap.style.setProperty("--chat-left", l);
+      if (r) wrap.style.setProperty("--chat-right", r);
+    } catch (_) {}
+  }, []);
+
   return (
-    <div className="chat-wrap">
+    <div className="chat-wrap" ref={chatWrapRef}>
       {/* sidebar list */}
       <div className="chat-list">
         <div className="chat-list-head row between">
@@ -1563,6 +1609,8 @@ function ChatPage() {
         </div>
       </div>
 
+      <div className="chat-resize" onMouseDown={startResize("left")} aria-hidden/>
+
       {/* main chat */}
       <div className="chat-panel">
         <div className="chat-head">
@@ -1578,7 +1626,17 @@ function ChatPage() {
             <div className="dim mono" style={{fontSize:11}}>{active.model} · {active.provider} · session {(session && session.session_id) ? `#${String(session.session_id).slice(0,4)}` : "—"}</div>
           </div>
           <div className="actions">
-            <button className="btn sm ghost" onClick={refreshSession}><I.refresh/></button>
+            <button className="btn sm ghost" onClick={refreshSession} title="Refresh session"><I.refresh/></button>
+            <button className="btn sm"
+                    onClick={() => {
+                      if (!ws.connected) { toastErr("WebSocket not connected"); return; }
+                      ws.sendCommand("retry", "");
+                      toast("Regenerating last response…");
+                    }}
+                    title="Regenerate the last assistant response"
+                    disabled={!ws.connected || sending}>
+              <I.refresh/> Regenerate
+            </button>
             <button className="btn sm"><I.download/> Export</button>
             <button className="icon-btn"><I.more/></button>
           </div>
@@ -1637,6 +1695,8 @@ function ChatPage() {
           ws={ws}
         />
       </div>
+
+      <div className="chat-resize" onMouseDown={startResize("right")} aria-hidden/>
 
       {/* side: context */}
       <div className="chat-side">
@@ -2584,6 +2644,7 @@ function WorkflowRunModal({ workflow, onClose, onRun }) {
   const [inputJson, setInputJson] = useState("{}");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const steps = Array.isArray(workflow.steps) ? workflow.steps : [];
   const run = async () => {
     let input;
     try { input = JSON.parse(inputJson); }
@@ -2595,18 +2656,46 @@ function WorkflowRunModal({ workflow, onClose, onRun }) {
   };
   return (
     <div className="modal-back" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-head"><b className="mono">Run workflow · {workflow.name || workflow.id}</b><button className="icon-btn" onClick={onClose}><I.close/></button></div>
+      <div className="modal wide" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <b className="mono">Run workflow · {workflow.name || workflow.id}</b>
+            {workflow.description && <div className="dim" style={{fontSize:11.5, marginTop:2}}>{workflow.description}</div>}
+          </div>
+          <button className="icon-btn" onClick={onClose}><I.close/></button>
+        </div>
         <div className="modal-body">
           <span className="muted mono" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>Input (JSON)</span>
           <textarea className="modal-field modal-textarea mt-8" style={{fontFamily:"var(--ff-mono)"}} value={inputJson} onChange={e => setInputJson(e.target.value)}/>
+
+          <span className="muted mono mt-16" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase", display:"block"}}>
+            Preflight · {steps.length} step{steps.length === 1 ? "" : "s"}
+            <Tip>Shown so you confirm which workflow + steps are about to run. Each row lists the step name, target agent, mode, and timeout.</Tip>
+          </span>
+          <div className="col gap-4 mt-8" style={{maxHeight:200, overflow:"auto"}}>
+            {steps.length === 0 && <div className="dim mono" style={{fontSize:11.5}}>(workflow has no steps)</div>}
+            {steps.map((s, i) => {
+              const agent = (s.agent && (s.agent.id || s.agent.name)) || s.agent_id || s.agent_name || "—";
+              const mode = typeof s.mode === "string" ? s.mode : (s.mode && Object.keys(s.mode)[0]) || "sequential";
+              return (
+                <div key={i} className="row gap-8" style={{padding:"5px 8px", background:"var(--bg-2)", borderRadius:5, fontFamily:"var(--ff-mono)", fontSize:11.5}}>
+                  <span className="badge plain" style={{minWidth:32, textAlign:"center"}}>#{i + 1}</span>
+                  <span style={{fontWeight:500}}>{s.name || "step"}</span>
+                  <span className="dim">→ {agent}</span>
+                  {mode !== "sequential" && <span className="badge violet" style={{marginLeft:"auto"}}>{mode}</span>}
+                  {(s.timeout_secs && s.timeout_secs !== 120) ? <span className="dim" style={{marginLeft:mode!=="sequential"?6:"auto"}}>{s.timeout_secs}s</span> : null}
+                </div>
+              );
+            })}
+          </div>
+
           {err && <div className="banner mt-12" style={{borderColor:"oklch(0.66 0.18 25 / .35)"}}>
             <span className="dot err"/><span className="banner-title">ERROR</span>
             <span className="banner-body mono" style={{fontSize:11}}>{err}</span></div>}
         </div>
         <div className="modal-foot">
           <button className="btn ghost" onClick={onClose}>Cancel</button>
-          <button className="btn primary" onClick={run} disabled={busy}>{busy ? "Running…" : "Run"}</button>
+          <button className="btn primary" onClick={run} disabled={busy}>{busy ? "Running…" : `Run ${steps.length} step${steps.length === 1 ? "" : "s"}`}</button>
         </div>
       </div>
     </div>
@@ -3416,6 +3505,7 @@ function KnowledgePage() {
   // POST to /api/knowledge/query and render that result instead.
   const [graph, , refresh] = usePolling("/api/knowledge", 30000);
   const [showAdd, setShowAdd] = useState(false);
+  const [showRel, setShowRel] = useState(false);
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState(null);
   const [serverResult, setServerResult] = useState(null);
@@ -3515,6 +3605,7 @@ function KnowledgePage() {
           </div>
           <button className="btn primary" onClick={runQuery} disabled={!query.trim()}><I.play/> Run</button>
           <button className="btn ghost" onClick={() => setShowAdd(true)}><I.plus/> Add node</button>
+          <button className="btn ghost" onClick={() => setShowRel(true)}><I.link/> Add relation</button>
         </div>
       </div>
       {queryErr && (
@@ -3562,6 +3653,109 @@ function KnowledgePage() {
         </div>
       </div>
       {showAdd && <KnowledgeAddNodeModal onClose={() => setShowAdd(false)} onAdded={() => { setShowAdd(false); refresh(); }}/>}
+      {showRel && <KnowledgeAddRelationModal nodes={allNodes} onClose={() => setShowRel(false)} onAdded={() => { setShowRel(false); refresh(); }}/>}
+    </div>
+  );
+}
+
+function KnowledgeAddRelationModal({ nodes, onClose, onAdded }) {
+  useEscapeKey(onClose);
+  const sortedNodes = React.useMemo(() => (nodes || []).slice().sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)), [nodes]);
+  const [source, setSource] = useState(sortedNodes[0] ? sortedNodes[0].id : "");
+  const [target, setTarget] = useState(sortedNodes[1] ? sortedNodes[1].id : (sortedNodes[0] ? sortedNodes[0].id : ""));
+  const [relation, setRelation] = useState("works_at");
+  const [confidence, setConfidence] = useState("1.0");
+  const [propsJson, setPropsJson] = useState("{}");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  // RelationType variants — keep in sync with rusty-hand-types/src/memory.rs.
+  const RELATIONS = [
+    "works_at", "knows_about", "related_to", "depends_on", "owned_by",
+    "created_by", "located_in", "part_of", "uses", "produces", "manages",
+    "collaborates_with", "mentions", "cites", "implements", "other",
+  ];
+
+  const submit = async () => {
+    if (!source || !target) { setErr("Both source and target are required"); return; }
+    if (source === target) { setErr("Source and target must differ"); return; }
+    let properties = {};
+    if (propsJson.trim()) {
+      try { properties = JSON.parse(propsJson); }
+      catch (e) { setErr(`Properties must be valid JSON: ${e.message}`); return; }
+      if (typeof properties !== "object" || Array.isArray(properties)) {
+        setErr("Properties must be a JSON object"); return;
+      }
+    }
+    const c = Number(confidence);
+    if (Number.isNaN(c) || c < 0 || c > 1) { setErr("Confidence must be 0..1"); return; }
+    setBusy(true); setErr(null);
+    try {
+      await rhFetch("/api/knowledge/relations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source, target, relation, confidence: c, properties }),
+      });
+      toastOk(`Added ${relation} relation`);
+      onAdded();
+    } catch (e) { setErr(String(e.message || e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head"><b className="mono">Add knowledge relation</b><button className="icon-btn" onClick={onClose}><I.close/></button></div>
+        <div className="modal-body">
+          {sortedNodes.length < 2 && (
+            <div className="banner mb-12" style={{borderColor:"oklch(0.78 0.14 88 / .35)"}}>
+              <span className="dot warn"/>
+              <span className="banner-body" style={{fontSize:11.5}}>
+                Need at least 2 nodes to create a relation. Add a node first.
+              </span>
+            </div>
+          )}
+          <div className="col gap-8">
+            <label className="t-row col"><span className="t-lbl">Source</span>
+              <select className="t-select" value={source} onChange={(e) => setSource(e.target.value)}>
+                {sortedNodes.map(n => <option key={n.id} value={n.id}>{n.name || n.id} <span>({n.type || "?"})</span></option>)}
+              </select></label>
+            <label className="t-row col">
+              <span className="t-lbl">
+                Relation
+                <Tip>One of the RelationType variants — these are the same labels the kernel uses for graph traversal queries.</Tip>
+              </span>
+              <select className="t-select" value={relation} onChange={(e) => setRelation(e.target.value)}>
+                {RELATIONS.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </label>
+            <label className="t-row col"><span className="t-lbl">Target</span>
+              <select className="t-select" value={target} onChange={(e) => setTarget(e.target.value)}>
+                {sortedNodes.map(n => <option key={n.id} value={n.id}>{n.name || n.id} <span>({n.type || "?"})</span></option>)}
+              </select></label>
+            <label className="t-row col">
+              <span className="t-lbl">
+                Confidence (0..1)
+                <Tip>Float weight on the relation. Used by graph-query ranking. Default 1.0 = certain.</Tip>
+              </span>
+              <input className="modal-field" type="number" step="0.05" min="0" max="1" value={confidence}
+                     onChange={(e) => setConfidence(e.target.value)}/></label>
+            <label className="t-row col"><span className="t-lbl">Properties (JSON object)</span>
+              <textarea className="modal-field modal-textarea" style={{minHeight:80, fontFamily:"var(--ff-mono)"}}
+                        value={propsJson} onChange={(e) => setPropsJson(e.target.value)}/></label>
+          </div>
+          {err && <div className="banner mt-12" style={{borderColor:"oklch(0.66 0.18 25 / .35)"}}>
+            <span className="dot err"/><span className="banner-title">ERROR</span>
+            <span className="banner-body mono" style={{fontSize:11}}>{err}</span>
+          </div>}
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+          <button className="btn primary" onClick={submit} disabled={busy || sortedNodes.length < 2}>
+            {busy ? "Adding…" : "Add relation"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -4107,9 +4301,56 @@ function ApprovalContextModal({ approval, onClose, onChange }) {
 
 /* ============================== AUDIT ============================== */
 function AuditPage() {
-  const [audit, , refresh] = usePolling("/api/audit/recent?n=200", 8000);
+  const route = useHashRoute();
+  // Read ?h=<hashPrefix> from the URL hash to support deep-links from
+  // other pages (or shared URLs). When present, the matching entry gets
+  // scrolled into view + highlighted for 3s, then the highlight fades.
+  const focusHash = (route && route.query && route.query.h) ? route.query.h : "";
+  // Persisted window size — operators investigating an incident often
+  // want a larger window; the kernel caps n=1000 on the server side.
+  const [windowSize, setWindowSize] = useState(() => {
+    try {
+      const stored = parseInt(localStorage.getItem("rh.panel.auditWindow") || "200", 10);
+      return [50, 200, 500, 1000].includes(stored) ? stored : 200;
+    } catch (e) { return 200; }
+  });
+  const setWindow = (n) => {
+    setWindowSize(n);
+    try { localStorage.setItem("rh.panel.auditWindow", String(n)); } catch (e) {}
+  };
+  const [audit, , refresh] = usePolling(`/api/audit/recent?n=${windowSize}`, 8000);
   const [verify, verifyErr, verifyRefresh] = useApi("/api/audit/verify");
   const [q, setQ] = useState("");
+  // `pulse` is the hash prefix currently flashing in the list — set
+  // by the route's ?h= query, cleared after 3.5s so the row relaxes.
+  // Named differently from the search-highlight() function below to
+  // avoid a shadowing footgun.
+  const [pulse, setPulse] = useState(focusHash);
+  React.useEffect(() => {
+    if (!pulse) return;
+    const id = setTimeout(() => setPulse(""), 3500);
+    return () => clearTimeout(id);
+  }, [pulse]);
+  React.useEffect(() => { setPulse(focusHash); }, [focusHash]);
+  const rowRefs = React.useRef({});
+  React.useEffect(() => {
+    if (!pulse || !audit) return;
+    const found = Object.entries(rowRefs.current)
+      .find(([h]) => h && h.startsWith(pulse));
+    const el = found && found[1];
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [pulse, audit]);
+
+  const copyDeepLink = (hash) => {
+    if (!hash) return;
+    const link = `${window.location.origin}${window.location.pathname}#/audit?h=${encodeURIComponent(String(hash).slice(0, 12))}`;
+    try {
+      navigator.clipboard.writeText(link);
+      toastOk("Link copied to clipboard");
+    } catch (e) { toastErr(`copy failed: ${e.message || e}`); }
+  };
 
   const rawEntries = (audit && audit.entries) || [];
   // Client-side substring filter across the loaded window. Real
@@ -4161,6 +4402,11 @@ function AuditPage() {
             <input placeholder="filter by action / actor / hash / detail…" value={q} onChange={e => setQ(e.target.value)}/>
             {q && <button className="kbd" onClick={() => setQ("")} style={{cursor:"pointer"}}>clear</button>}
           </div>
+          <div className="seg" title="Audit window size">
+            {[50, 200, 500, 1000].map(n => (
+              <button key={n} className={windowSize === n ? "on" : ""} onClick={() => setWindow(n)}>{n}</button>
+            ))}
+          </div>
           <button className="btn ghost" onClick={() => { refresh(); verifyRefresh(); }}><I.refresh/></button>
           <button className="btn ghost" onClick={verifyRefresh}><I.shield/> Verify chain</button>
           <button className="btn ghost" onClick={() => {
@@ -4189,7 +4435,7 @@ function AuditPage() {
         <div className="col-3 card">
           <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Loaded window</div>
           <div className="mono" style={{fontSize:20}}>{entries.length} <span className="dim" style={{fontSize:13}}>entries</span></div>
-          <div className="dim mono mt-4" style={{fontSize:11}}>from /api/audit/recent?n=50</div>
+          <div className="dim mono mt-4" style={{fontSize:11}}>from /api/audit/recent?n={windowSize}</div>
         </div>
         <div className="col-3 card">
           <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Top actor</div>
@@ -4224,8 +4470,13 @@ function AuditPage() {
           )}
           {entries.map((a) => {
             const hash = a.hash ? String(a.hash).slice(0, 12) : "—";
+            const pulsing = pulse && a.hash && String(a.hash).startsWith(pulse);
             return (
-              <div key={a.hash || a.seq} className="merkle-row">
+              <div key={a.hash || a.seq}
+                   ref={(el) => { if (a.hash) rowRefs.current[a.hash] = el; }}
+                   className={"merkle-row" + (pulsing ? " audit-pulse" : "")}
+                   onClick={() => copyDeepLink(a.hash)}
+                   title="Click to copy deep-link to this entry">
                 <div className="chain"/>
                 <span className="time">{formatTime(a.timestamp)}</span>
                 <span>
@@ -4259,7 +4510,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.52";
+  const version = (health && health.version) || "0.7.53";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 
@@ -4362,10 +4613,52 @@ function SettingsPage() {
               <dt>restarts</dt><dd>{health && health.restart_count != null ? health.restart_count : "—"}</dd>
             </div>
           </div>
+          <LogLevelCard config={config}/>
         </div>
       </div>
 
       {editing && <ProviderKeyModal provider={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); refreshProviders(); }}/>}
+    </div>
+  );
+}
+
+// LogLevelCard — segmented control that POSTs to /api/config/set so
+// operators can dial verbosity without editing config.toml. Values
+// match tracing/EnvFilter levels accepted by the kernel.
+function LogLevelCard({ config }) {
+  const current = (config && config.log_level) || "info";
+  const [busy, setBusy] = useState(false);
+  const apply = async (level) => {
+    setBusy(true);
+    try {
+      await rhFetch("/api/config/set", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: "log_level", value: level }),
+      });
+      toastOk(`Log level set to ${level}. Restart daemon for effect.`);
+    } catch (e) { toastErr(`set failed: ${e.message || e}`); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="card">
+      <div className="muted mono mb-8" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>
+        Log verbosity
+        <Tip>Persisted to config.toml.log_level. Takes effect on daemon restart — the running tracing EnvFilter is fixed at boot. Use trace/debug for troubleshooting, info for normal operation.</Tip>
+      </div>
+      <div className="seg" style={{flexWrap:"wrap"}}>
+        {["error", "warn", "info", "debug", "trace"].map(l => (
+          <button key={l}
+                  className={current === l ? "on" : ""}
+                  disabled={busy}
+                  onClick={() => apply(l)}>
+            {l}
+          </button>
+        ))}
+      </div>
+      <div className="dim mt-8" style={{fontSize:11}}>
+        Current: <span className="mono">{current}</span>
+      </div>
     </div>
   );
 }

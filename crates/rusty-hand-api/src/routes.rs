@@ -3603,6 +3603,88 @@ pub async fn knowledge_add_entity(
     }
 }
 
+/// POST /api/knowledge/relations — Add a relation between two existing
+/// entities in the knowledge graph. Body shape:
+/// `{source, target, relation, confidence?, properties?}`.
+///
+/// `relation` is validated against the `RelationType` enum (snake_case
+/// variants like `"works_at"`, `"located_in"`); bad values yield 400 so
+/// misspellings are loud rather than silently mis-typed.
+pub async fn knowledge_add_relation(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    use rusty_hand_types::memory::Relation;
+
+    let source = match body.get("source").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Missing or empty 'source' field"})),
+            );
+        }
+    };
+    let target = match body.get("target").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Missing or empty 'target' field"})),
+            );
+        }
+    };
+    let relation_v = match body.get("relation").cloned() {
+        Some(v) => v,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "Missing 'relation' field — use a snake_case RelationType variant"
+                })),
+            );
+        }
+    };
+    let relation: rusty_hand_types::memory::RelationType = match serde_json::from_value(relation_v)
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Unknown relation type: {e}")})),
+            );
+        }
+    };
+    let confidence = body
+        .get("confidence")
+        .and_then(|v| v.as_f64())
+        .map(|c| c.clamp(0.0, 1.0) as f32)
+        .unwrap_or(1.0);
+    let properties: std::collections::HashMap<String, serde_json::Value> = body
+        .get("properties")
+        .and_then(|v| v.as_object())
+        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        .unwrap_or_default();
+    let rel = Relation {
+        source,
+        relation,
+        target,
+        properties,
+        confidence,
+        created_at: chrono::Utc::now(),
+    };
+    match state.kernel.memory.add_relation(rel).await {
+        Ok(id) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({"id": id, "status": "created"})),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Add relation failed: {e}")})),
+        ),
+    }
+}
+
 /// POST /api/knowledge/query — Filtered knowledge-graph query.
 ///
 /// Request body shape: `{source?, relation?, target?, max_depth?}`.

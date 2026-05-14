@@ -513,10 +513,29 @@ a { color: inherit; text-decoration: none; }
 /* ---------- Chat ---------- */
 .chat-wrap {
   display: grid;
-  grid-template-columns: 280px 1fr 340px;
-  gap: 16px;
+  /* Width of side columns is a CSS variable so the drag handle can
+     mutate it inline. Defaults match the design's original 280/340. */
+  grid-template-columns: var(--chat-left, 280px) 6px var(--chat-center, 1fr) 6px var(--chat-right, 340px);
+  gap: 0;
   height: calc(100vh - 48px - var(--pad-2)*2);
 }
+.chat-resize {
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  user-select: none;
+}
+.chat-resize::after {
+  content: "";
+  position: absolute;
+  top: 30%; bottom: 30%;
+  left: 50%;
+  width: 1px;
+  background: var(--border);
+  transition: background .12s, width .12s;
+}
+.chat-resize:hover::after,
+.chat-resize.dragging::after { background: var(--rust); width: 2px; }
 .chat-list {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1252,6 +1271,16 @@ code, .mono { font-family: var(--ff-mono); }
   color: var(--fg);
   border-radius: 2px;
   padding: 0 2px;
+}
+.merkle-row { cursor: pointer; }
+.merkle-row:hover { background: var(--surface-2); }
+.audit-pulse {
+  animation: audit-pulse 1.4s ease-out 2;
+  background: oklch(0.665 0.165 50 / .12);
+}
+@keyframes audit-pulse {
+  0%, 100% { background: oklch(0.665 0.165 50 / .12); box-shadow: inset 3px 0 0 var(--rust); }
+  50% { background: oklch(0.665 0.165 50 / .25); box-shadow: inset 3px 0 0 var(--rust-2); }
 }
 
 /* ---------- Inline tooltips (Tip component) ---------- */

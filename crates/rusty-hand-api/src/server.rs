@@ -407,6 +407,10 @@ pub async fn build_router(
             "/api/knowledge/entities",
             axum::routing::post(routes::knowledge_add_entity),
         )
+        .route(
+            "/api/knowledge/relations",
+            axum::routing::post(routes::knowledge_add_relation),
+        )
         // Config endpoints
         .route("/api/config", axum::routing::get(routes::get_config))
         .route(

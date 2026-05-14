@@ -159,6 +159,17 @@ async fn dashboard_includes_all_panel_modules() {
         ("exportWorkflowYaml", "workflow YAML export helper"),
         ("KnowledgeAddNodeModal", "knowledge add-node modal"),
         ("/api/knowledge/entities", "knowledge add-entity endpoint"),
+        // Iter 47-49
+        ("KnowledgeAddRelationModal", "knowledge add-relation modal"),
+        (
+            "/api/knowledge/relations",
+            "knowledge add-relation endpoint",
+        ),
+        ("audit-pulse", "audit deep-link pulse highlight"),
+        ("chat-resize", "chat column resize handles"),
+        ("rh.panel.chatLeft", "chat width persistence"),
+        ("LogLevelCard", "settings log verbosity card"),
+        ("Preflight", "workflow run preflight section"),
     ];
     for (needle, msg) in markers {
         assert!(body.contains(needle), "{msg} (missing `{needle}`)");
