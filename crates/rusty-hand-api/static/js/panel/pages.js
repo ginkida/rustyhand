@@ -22,7 +22,7 @@ function OverviewPage({ go }) {
     refreshApprovals();
   };
   const approvalRows = approvalsResp && approvalsResp.approvals || D.approvals;
-  const version = health && health.version || "0.7.55";
+  const version = health && health.version || "0.7.56";
   const uptime = health && health.uptime_seconds ? formatUptime(health.uptime_seconds) : null;
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(Banner, { go, onboarding }), /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Overview"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "System pulse \xB7 kernel ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v", version), uptime && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 uptime ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, uptime)), " ", "\xB7 schema ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v8"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null), " Refresh"), /* @__PURE__ */ React.createElement("button", { className: "btn primary" }, /* @__PURE__ */ React.createElement(I.plus, null), " New agent"))), /* @__PURE__ */ React.createElement("div", { className: "tiles" }, /* @__PURE__ */ React.createElement(Tile, { label: "Agents running", value: `${live}`, foot: `of ${totalAgents} total`, spark: sparkOf(agents.map((_, i) => live + (i % 3 - 1)), 12) }), /* @__PURE__ */ React.createElement(Tile, { label: "Cost \xB7 today", value: `$${(cost24 || 0).toFixed(2)}`, foot: usage ? "from /api/usage/daily" : "loading\u2026", spark: days.slice(-12).map((d) => d.cost_usd || 0) }), /* @__PURE__ */ React.createElement(Tile, { label: "Audit entries", value: audit && audit.total != null ? audit.total.toLocaleString() : "\u2014", foot: audit && audit.tip_hash ? `tip ${String(audit.tip_hash).slice(0, 8)}` : "loading\u2026", spark: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] }), /* @__PURE__ */ React.createElement(Tile, { label: "Errors \xB7 agents", value: `${errors}`, foot: errors ? `${errors} crashed agent(s)` : "all green", spark: [0, 0, 1, 0, 0, 0, 0, 0, errors, 0, 0, 0], deltaCls: "up", warn: errors > 0 })), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 col" }, /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Live activity"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: refreshAudit }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost" }, /* @__PURE__ */ React.createElement(I.download, null), " Export"))), /* @__PURE__ */ React.createElement(ActivityFeed, { entries: audit && audit.entries })), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Approvals \xB7 waiting"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("approvals") }, "Open queue"))), approvalRows.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, "No approvals waiting.") : /* @__PURE__ */ React.createElement(ApprovalsTable, { rows: approvalRows.slice(0, 3), compact: true, onChange: refreshApprovals }))), /* @__PURE__ */ React.createElement("div", { className: "col-4 col" }, onboarding && onboarding.demo_mode && /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Demo seed"), /* @__PURE__ */ React.createElement("span", { className: "badge demo" }, /* @__PURE__ */ React.createElement("span", { className: "dot demo" }), "active")), /* @__PURE__ */ React.createElement("div", { className: "col gap-8" }, /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.agents, null), title: "rusty", sub: "welcome agent \xB7 chat-ready", onClick: () => go("chat") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.workflows, null), title: "demo-pipeline", sub: "2-step sample workflow \xB7 click to run", onClick: () => go("workflows") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.event, null), title: "sample trigger", sub: "agent-spawn on webhook", onClick: () => go("automation") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.cron, null), title: "demo-daily-ping", sub: "cron 0 9 * * * \xB7 disabled", onClick: () => go("automation") }))), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Providers"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("settings") }, "Manage")), /* @__PURE__ */ React.createElement(ProvidersList, { providers: providersResp && providersResp.providers })), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Audit chain"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("audit") }, "View")), /* @__PURE__ */ React.createElement("div", { className: "col gap-4" }, /* @__PURE__ */ React.createElement(AuditSummary, { audit }))))));
 }
@@ -151,7 +151,7 @@ const ActivityFeed = ({ entries }) => {
     );
   }));
 };
-const ApprovalsTable = ({ rows, compact, onChange, onInspect }) => {
+const ApprovalsTable = ({ rows, compact, onChange, onInspect, selectable, selected, onToggle, onToggleAll }) => {
   const decide = async (id, verdict) => {
     try {
       await rhFetch(`/api/approvals/${id}/${verdict}`, { method: "POST" });
@@ -161,18 +161,35 @@ const ApprovalsTable = ({ rows, compact, onChange, onInspect }) => {
       toastErr(`${verdict} failed: ${e.message || e}`);
     }
   };
-  return /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "ID"), /* @__PURE__ */ React.createElement("th", null, "Agent"), /* @__PURE__ */ React.createElement("th", null, "Action"), /* @__PURE__ */ React.createElement("th", null, "Risk"), /* @__PURE__ */ React.createElement("th", null, "Age"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Decide"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r) => {
+  const allChecked = selectable && rows.length > 0 && rows.every((r) => selected && selected.has(r.id));
+  return /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, selectable && /* @__PURE__ */ React.createElement("th", { style: { width: 28 } }, /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "checkbox",
+      checked: allChecked,
+      ref: (el) => {
+        if (el) el.indeterminate = !!(selected && selected.size > 0 && !allChecked);
+      },
+      onChange: () => onToggleAll && onToggleAll(rows),
+      title: allChecked ? "Deselect all" : "Select all"
+    }
+  )), /* @__PURE__ */ React.createElement("th", null, "ID"), /* @__PURE__ */ React.createElement("th", null, "Agent"), /* @__PURE__ */ React.createElement("th", null, "Action"), /* @__PURE__ */ React.createElement("th", null, "Risk"), /* @__PURE__ */ React.createElement("th", null, "Age"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Decide"))), /* @__PURE__ */ React.createElement("tbody", null, rows.map((r) => {
     const agent = r.agent_name || r.agent || r.agent_id || "\u2014";
     const age = r.age || relativeTime(r.requested_at || r.created_at);
     const risk = (r.risk || "low").toLowerCase();
+    const isSel = selectable && selected && selected.has(r.id);
     return /* @__PURE__ */ React.createElement(
       "tr",
       {
         key: r.id,
-        style: { cursor: onInspect ? "pointer" : "default" },
+        style: { cursor: onInspect ? "pointer" : "default", background: isSel ? "var(--surface-2)" : void 0 },
         onClick: () => onInspect && onInspect(r),
         title: onInspect ? "Click to inspect full payload" : ""
       },
+      selectable && /* @__PURE__ */ React.createElement("td", { onClick: (e) => {
+        e.stopPropagation();
+        onToggle && onToggle(r.id);
+      } }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!isSel, readOnly: true, tabIndex: -1 })),
       /* @__PURE__ */ React.createElement("td", { className: "mono" }, r.id),
       /* @__PURE__ */ React.createElement("td", { className: "mono" }, agent),
       /* @__PURE__ */ React.createElement("td", null, r.action),
@@ -1914,6 +1931,8 @@ function ChannelsPage() {
   const channels = chResp && chResp.channels || [];
   const [configuring, setConfiguring] = useState(null);
   const [testResult, setTestResult] = useState(null);
+  const [activityFor, setActivityFor] = useState(null);
+  const [auditResp] = usePolling("/api/audit/recent?n=200", 15e3);
   const testChannel = async (name) => {
     setTestResult({ name, busy: true });
     try {
@@ -1944,11 +1963,51 @@ function ChannelsPage() {
     const kind = ch.icon || ch.name;
     const state = ch.configured ? ch.auth_status === "ok" ? "live" : ch.auth_status === "auth_failed" ? "auth_failed" : "idle" : "idle";
     const stateLabel = ch.configured ? ch.auth_status === "ok" ? "live" : ch.auth_status === "auth_failed" ? "auth failed" : "configured" : "not configured";
-    return /* @__PURE__ */ React.createElement("div", { key: ch.name, className: "col-6 card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("div", { className: "row gap-12" }, /* @__PURE__ */ React.createElement("div", { className: "avatar lg", style: { background: "linear-gradient(135deg,var(--rust),oklch(0.42 0.10 50))" } }, /* @__PURE__ */ React.createElement(ChannelIcon, { kind })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 14, fontWeight: 500 } }, ch.display_name || ch.name), /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, ch.name, ch.difficulty ? ` \xB7 ${ch.difficulty}` : "", ch.setup_time ? ` \xB7 ${ch.setup_time}` : ""))), /* @__PURE__ */ React.createElement("span", { className: "badge " + (state === "live" ? "live" : state === "auth_failed" ? "error" : "idle") }, stateLabel)), /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 11.5, marginBottom: 12 } }, ch.description), testResult && testResult.name === ch.name && /* @__PURE__ */ React.createElement(ChannelTestCard, { result: testResult }), /* @__PURE__ */ React.createElement("div", { className: "row gap-6" }, ch.configured ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { className: "btn sm", onClick: () => testChannel(ch.name) }, "Test"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => setConfiguring(ch) }, "Reconfigure"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => removeChannel(ch.name), style: { color: "var(--crimson)" } }, "Disconnect")) : /* @__PURE__ */ React.createElement("button", { className: "btn sm primary", onClick: () => setConfiguring(ch) }, /* @__PURE__ */ React.createElement(I.plus, null), " Connect")));
+    return /* @__PURE__ */ React.createElement("div", { key: ch.name, className: "col-6 card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("div", { className: "row gap-12" }, /* @__PURE__ */ React.createElement("div", { className: "avatar lg", style: { background: "linear-gradient(135deg,var(--rust),oklch(0.42 0.10 50))" } }, /* @__PURE__ */ React.createElement(ChannelIcon, { kind })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 14, fontWeight: 500 } }, ch.display_name || ch.name), /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, ch.name, ch.difficulty ? ` \xB7 ${ch.difficulty}` : "", ch.setup_time ? ` \xB7 ${ch.setup_time}` : ""))), /* @__PURE__ */ React.createElement("span", { className: "badge " + (state === "live" ? "live" : state === "auth_failed" ? "error" : "idle") }, stateLabel)), /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 11.5, marginBottom: 12 } }, ch.description), testResult && testResult.name === ch.name && /* @__PURE__ */ React.createElement(ChannelTestCard, { result: testResult }), activityFor === ch.name && /* @__PURE__ */ React.createElement(
+      ChannelActivityCard,
+      {
+        channelName: ch.name,
+        entries: auditResp && auditResp.entries || [],
+        onClose: () => setActivityFor(null)
+      }
+    ), /* @__PURE__ */ React.createElement("div", { className: "row gap-6" }, ch.configured ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { className: "btn sm", onClick: () => testChannel(ch.name) }, "Test"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => setActivityFor(activityFor === ch.name ? null : ch.name) }, activityFor === ch.name ? "Hide activity" : "Activity"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => setConfiguring(ch) }, "Reconfigure"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => removeChannel(ch.name), style: { color: "var(--crimson)" } }, "Disconnect")) : /* @__PURE__ */ React.createElement("button", { className: "btn sm primary", onClick: () => setConfiguring(ch) }, /* @__PURE__ */ React.createElement(I.plus, null), " Connect")));
   })), configuring && /* @__PURE__ */ React.createElement(ChannelConfigModal, { channel: configuring, onClose: () => setConfiguring(null), onSaved: () => {
     setConfiguring(null);
     refresh();
   } }));
+}
+function ChannelActivityCard({ channelName, entries, onClose }) {
+  const lc = (channelName || "").toLowerCase();
+  if (!lc) return null;
+  const matches = (entries || []).filter((e) => {
+    const haystack = [e.action || "", e.detail || "", e.agent_name || "", e.agent_id || "", e.outcome || ""].join(" ").toLowerCase();
+    return haystack.includes(lc);
+  }).slice(0, 10);
+  return /* @__PURE__ */ React.createElement("div", { style: {
+    marginTop: 8,
+    padding: "10px 12px",
+    background: "var(--bg-2)",
+    borderRadius: 6,
+    border: "1px solid var(--border)"
+  } }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-8" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Recent activity ", /* @__PURE__ */ React.createElement("span", { className: "dim", style: { marginLeft: 6 } }, matches.length, " of last 200")), /* @__PURE__ */ React.createElement("button", { className: "kbd", onClick: onClose, style: { cursor: "pointer" } }, "close")), matches.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11, textAlign: "center", padding: "6px 0" } }, "No matches in the last 200 audit entries."), matches.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "col gap-4", style: { maxHeight: 200, overflow: "auto" } }, matches.map((e, i) => {
+    const hash = e.hash ? String(e.hash).slice(0, 8) : "";
+    const link = hash ? `#/audit?h=${encodeURIComponent(hash)}` : "#/audit";
+    return /* @__PURE__ */ React.createElement("a", { key: `${e.seq || i}`, href: link, style: {
+      display: "block",
+      padding: "5px 8px",
+      fontFamily: "var(--ff-mono)",
+      fontSize: 11,
+      background: "var(--surface)",
+      borderRadius: 5,
+      color: "var(--fg-2)",
+      textDecoration: "none"
+    } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--rust)" } }, e.action || "\u2014"), e.outcome && /* @__PURE__ */ React.createElement("span", { className: "dim", style: { marginLeft: 6 } }, "\xB7 ", e.outcome), /* @__PURE__ */ React.createElement("span", { className: "dim", style: { marginLeft: 6 } }, "\xB7 ", relativeTime(e.timestamp || e.created_at)), e.detail && /* @__PURE__ */ React.createElement("div", { className: "dim", style: {
+      marginTop: 2,
+      whiteSpace: "nowrap",
+      overflow: "hidden",
+      textOverflow: "ellipsis"
+    } }, e.detail));
+  })));
 }
 function ChannelTestCard({ result }) {
   const r = result || {};
@@ -2535,8 +2594,70 @@ function SkillInstallModal({ onClose, onInstalled }) {
 function ApprovalsPage() {
   const [resp, , refresh] = usePolling("/api/approvals", 1e4);
   const [inspect, setInspect] = useState(null);
+  const [selected, setSelected] = useState(() => /* @__PURE__ */ new Set());
   const rows = resp && resp.approvals || [];
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Approvals ", /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 14 } }, "\xB7 ", resp ? rows.length : "\u2026")), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Inline keyboard buttons push to bound channels \xB7 decisions written to audit chain")), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null)))), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, !resp && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, "loading\u2026"), resp && rows.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, "No approvals waiting."), rows.length > 0 && /* @__PURE__ */ React.createElement(ApprovalsTable, { rows, onChange: refresh, onInspect: setInspect })), inspect && /* @__PURE__ */ React.createElement(ApprovalContextModal, { approval: inspect, onClose: () => setInspect(null), onChange: () => {
+  React.useEffect(() => {
+    if (selected.size === 0) return;
+    const live = new Set(rows.map((r) => r.id));
+    const next = new Set([...selected].filter((id) => live.has(id)));
+    if (next.size !== selected.size) setSelected(next);
+  }, [rows.map((r) => r.id).join(",")]);
+  const toggle = (id) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const toggleAll = (visible) => {
+    setSelected((prev) => {
+      if (visible.every((r) => prev.has(r.id))) {
+        const next2 = new Set(prev);
+        for (const r of visible) next2.delete(r.id);
+        return next2;
+      }
+      const next = new Set(prev);
+      for (const r of visible) next.add(r.id);
+      return next;
+    });
+  };
+  const bulkDecide = async (verdict) => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    const ok = await confirmDialog({
+      title: `${verdict === "approve" ? "Approve" : "Reject"} ${ids.length} request(s)?`,
+      message: `${verdict === "approve" ? "Approving" : "Rejecting"} all selected approvals. Decisions are recorded in the audit chain and cannot be undone.`,
+      danger: verdict === "reject",
+      confirmLabel: verdict === "approve" ? `Approve ${ids.length}` : `Reject ${ids.length}`
+    });
+    if (!ok) return;
+    let okCount = 0, failCount = 0;
+    for (const id of ids) {
+      try {
+        await rhFetch(`/api/approvals/${id}/${verdict}`, { method: "POST" });
+        okCount++;
+      } catch (_) {
+        failCount++;
+      }
+    }
+    setSelected(/* @__PURE__ */ new Set());
+    if (failCount > 0) toastErr(`${verdict}: ${okCount} ok / ${failCount} failed`);
+    else toastOk(`${verdict === "approve" ? "Approved" : "Rejected"} ${okCount} request(s)`);
+    refresh();
+  };
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Approvals ", /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 14 } }, "\xB7 ", resp ? rows.length : "\u2026")), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Inline keyboard buttons push to bound channels \xB7 decisions written to audit chain")), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null)))), selected.size > 0 && /* @__PURE__ */ React.createElement("div", { className: "bulk-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 12 } }, selected.size, " selected"), /* @__PURE__ */ React.createElement("button", { className: "btn sm primary", onClick: () => bulkDecide("approve") }, /* @__PURE__ */ React.createElement(I.check, null), " Approve ", selected.size), /* @__PURE__ */ React.createElement("button", { className: "btn sm danger", onClick: () => bulkDecide("reject") }, /* @__PURE__ */ React.createElement(I.close, null), " Reject ", selected.size), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => setSelected(/* @__PURE__ */ new Set()), style: { marginLeft: "auto" } }, "Clear")), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, !resp && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, "loading\u2026"), resp && rows.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, "No approvals waiting."), rows.length > 0 && /* @__PURE__ */ React.createElement(
+    ApprovalsTable,
+    {
+      rows,
+      onChange: refresh,
+      onInspect: setInspect,
+      selectable: true,
+      selected,
+      onToggle: toggle,
+      onToggleAll: toggleAll
+    }
+  )), inspect && /* @__PURE__ */ React.createElement(ApprovalContextModal, { approval: inspect, onClose: () => setInspect(null), onChange: () => {
     setInspect(null);
     refresh();
   } }));
@@ -2628,14 +2749,45 @@ function AuditPage() {
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Audit log"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Merkle hash chain \xB7 ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "~/.rustyhand/data/audit.jsonl"), " \xB7 replayed on boot")), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("div", { className: "search-field", style: { minWidth: 260 } }, /* @__PURE__ */ React.createElement(I.search, null), /* @__PURE__ */ React.createElement("input", { placeholder: "filter by action / actor / hash / detail\u2026", value: q, onChange: (e) => setQ(e.target.value) }), q && /* @__PURE__ */ React.createElement("button", { className: "kbd", onClick: () => setQ(""), style: { cursor: "pointer" } }, "clear")), /* @__PURE__ */ React.createElement("div", { className: "seg", title: "Audit window size" }, [50, 200, 500, 1e3].map((n) => /* @__PURE__ */ React.createElement("button", { key: n, className: windowSize === n ? "on" : "", onClick: () => setWindow(n) }, n))), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => {
     refresh();
     verifyRefresh();
-  } }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: verifyRefresh }, /* @__PURE__ */ React.createElement(I.shield, null), " Verify chain"), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => {
+  } }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: verifyRefresh }, /* @__PURE__ */ React.createElement(I.shield, null), " Verify chain"), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      className: "btn ghost",
+      title: ql ? `Export ${entries.length} filtered entries as CSV` : "Export the loaded audit window as CSV",
+      onClick: () => {
+        if (entries.length === 0) {
+          toastErr("Nothing to export");
+          return;
+        }
+        const rows = entries.map((e) => ({
+          seq: e.seq != null ? e.seq : "",
+          timestamp: e.timestamp || e.created_at || "",
+          agent_id: e.agent_id || "",
+          agent_name: e.agent_name || "",
+          action: e.action || "",
+          outcome: e.outcome || "",
+          detail: (e.detail || "").replace(/\s+/g, " ").trim(),
+          hash: e.hash || ""
+        }));
+        const csv = rowsToCsv(rows);
+        const tag = ql ? "filtered" : "window";
+        downloadBlob(
+          `rustyhand-audit-${tag}-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.csv`,
+          csv,
+          "text/csv"
+        );
+      }
+    },
+    /* @__PURE__ */ React.createElement(I.download, null),
+    " CSV"
+  ), /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => {
     if (!audit) return;
     downloadBlob(
       `rustyhand-audit-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.json`,
       JSON.stringify(audit, null, 2),
       "application/json"
     );
-  } }, /* @__PURE__ */ React.createElement(I.download, null), " Export"))), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-3 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Chain head"), /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 14, color: "var(--rust)", wordBreak: "break-all" } }, audit && audit.tip_hash ? String(audit.tip_hash).slice(0, 16) : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 11 } }, "depth ", audit ? audit.total != null ? audit.total.toLocaleString() : "\u2014" : "\u2026"), /* @__PURE__ */ React.createElement("div", { className: "divider" }), verify ? /* @__PURE__ */ React.createElement("div", { className: "row gap-6" }, verify.valid ? /* @__PURE__ */ React.createElement("span", { className: "badge live" }, /* @__PURE__ */ React.createElement(I.check, null), " verified") : /* @__PURE__ */ React.createElement("span", { className: "badge error" }, /* @__PURE__ */ React.createElement(I.warn, null), " mismatch"), /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 11 } }, (verify.entries || []).length || verify.total || 0, " entries")) : /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, verifyErr || "verifying\u2026")), /* @__PURE__ */ React.createElement("div", { className: "col-3 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Loaded window"), /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 20 } }, entries.length, " ", /* @__PURE__ */ React.createElement("span", { className: "dim", style: { fontSize: 13 } }, "entries")), /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 11 } }, "from /api/audit/recent?n=", windowSize)), /* @__PURE__ */ React.createElement("div", { className: "col-3 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Top actor"), /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 14 } }, topActor ? topActor[0] : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 11 } }, topActor ? `${topActor[1]} entries (in window)` : "no activity")), /* @__PURE__ */ React.createElement("div", { className: "col-3 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Warning"), /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 14, color: verify && verify.warning ? "var(--amber)" : "var(--live)" } }, verify && verify.warning ? "see below" : "none"), /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 11 } }, verify && verify.warning ? verify.warning : "audit chain stable"))), /* @__PURE__ */ React.createElement("div", { className: "card flush mt-16" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Chain \xB7 most recent"), /* @__PURE__ */ React.createElement("span", { className: "mono dim" }, "descending")), /* @__PURE__ */ React.createElement("div", null, !audit && Array.from({ length: 6 }).map((_, i) => /* @__PURE__ */ React.createElement("div", { key: `sa-${i}`, className: "merkle-row" }, /* @__PURE__ */ React.createElement("div", { className: "chain" }), /* @__PURE__ */ React.createElement(Skel, { w: 50, h: 10 }), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement(Skel, { w: "50%", h: 10 }), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 4 } }, /* @__PURE__ */ React.createElement(Skel, { w: "70%", h: 9 }))), /* @__PURE__ */ React.createElement(Skel, { w: 70, h: 10 }), /* @__PURE__ */ React.createElement(Skel, { w: 50, h: 10 }))), audit && entries.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, ql ? `No entries matching "${q}" in the loaded window of ${rawEntries.length}.` : "No audit entries yet."), entries.map((a) => {
+  } }, /* @__PURE__ */ React.createElement(I.download, null), " JSON"))), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-3 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Chain head"), /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 14, color: "var(--rust)", wordBreak: "break-all" } }, audit && audit.tip_hash ? String(audit.tip_hash).slice(0, 16) : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 11 } }, "depth ", audit ? audit.total != null ? audit.total.toLocaleString() : "\u2014" : "\u2026"), /* @__PURE__ */ React.createElement("div", { className: "divider" }), verify ? /* @__PURE__ */ React.createElement("div", { className: "row gap-6" }, verify.valid ? /* @__PURE__ */ React.createElement("span", { className: "badge live" }, /* @__PURE__ */ React.createElement(I.check, null), " verified") : /* @__PURE__ */ React.createElement("span", { className: "badge error" }, /* @__PURE__ */ React.createElement(I.warn, null), " mismatch"), /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 11 } }, (verify.entries || []).length || verify.total || 0, " entries")) : /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, verifyErr || "verifying\u2026")), /* @__PURE__ */ React.createElement("div", { className: "col-3 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Loaded window"), /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 20 } }, entries.length, " ", /* @__PURE__ */ React.createElement("span", { className: "dim", style: { fontSize: 13 } }, "entries")), /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 11 } }, "from /api/audit/recent?n=", windowSize)), /* @__PURE__ */ React.createElement("div", { className: "col-3 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Top actor"), /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 14 } }, topActor ? topActor[0] : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 11 } }, topActor ? `${topActor[1]} entries (in window)` : "no activity")), /* @__PURE__ */ React.createElement("div", { className: "col-3 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Warning"), /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 14, color: verify && verify.warning ? "var(--amber)" : "var(--live)" } }, verify && verify.warning ? "see below" : "none"), /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 11 } }, verify && verify.warning ? verify.warning : "audit chain stable"))), /* @__PURE__ */ React.createElement("div", { className: "card flush mt-16" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Chain \xB7 most recent"), /* @__PURE__ */ React.createElement("span", { className: "mono dim" }, "descending")), /* @__PURE__ */ React.createElement("div", null, !audit && Array.from({ length: 6 }).map((_, i) => /* @__PURE__ */ React.createElement("div", { key: `sa-${i}`, className: "merkle-row" }, /* @__PURE__ */ React.createElement("div", { className: "chain" }), /* @__PURE__ */ React.createElement(Skel, { w: 50, h: 10 }), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement(Skel, { w: "50%", h: 10 }), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 4 } }, /* @__PURE__ */ React.createElement(Skel, { w: "70%", h: 9 }))), /* @__PURE__ */ React.createElement(Skel, { w: 70, h: 10 }), /* @__PURE__ */ React.createElement(Skel, { w: 50, h: 10 }))), audit && entries.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, ql ? `No entries matching "${q}" in the loaded window of ${rawEntries.length}.` : "No audit entries yet."), entries.map((a) => {
     const hash = a.hash ? String(a.hash).slice(0, 12) : "\u2014";
     const pulsing = pulse && a.hash && String(a.hash).startsWith(pulse);
     return /* @__PURE__ */ React.createElement(
@@ -2668,7 +2820,7 @@ function SettingsPage() {
   const users = usersResp && usersResp.users || [];
   const apiListen = config && (config.api_listen || config.api && config.api.listen) || "\u2014";
   const proxy = config && (config.proxy_url || config.proxy && config.proxy.url) || null;
-  const version = health && health.version || "0.7.55";
+  const version = health && health.version || "0.7.56";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "\u2014";
   const agentCount = health && health.agent_count != null ? health.agent_count : "\u2014";
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Settings"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Config at ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "~/.rustyhand/config.toml"), " \xB7 50+ fields with serde defaults \xB7 live from ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/config")))), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "LLM providers"), /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 11 } }, providers.length, " loaded \xB7 auto-probe at boot")), /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Provider"), /* @__PURE__ */ React.createElement("th", null, "Env var"), /* @__PURE__ */ React.createElement("th", null, "State"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Models"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, !providersResp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 5, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), providers.map((p) => {

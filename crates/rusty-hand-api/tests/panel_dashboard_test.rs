@@ -428,6 +428,13 @@ async fn dashboard_wires_write_paths() {
         ("liveRun", "Workflow live-run polling toggle"),
         ("max-width: 1100px", "Sidebar icon-rail breakpoint"),
         ("max-width: 720px", "Mobile single-column breakpoint"),
+        // Iter 57-59: approvals bulk ops + audit CSV + channel activity
+        ("bulkDecide", "Approvals bulk approve/reject"),
+        ("ChannelActivityCard", "Per-channel recent-activity drawer"),
+        (
+            "rustyhand-audit-${tag}",
+            "Audit CSV export filename template",
+        ),
     ];
     for (needle, what) in markers {
         assert!(

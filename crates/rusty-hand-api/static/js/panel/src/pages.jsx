@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.55";
+  const version = (health && health.version) || "0.7.56";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -365,7 +365,10 @@ const ActivityFeed = ({ entries }) => {
 // rows from /api/approvals come in this shape: { id, agent_id, agent_name,
 // action, risk, requested_at, status }. The design's mock used agent (string),
 // action, risk, age — we adapt below so this component accepts both.
-const ApprovalsTable = ({ rows, compact, onChange, onInspect }) => {
+// `selectable` adds a checkbox column wired into the parent's selection
+// Set; only the Approvals page uses it (the Overview embeds the table in
+// read-mostly mode).
+const ApprovalsTable = ({ rows, compact, onChange, onInspect, selectable, selected, onToggle, onToggleAll }) => {
   const decide = async (id, verdict) => {
     try {
       await rhFetch(`/api/approvals/${id}/${verdict}`, { method: "POST" });
@@ -375,21 +378,39 @@ const ApprovalsTable = ({ rows, compact, onChange, onInspect }) => {
       toastErr(`${verdict} failed: ${e.message || e}`);
     }
   };
+  const allChecked = selectable && rows.length > 0 && rows.every(r => selected && selected.has(r.id));
   return (
     <table className="tbl">
       <thead>
-        <tr><th>ID</th><th>Agent</th><th>Action</th><th>Risk</th><th>Age</th><th className="right">Decide</th></tr>
+        <tr>
+          {selectable && (
+            <th style={{width:28}}>
+              <input type="checkbox"
+                     checked={allChecked}
+                     ref={el => { if (el) el.indeterminate = !!(selected && selected.size > 0 && !allChecked); }}
+                     onChange={() => onToggleAll && onToggleAll(rows)}
+                     title={allChecked ? "Deselect all" : "Select all"}/>
+            </th>
+          )}
+          <th>ID</th><th>Agent</th><th>Action</th><th>Risk</th><th>Age</th><th className="right">Decide</th>
+        </tr>
       </thead>
       <tbody>
         {rows.map(r => {
           const agent = r.agent_name || r.agent || r.agent_id || "—";
           const age = r.age || relativeTime(r.requested_at || r.created_at);
           const risk = (r.risk || "low").toLowerCase();
+          const isSel = selectable && selected && selected.has(r.id);
           return (
             <tr key={r.id}
-                style={{cursor: onInspect ? "pointer" : "default"}}
+                style={{cursor: onInspect ? "pointer" : "default", background: isSel ? "var(--surface-2)" : undefined}}
                 onClick={() => onInspect && onInspect(r)}
                 title={onInspect ? "Click to inspect full payload" : ""}>
+              {selectable && (
+                <td onClick={(e) => { e.stopPropagation(); onToggle && onToggle(r.id); }}>
+                  <input type="checkbox" checked={!!isSel} readOnly tabIndex={-1}/>
+                </td>
+              )}
               <td className="mono">{r.id}</td>
               <td className="mono">{agent}</td>
               <td>{r.action}</td>
@@ -3277,6 +3298,11 @@ function ChannelsPage() {
   const channels = (chResp && chResp.channels) || [];
   const [configuring, setConfiguring] = useState(null);
   const [testResult, setTestResult] = useState(null);
+  const [activityFor, setActivityFor] = useState(null);
+  // Audit window used to derive per-channel recent activity (last 10
+  // matches). 200 entries is the page-wide default and is plenty for
+  // "who pinged us in the last few minutes" answers.
+  const [auditResp] = usePolling("/api/audit/recent?n=200", 15000);
 
   const testChannel = async (name) => {
     setTestResult({ name, busy: true });
@@ -3337,10 +3363,20 @@ function ChannelsPage() {
               {testResult && testResult.name === ch.name && (
                 <ChannelTestCard result={testResult}/>
               )}
+              {activityFor === ch.name && (
+                <ChannelActivityCard
+                  channelName={ch.name}
+                  entries={(auditResp && auditResp.entries) || []}
+                  onClose={() => setActivityFor(null)}
+                />
+              )}
               <div className="row gap-6">
                 {ch.configured ? (
                   <>
                     <button className="btn sm" onClick={() => testChannel(ch.name)}>Test</button>
+                    <button className="btn sm ghost" onClick={() => setActivityFor(activityFor === ch.name ? null : ch.name)}>
+                      {activityFor === ch.name ? "Hide activity" : "Activity"}
+                    </button>
                     <button className="btn sm ghost" onClick={() => setConfiguring(ch)}>Reconfigure</button>
                     <button className="btn sm ghost" onClick={() => removeChannel(ch.name)} style={{color:"var(--crimson)"}}>Disconnect</button>
                   </>
@@ -3363,6 +3399,73 @@ function ChannelsPage() {
 // discord: {ok, gateway:{ms}}; webhook: {status, latency_ms}) — we
 // surface known fields with labels and fall through to a JSON dump for
 // anything we don't recognize, instead of showing raw stringified JSON.
+// Inline activity card: filters the audit-log window to entries whose
+// action / detail / agent reference the given channel name. No backend
+// changes — uses the same /api/audit/recent feed all pages share. Shows
+// last 10 matches; deep-links each into the Audit page on click.
+function ChannelActivityCard({ channelName, entries, onClose }) {
+  const lc = (channelName || "").toLowerCase();
+  if (!lc) return null;
+  const matches = (entries || []).filter(e => {
+    const haystack = [e.action || "", e.detail || "", e.agent_name || "", e.agent_id || "", e.outcome || ""]
+      .join(" ").toLowerCase();
+    return haystack.includes(lc);
+  }).slice(0, 10);
+  return (
+    <div style={{
+      marginTop: 8,
+      padding: "10px 12px",
+      background: "var(--bg-2)",
+      borderRadius: 6,
+      border: "1px solid var(--border)",
+    }}>
+      <div className="row between mb-8">
+        <div className="muted mono" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>
+          Recent activity <span className="dim" style={{marginLeft:6}}>{matches.length} of last 200</span>
+        </div>
+        <button className="kbd" onClick={onClose} style={{cursor:"pointer"}}>close</button>
+      </div>
+      {matches.length === 0 && (
+        <div className="dim mono" style={{fontSize:11, textAlign:"center", padding:"6px 0"}}>
+          No matches in the last 200 audit entries.
+        </div>
+      )}
+      {matches.length > 0 && (
+        <div className="col gap-4" style={{maxHeight:200, overflow:"auto"}}>
+          {matches.map((e, i) => {
+            const hash = e.hash ? String(e.hash).slice(0, 8) : "";
+            const link = hash ? `#/audit?h=${encodeURIComponent(hash)}` : "#/audit";
+            return (
+              <a key={`${e.seq || i}`} href={link} style={{
+                display:"block",
+                padding:"5px 8px",
+                fontFamily:"var(--ff-mono)",
+                fontSize:11,
+                background:"var(--surface)",
+                borderRadius:5,
+                color:"var(--fg-2)",
+                textDecoration:"none",
+              }}>
+                <span style={{color:"var(--rust)"}}>{e.action || "—"}</span>
+                {e.outcome && <span className="dim" style={{marginLeft:6}}>· {e.outcome}</span>}
+                <span className="dim" style={{marginLeft:6}}>· {relativeTime(e.timestamp || e.created_at)}</span>
+                {e.detail && (
+                  <div className="dim" style={{
+                    marginTop:2,
+                    whiteSpace:"nowrap",
+                    overflow:"hidden",
+                    textOverflow:"ellipsis",
+                  }}>{e.detail}</div>
+                )}
+              </a>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ChannelTestCard({ result }) {
   const r = result || {};
   const ok = !!r.ok;
@@ -4408,7 +4511,57 @@ function SkillInstallModal({ onClose, onInstalled }) {
 function ApprovalsPage() {
   const [resp, , refresh] = usePolling("/api/approvals", 10000);
   const [inspect, setInspect] = useState(null);
+  const [selected, setSelected] = useState(() => new Set());
   const rows = (resp && resp.approvals) || [];
+  // Drop selections whose row disappeared (decided elsewhere, cleared on
+  // refresh) so the bulk-bar count stays honest.
+  React.useEffect(() => {
+    if (selected.size === 0) return;
+    const live = new Set(rows.map(r => r.id));
+    const next = new Set([...selected].filter(id => live.has(id)));
+    if (next.size !== selected.size) setSelected(next);
+  }, [rows.map(r => r.id).join(",")]);
+  const toggle = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleAll = (visible) => {
+    setSelected(prev => {
+      if (visible.every(r => prev.has(r.id))) {
+        const next = new Set(prev);
+        for (const r of visible) next.delete(r.id);
+        return next;
+      }
+      const next = new Set(prev);
+      for (const r of visible) next.add(r.id);
+      return next;
+    });
+  };
+  const bulkDecide = async (verdict) => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    const ok = await confirmDialog({
+      title: `${verdict === "approve" ? "Approve" : "Reject"} ${ids.length} request(s)?`,
+      message: `${verdict === "approve" ? "Approving" : "Rejecting"} all selected approvals. Decisions are recorded in the audit chain and cannot be undone.`,
+      danger: verdict === "reject",
+      confirmLabel: verdict === "approve" ? `Approve ${ids.length}` : `Reject ${ids.length}`,
+    });
+    if (!ok) return;
+    let okCount = 0, failCount = 0;
+    for (const id of ids) {
+      try {
+        await rhFetch(`/api/approvals/${id}/${verdict}`, { method: "POST" });
+        okCount++;
+      } catch (_) { failCount++; }
+    }
+    setSelected(new Set());
+    if (failCount > 0) toastErr(`${verdict}: ${okCount} ok / ${failCount} failed`);
+    else toastOk(`${verdict === "approve" ? "Approved" : "Rejected"} ${okCount} request(s)`);
+    refresh();
+  };
   return (
     <div>
       <div className="page-head">
@@ -4420,10 +4573,25 @@ function ApprovalsPage() {
           <button className="btn ghost" onClick={refresh}><I.refresh/></button>
         </div>
       </div>
+      {selected.size > 0 && (
+        <div className="bulk-bar">
+          <span className="mono" style={{fontSize:12}}>{selected.size} selected</span>
+          <button className="btn sm primary" onClick={() => bulkDecide("approve")}>
+            <I.check/> Approve {selected.size}
+          </button>
+          <button className="btn sm danger" onClick={() => bulkDecide("reject")}>
+            <I.close/> Reject {selected.size}
+          </button>
+          <button className="btn sm ghost" onClick={() => setSelected(new Set())} style={{marginLeft:"auto"}}>Clear</button>
+        </div>
+      )}
       <div className="card flush">
         {!resp && <div className="muted mono" style={{padding:"16px 14px", fontSize:12}}>loading…</div>}
         {resp && rows.length === 0 && <div className="muted mono" style={{padding:"16px 14px", fontSize:12}}>No approvals waiting.</div>}
-        {rows.length > 0 && <ApprovalsTable rows={rows} onChange={refresh} onInspect={setInspect}/>}
+        {rows.length > 0 && (
+          <ApprovalsTable rows={rows} onChange={refresh} onInspect={setInspect}
+                          selectable selected={selected} onToggle={toggle} onToggleAll={toggleAll}/>
+        )}
       </div>
       {inspect && <ApprovalContextModal approval={inspect} onClose={() => setInspect(null)} onChange={() => { setInspect(null); refresh(); }}/>}
     </div>
@@ -4602,11 +4770,33 @@ function AuditPage() {
           </div>
           <button className="btn ghost" onClick={() => { refresh(); verifyRefresh(); }}><I.refresh/></button>
           <button className="btn ghost" onClick={verifyRefresh}><I.shield/> Verify chain</button>
+          <button className="btn ghost"
+                  title={ql ? `Export ${entries.length} filtered entries as CSV` : "Export the loaded audit window as CSV"}
+                  onClick={() => {
+                    if (entries.length === 0) { toastErr("Nothing to export"); return; }
+                    const rows = entries.map(e => ({
+                      seq: e.seq != null ? e.seq : "",
+                      timestamp: e.timestamp || e.created_at || "",
+                      agent_id: e.agent_id || "",
+                      agent_name: e.agent_name || "",
+                      action: e.action || "",
+                      outcome: e.outcome || "",
+                      detail: (e.detail || "").replace(/\s+/g, " ").trim(),
+                      hash: e.hash || "",
+                    }));
+                    const csv = rowsToCsv(rows);
+                    const tag = ql ? "filtered" : "window";
+                    downloadBlob(
+                      `rustyhand-audit-${tag}-${new Date().toISOString().slice(0, 10)}.csv`,
+                      csv,
+                      "text/csv",
+                    );
+                  }}><I.download/> CSV</button>
           <button className="btn ghost" onClick={() => {
             if (!audit) return;
             downloadBlob(`rustyhand-audit-${new Date().toISOString().slice(0, 10)}.json`,
               JSON.stringify(audit, null, 2), "application/json");
-          }}><I.download/> Export</button>
+          }}><I.download/> JSON</button>
         </div>
       </div>
 
@@ -4703,7 +4893,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.55";
+  const version = (health && health.version) || "0.7.56";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 
