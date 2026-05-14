@@ -38,23 +38,65 @@ const NAV = [
   { id: "bindings", label: "Bindings", icon: /* @__PURE__ */ React.createElement(I.link, null), count: null },
   { id: "settings", label: "Settings", icon: /* @__PURE__ */ React.createElement(I.settings, null), count: null }
 ];
+function usePinnedNav() {
+  const KEY = "rh-panel-pinned-nav";
+  const [pinned, setPinned] = React.useState(() => {
+    try {
+      const raw = localStorage.getItem(KEY);
+      return Array.isArray(JSON.parse(raw)) ? JSON.parse(raw) : [];
+    } catch (_) {
+      return [];
+    }
+  });
+  const toggle = (id) => {
+    setPinned((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      try {
+        localStorage.setItem(KEY, JSON.stringify(next));
+      } catch (_) {
+      }
+      return next;
+    });
+  };
+  return [pinned, toggle];
+}
 function Sidebar({ page, go }) {
   const [health] = usePolling("/api/health/detail", 2e4);
   const [onb] = usePolling("/api/onboarding", 3e4);
-  const [approvalsResp] = usePolling("/api/approvals", 1e4);
-  const approvalsCount = approvalsResp && Array.isArray(approvalsResp.approvals) ? approvalsResp.approvals.length : null;
+  const [pinned, togglePin] = usePinnedNav();
+  const [approvalsCount, setApprovalsCount] = React.useState(null);
+  const lastIdsRef = React.useRef(null);
+  useEventSource("/api/approvals/stream", (msg) => {
+    if (!msg || !Array.isArray(msg.pending)) return;
+    const ids = msg.pending.map((p) => p.id).sort();
+    if (lastIdsRef.current !== null) {
+      const prev = new Set(lastIdsRef.current);
+      const fresh = ids.filter((id) => !prev.has(id));
+      if (fresh.length > 0 && page !== "approvals") {
+        const first = msg.pending.find((p) => p.id === fresh[0]);
+        const label = first ? first.action_summary || first.tool_name || "Approval pending" : "Approval pending";
+        toast("warn", `${fresh.length === 1 ? "" : `${fresh.length}\xD7 `}${label}`, { duration: 6e3 });
+      }
+    }
+    lastIdsRef.current = ids;
+    setApprovalsCount(ids.length);
+  });
   const uptime = health && health.uptime_seconds != null ? formatUptimeShort(health.uptime_seconds) : null;
-  return /* @__PURE__ */ React.createElement("nav", { className: "sidebar" }, /* @__PURE__ */ React.createElement("div", { className: "sb-brand" }, /* @__PURE__ */ React.createElement("div", { className: "sb-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sb-title" }, "Rusty Hand"), /* @__PURE__ */ React.createElement("div", { className: "sb-sub" }, "v0.7.53 \xB7 schema v8"))), /* @__PURE__ */ React.createElement("div", { className: "sb-nav", style: { flex: 1, overflow: "auto", padding: "6px 6px" } }, NAV.map((it, i) => {
-    if (it.kind === "section") return /* @__PURE__ */ React.createElement("div", { key: i, className: "sb-section-label", style: { marginTop: i === 0 ? 4 : 10 } }, it.label);
+  return /* @__PURE__ */ React.createElement("nav", { className: "sidebar" }, /* @__PURE__ */ React.createElement("div", { className: "sb-brand" }, /* @__PURE__ */ React.createElement("div", { className: "sb-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sb-title" }, "Rusty Hand"), /* @__PURE__ */ React.createElement("div", { className: "sb-sub" }, "v0.7.54 \xB7 schema v8"))), /* @__PURE__ */ React.createElement("div", { className: "sb-nav", style: { flex: 1, overflow: "auto", padding: "6px 6px" } }, pinned.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-section-label", style: { marginTop: 4 } }, "Pinned"), pinned.map((id) => NAV.find((n) => n.id === id)).filter(Boolean).map((it) => {
     const active = page === it.id;
     const liveCount = it.id === "approvals" && approvalsCount != null ? approvalsCount : it.count;
     const liveBadge = it.id === "approvals" && approvalsCount > 0 ? "warn" : it.badge;
     return /* @__PURE__ */ React.createElement(
       "a",
       {
-        key: it.id,
+        key: `pin-${it.id}`,
         href: `#/${it.id}`,
         className: "sb-item " + (active ? "active" : ""),
+        onContextMenu: (e) => {
+          e.preventDefault();
+          togglePin(it.id);
+        },
+        title: "Right-click to unpin",
         onClick: (e) => {
           if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
           e.preventDefault();
@@ -63,6 +105,34 @@ function Sidebar({ page, go }) {
       },
       /* @__PURE__ */ React.createElement("span", { className: "sb-icon" }, it.icon),
       /* @__PURE__ */ React.createElement("span", null, it.label),
+      liveCount != null && /* @__PURE__ */ React.createElement("span", { className: "sb-count", style: liveBadge === "warn" ? { color: "var(--amber)", borderColor: "oklch(0.78 0.14 88 / .35)" } : {} }, liveCount)
+    );
+  })), NAV.map((it, i) => {
+    if (it.kind === "section") return /* @__PURE__ */ React.createElement("div", { key: i, className: "sb-section-label", style: { marginTop: i === 0 && pinned.length === 0 ? 4 : 10 } }, it.label);
+    const active = page === it.id;
+    const liveCount = it.id === "approvals" && approvalsCount != null ? approvalsCount : it.count;
+    const liveBadge = it.id === "approvals" && approvalsCount > 0 ? "warn" : it.badge;
+    const isPinned = pinned.includes(it.id);
+    return /* @__PURE__ */ React.createElement(
+      "a",
+      {
+        key: it.id,
+        href: `#/${it.id}`,
+        className: "sb-item " + (active ? "active" : ""),
+        onContextMenu: (e) => {
+          e.preventDefault();
+          togglePin(it.id);
+        },
+        title: isPinned ? "Right-click to unpin" : "Right-click to pin to top",
+        onClick: (e) => {
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+          e.preventDefault();
+          go(it.id);
+        }
+      },
+      /* @__PURE__ */ React.createElement("span", { className: "sb-icon" }, it.icon),
+      /* @__PURE__ */ React.createElement("span", null, it.label),
+      isPinned && /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 10, marginLeft: "auto", opacity: 0.5 } }, "\u2605"),
       liveCount != null && /* @__PURE__ */ React.createElement("span", { className: "sb-count", style: liveBadge === "warn" ? { color: "var(--amber)", borderColor: "oklch(0.78 0.14 88 / .35)" } : {} }, liveCount)
     );
   })), /* @__PURE__ */ React.createElement("div", { className: "sb-status" }, /* @__PURE__ */ React.createElement("div", { className: "sb-status-row" }, /* @__PURE__ */ React.createElement("span", { className: "dot " + (health ? "live" : "warn") }), /* @__PURE__ */ React.createElement("span", null, health ? "kernel live" : "checking\u2026"), /* @__PURE__ */ React.createElement("span", { style: { marginLeft: "auto" } }, uptime || "\u2014")), onb && onb.demo_mode && /* @__PURE__ */ React.createElement("div", { className: "sb-status-row" }, /* @__PURE__ */ React.createElement("span", { className: "dot demo" }), /* @__PURE__ */ React.createElement("span", null, "demo mode"), /* @__PURE__ */ React.createElement("span", { style: { marginLeft: "auto" } }, onb.provider || "mock")), /* @__PURE__ */ React.createElement("div", { className: "sb-status-row" }, /* @__PURE__ */ React.createElement("span", { className: "badge live", style: { padding: "1px 5px" } }, "v"), /* @__PURE__ */ React.createElement("span", null, health && health.version ? health.version : "\u2014"), /* @__PURE__ */ React.createElement("span", { style: { marginLeft: "auto" } }, health && health.agent_count != null ? `${health.agent_count} agents` : ""))));

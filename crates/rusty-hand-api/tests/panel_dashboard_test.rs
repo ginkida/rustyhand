@@ -406,6 +406,19 @@ async fn dashboard_wires_write_paths() {
         ("/api/channels/reload", "Channel reload"),
         ("/api/skills/install-custom", "Custom skill install"),
         ("/api/skills/uninstall", "Skill uninstall"),
+        // Iter 51-52: knowledge graph CRUD + approvals SSE + sidebar pinning
+        (
+            "/api/knowledge/entities/${encodeURIComponent(active.id)}",
+            "Knowledge entity delete",
+        ),
+        (
+            "/api/knowledge/relations/${encodeURIComponent(relId)}",
+            "Knowledge relation delete",
+        ),
+        ("/api/approvals/stream", "Approvals SSE feed"),
+        ("usePinnedNav", "Sidebar pinning hook"),
+        ("bulkExport", "Memory bulk export"),
+        ("bulkDelete", "Memory bulk delete"),
     ];
     for (needle, what) in markers {
         assert!(

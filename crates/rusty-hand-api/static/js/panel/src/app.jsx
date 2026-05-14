@@ -41,15 +41,51 @@ const NAV = [
   { id: "settings",   label: "Settings",   icon: <I.settings/>,   count: null },
 ];
 
+// localStorage-backed list of pinned sidebar item IDs (manual ordering).
+// Right-click a sidebar item to toggle pinned/unpinned; pinned items
+// render in a "Pinned" section at the top of the nav.
+function usePinnedNav() {
+  const KEY = "rh-panel-pinned-nav";
+  const [pinned, setPinned] = React.useState(() => {
+    try {
+      const raw = localStorage.getItem(KEY);
+      return Array.isArray(JSON.parse(raw)) ? JSON.parse(raw) : [];
+    } catch (_) { return []; }
+  });
+  const toggle = (id) => {
+    setPinned(prev => {
+      const next = prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id];
+      try { localStorage.setItem(KEY, JSON.stringify(next)); } catch (_) {}
+      return next;
+    });
+  };
+  return [pinned, toggle];
+}
+
 function Sidebar({ page, go }) {
-  // Live sidebar status: kernel uptime/version + pending approvals count
-  // refresh every 10-20s without visiting the page. Cheap polls, big UX
-  // win — operators see urgent items without clicking around.
+  // Live sidebar status: kernel uptime/version + pending approvals count.
+  // Approvals subscribe to SSE for instant badge update + toast on new
+  // requests; health/onboarding remain on a slow poll.
   const [health] = usePolling("/api/health/detail", 20000);
   const [onb] = usePolling("/api/onboarding", 30000);
-  const [approvalsResp] = usePolling("/api/approvals", 10000);
-  const approvalsCount = (approvalsResp && Array.isArray(approvalsResp.approvals))
-    ? approvalsResp.approvals.length : null;
+  const [pinned, togglePin] = usePinnedNav();
+  const [approvalsCount, setApprovalsCount] = React.useState(null);
+  const lastIdsRef = React.useRef(null);
+  useEventSource("/api/approvals/stream", (msg) => {
+    if (!msg || !Array.isArray(msg.pending)) return;
+    const ids = msg.pending.map(p => p.id).sort();
+    if (lastIdsRef.current !== null) {
+      const prev = new Set(lastIdsRef.current);
+      const fresh = ids.filter(id => !prev.has(id));
+      if (fresh.length > 0 && page !== "approvals") {
+        const first = msg.pending.find(p => p.id === fresh[0]);
+        const label = first ? (first.action_summary || first.tool_name || "Approval pending") : "Approval pending";
+        toast("warn", `${fresh.length === 1 ? "" : `${fresh.length}× `}${label}`, { duration: 6000 });
+      }
+    }
+    lastIdsRef.current = ids;
+    setApprovalsCount(ids.length);
+  });
   const uptime = (health && health.uptime_seconds != null) ? formatUptimeShort(health.uptime_seconds) : null;
   return (
     <nav className="sidebar">
@@ -57,17 +93,46 @@ function Sidebar({ page, go }) {
         <div className="sb-mark">RH</div>
         <div>
           <div className="sb-title">Rusty Hand</div>
-          <div className="sb-sub">v0.7.53 · schema v8</div>
+          <div className="sb-sub">v0.7.54 · schema v8</div>
         </div>
       </div>
 
       <div className="sb-nav" style={{flex:1, overflow:"auto", padding:"6px 6px"}}>
+        {pinned.length > 0 && (
+          <>
+            <div className="sb-section-label" style={{marginTop:4}}>Pinned</div>
+            {pinned
+              .map(id => NAV.find(n => n.id === id))
+              .filter(Boolean)
+              .map(it => {
+                const active = page === it.id;
+                const liveCount = it.id === "approvals" && approvalsCount != null ? approvalsCount : it.count;
+                const liveBadge = it.id === "approvals" && approvalsCount > 0 ? "warn" : it.badge;
+                return (
+                  <a key={`pin-${it.id}`} href={`#/${it.id}`}
+                     className={"sb-item " + (active ? "active" : "")}
+                     onContextMenu={(e) => { e.preventDefault(); togglePin(it.id); }}
+                     title="Right-click to unpin"
+                     onClick={(e) => {
+                       if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                       e.preventDefault();
+                       go(it.id);
+                     }}>
+                    <span className="sb-icon">{it.icon}</span>
+                    <span>{it.label}</span>
+                    {liveCount != null && <span className="sb-count" style={liveBadge === "warn" ? {color:"var(--amber)", borderColor:"oklch(0.78 0.14 88 / .35)"} : {}}>{liveCount}</span>}
+                  </a>
+                );
+              })}
+          </>
+        )}
         {NAV.map((it, i) => {
-          if (it.kind === "section") return <div key={i} className="sb-section-label" style={{marginTop: i === 0 ? 4 : 10}}>{it.label}</div>;
+          if (it.kind === "section") return <div key={i} className="sb-section-label" style={{marginTop: i === 0 && pinned.length === 0 ? 4 : 10}}>{it.label}</div>;
           const active = page === it.id;
           // Live override of the static approvals count from NAV.
           const liveCount = it.id === "approvals" && approvalsCount != null ? approvalsCount : it.count;
           const liveBadge = it.id === "approvals" && approvalsCount > 0 ? "warn" : it.badge;
+          const isPinned = pinned.includes(it.id);
           // Render as <a> so middle-click + Cmd-click + "open in new tab"
           // work like a real link. The hashchange listener picks up the
           // navigation; we still preventDefault + call go(...) on plain
@@ -75,6 +140,8 @@ function Sidebar({ page, go }) {
           return (
             <a key={it.id} href={`#/${it.id}`}
                className={"sb-item " + (active ? "active" : "")}
+               onContextMenu={(e) => { e.preventDefault(); togglePin(it.id); }}
+               title={isPinned ? "Right-click to unpin" : "Right-click to pin to top"}
                onClick={(e) => {
                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
                  e.preventDefault();
@@ -82,6 +149,7 @@ function Sidebar({ page, go }) {
                }}>
               <span className="sb-icon">{it.icon}</span>
               <span>{it.label}</span>
+              {isPinned && <span className="dim mono" style={{fontSize:10, marginLeft:"auto", opacity:.5}}>★</span>}
               {liveCount != null && <span className="sb-count" style={liveBadge === "warn" ? {color:"var(--amber)", borderColor:"oklch(0.78 0.14 88 / .35)"} : {}}>{liveCount}</span>}
             </a>
           );

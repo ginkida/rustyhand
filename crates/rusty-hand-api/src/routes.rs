@@ -3488,6 +3488,7 @@ async fn execute_knowledge_query(
                     }));
                 }
                 edges.push(serde_json::json!({
+                    "id": m.relation.id,
                     "source": m.source.id,
                     "target": m.target.id,
                     "type": serde_json::to_string(&m.relation.relation).unwrap_or_default(),
@@ -3666,6 +3667,7 @@ pub async fn knowledge_add_relation(
         .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
         .unwrap_or_default();
     let rel = Relation {
+        id: String::new(),
         source,
         relation,
         target,
@@ -3681,6 +3683,61 @@ pub async fn knowledge_add_relation(
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": format!("Add relation failed: {e}")})),
+        ),
+    }
+}
+
+/// DELETE /api/knowledge/relations/:id — Delete a relation by ID.
+pub async fn knowledge_delete_relation(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if id.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Empty relation id"})),
+        );
+    }
+    match state.kernel.memory.remove_relation(id.clone()).await {
+        Ok(true) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"status": "deleted", "id": id})),
+        ),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Relation not found"})),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Delete failed: {e}")})),
+        ),
+    }
+}
+
+/// DELETE /api/knowledge/entities/:id — Delete an entity by ID. Cascades
+/// to all relations referencing it.
+pub async fn knowledge_delete_entity(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if id.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Empty entity id"})),
+        );
+    }
+    match state.kernel.memory.remove_entity(id.clone()).await {
+        Ok(true) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"status": "deleted", "id": id})),
+        ),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Entity not found"})),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Delete failed: {e}")})),
         ),
     }
 }
@@ -7272,6 +7329,64 @@ pub async fn serve_upload(Path(file_id): Path<String>) -> impl IntoResponse {
 // ---------------------------------------------------------------------------
 
 /// GET /api/approvals — List pending approval requests.
+/// GET /api/approvals/stream — SSE feed of pending approvals.
+///
+/// Polls the approval manager every second and emits a JSON snapshot
+/// `{pending: [...], total: N}` whenever the set of pending IDs changes.
+/// Keeps the dashboard's "Approvals" notification badge live without
+/// requiring page-wide polling.
+pub async fn approvals_stream(State(state): State<Arc<AppState>>) -> axum::response::Response {
+    use axum::response::sse::{Event, KeepAlive, Sse};
+
+    let (tx, rx) = tokio::sync::mpsc::channel::<
+        Result<axum::response::sse::Event, std::convert::Infallible>,
+    >(64);
+
+    tokio::spawn(async move {
+        let mut last_ids: Vec<String> = Vec::new();
+        let mut first_emit = true;
+        loop {
+            let pending = state.kernel.approval_manager.list_pending();
+            let mut ids: Vec<String> = pending.iter().map(|p| p.id.to_string()).collect();
+            ids.sort();
+
+            if first_emit || ids != last_ids {
+                let approvals: Vec<_> = pending
+                    .iter()
+                    .map(|r| {
+                        let mut v = serde_json::to_value(r).unwrap_or_default();
+                        if let Some(obj) = v.as_object_mut() {
+                            obj.insert("status".to_string(), serde_json::json!("pending"));
+                        }
+                        v
+                    })
+                    .collect();
+                let payload = serde_json::json!({
+                    "pending": approvals,
+                    "total": approvals.len(),
+                });
+                let data = serde_json::to_string(&payload).unwrap_or_default();
+                if tx.send(Ok(Event::default().data(data))).await.is_err() {
+                    return;
+                }
+                last_ids = ids;
+                first_emit = false;
+            }
+
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    });
+
+    let rx_stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    Sse::new(rx_stream)
+        .keep_alive(
+            KeepAlive::new()
+                .interval(std::time::Duration::from_secs(15))
+                .text("ping"),
+        )
+        .into_response()
+}
+
 pub async fn list_approvals(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let pending = state.kernel.approval_manager.list_pending();
     let total = pending.len();

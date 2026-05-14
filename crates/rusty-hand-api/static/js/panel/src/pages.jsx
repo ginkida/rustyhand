@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.53";
+  const version = (health && health.version) || "0.7.54";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -3628,10 +3628,31 @@ function KnowledgePage() {
             </div>
             {active && (
               <>
-                <div className="kv mb-12">
-                  <dt>id</dt><dd>{active.id}</dd>
-                  <dt>kind</dt><dd>{active.type || "—"}</dd>
-                  <dt>degree</dt><dd>{activeEdges.length}</dd>
+                <div className="row between mb-8">
+                  <div className="kv" style={{flex:1}}>
+                    <dt>id</dt><dd>{active.id}</dd>
+                    <dt>kind</dt><dd>{active.type || "—"}</dd>
+                    <dt>degree</dt><dd>{activeEdges.length}</dd>
+                  </div>
+                  <button
+                    className="btn ghost"
+                    title="Delete this entity (and all its relations)"
+                    onClick={async () => {
+                      const ok = await confirmDialog({
+                        title: "Delete entity?",
+                        body: `This will remove '${active.name || active.id}' and ${activeEdges.length} relation(s).`,
+                        confirmLabel: "Delete",
+                        danger: true,
+                      });
+                      if (!ok) return;
+                      try {
+                        await rhFetch(`/api/knowledge/entities/${encodeURIComponent(active.id)}`, { method: "DELETE" });
+                        toastOk("Entity deleted");
+                        setActiveId(null);
+                        refresh();
+                      } catch (err) { toastErr(`Delete failed: ${err.message || err}`); }
+                    }}
+                  ><I.trash/></button>
                 </div>
                 <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Edges ({activeEdges.length})</div>
                 <div className="col gap-4" style={{maxHeight:240, overflow:"auto"}}>
@@ -3639,10 +3660,33 @@ function KnowledgePage() {
                     const src = e.source || e.source_id;
                     const dst = e.target || e.target_id;
                     const other = src === active.id ? dst : src;
+                    const relId = e.id || e.relation_id || "";
                     return (
-                      <div key={i} className="row between" style={{padding:"5px 8px",background:"var(--bg-2)",borderRadius:5,fontSize:11.5,fontFamily:"var(--ff-mono)"}}>
+                      <div key={relId || i} className="row between" style={{padding:"5px 8px",background:"var(--bg-2)",borderRadius:5,fontSize:11.5,fontFamily:"var(--ff-mono)"}}>
                         <span style={{color:"var(--rust)"}}>{e.relation || e.label || "→"}</span>
-                        <span className="muted">→ {nodes.find(n => n.id === other)?.name || other}</span>
+                        <span className="muted" style={{flex:1, textAlign:"right"}}>→ {nodes.find(n => n.id === other)?.name || other}</span>
+                        {relId && (
+                          <button
+                            className="kbd"
+                            style={{marginLeft:6, cursor:"pointer", color:"oklch(0.66 0.18 25)"}}
+                            title="Delete this relation"
+                            onClick={async (ev) => {
+                              ev.stopPropagation();
+                              const ok = await confirmDialog({
+                                title: "Delete relation?",
+                                body: `${e.relation || "→"} between these two entities will be removed.`,
+                                confirmLabel: "Delete",
+                                danger: true,
+                              });
+                              if (!ok) return;
+                              try {
+                                await rhFetch(`/api/knowledge/relations/${encodeURIComponent(relId)}`, { method: "DELETE" });
+                                toastOk("Relation deleted");
+                                refresh();
+                              } catch (err) { toastErr(`Delete failed: ${err.message || err}`); }
+                            }}
+                          >del</button>
+                        )}
                       </div>
                     );
                   })}
@@ -4510,7 +4554,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.53";
+  const version = (health && health.version) || "0.7.54";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 
@@ -4754,6 +4798,67 @@ function MemoryPage() {
   const [labelEditing, setLabelEditing] = useState(null);
   const [labelDraft, setLabelDraft] = useState("");
   const fileInputRef = useRef(null);
+  const [selected, setSelected] = useState(() => new Set());
+  // Drop selections that no longer appear in the current page (e.g. after
+  // a delete or filter change). Keeps the "Delete N selected" badge honest.
+  React.useEffect(() => {
+    if (selected.size === 0) return;
+    const visible = new Set(sessions.map(s => s.session_id));
+    const next = new Set([...selected].filter(id => visible.has(id)));
+    if (next.size !== selected.size) setSelected(next);
+  }, [sessions]);
+  const toggle = (id) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSelected(next);
+  };
+  const toggleAll = () => {
+    if (selected.size === sessions.length && sessions.length > 0) setSelected(new Set());
+    else setSelected(new Set(sessions.map(s => s.session_id)));
+  };
+  const bulkDelete = async () => {
+    if (selected.size === 0) return;
+    const ok = await confirmDialog({
+      title: `Delete ${selected.size} session(s)?`,
+      message: "This cannot be undone. Sessions and their messages will be permanently removed.",
+      danger: true,
+      confirmLabel: `Delete ${selected.size}`,
+    });
+    if (!ok) return;
+    let okCount = 0;
+    let failCount = 0;
+    for (const id of selected) {
+      try {
+        await rhFetch(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+        okCount++;
+      } catch (_) { failCount++; }
+    }
+    setSelected(new Set());
+    if (failCount > 0) toastErr(`Deleted ${okCount}, failed ${failCount}`);
+    else toastOk(`Deleted ${okCount} session(s)`);
+    refresh();
+  };
+  const bulkExport = async () => {
+    if (selected.size === 0) return;
+    const parts = [];
+    let okCount = 0;
+    let failCount = 0;
+    for (const id of selected) {
+      try {
+        const md = await rhFetch(`/api/sessions/${encodeURIComponent(id)}/export.md`);
+        parts.push(`# Session ${String(id).slice(0, 8)}\n\n${md}\n\n---\n`);
+        okCount++;
+      } catch (_) { failCount++; }
+    }
+    if (parts.length === 0) {
+      toastErr("Bulk export produced no content");
+      return;
+    }
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadBlob(`rustyhand-sessions-${stamp}.md`, parts.join(""), "text/markdown");
+    if (failCount > 0) toastErr(`Exported ${okCount}, failed ${failCount}`);
+    else toastOk(`Exported ${okCount} session(s)`);
+  };
 
   const remove = async (id) => {
     if (!(await confirmDialog({ title: "Delete session", message: `Delete session ${String(id).slice(0, 8)}? This cannot be undone.`, danger: true, confirmLabel: "Delete" }))) return;
@@ -4808,6 +4913,16 @@ function MemoryPage() {
         </div>
         <div className="page-actions">
           <button className="btn ghost" onClick={refresh}><I.refresh/></button>
+          {selected.size > 0 && (
+            <>
+              <button className="btn sm ghost" onClick={bulkExport} title="Export selected sessions as one markdown file">
+                <I.download/> Export {selected.size}
+              </button>
+              <button className="btn sm danger" onClick={bulkDelete} title="Delete the selected sessions">
+                <I.trash/> Delete {selected.size}
+              </button>
+            </>
+          )}
           <button className="btn ghost" onClick={() => fileInputRef.current && fileInputRef.current.click()}><I.copy/> Restore</button>
           <input ref={fileInputRef} type="file" accept="application/json,.json"
                  style={{display:"none"}}
@@ -4826,13 +4941,24 @@ function MemoryPage() {
       <div className="card flush">
         <table className="tbl">
           <thead><tr>
+            <th style={{width:28}}>
+              <input type="checkbox"
+                     checked={sessions.length > 0 && selected.size === sessions.length}
+                     onChange={toggleAll}
+                     title="Select all on this page"/>
+            </th>
             <th>Session</th><th>Agent</th><th>Label</th><th className="right">Messages</th><th>Created</th><th>Updated</th><th></th>
           </tr></thead>
           <tbody>
-            {!resp && <tr><td colSpan={7} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>}
-            {resp && sessions.length === 0 && <tr><td colSpan={7} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>No sessions yet.</td></tr>}
+            {!resp && <tr><td colSpan={8} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>}
+            {resp && sessions.length === 0 && <tr><td colSpan={8} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>No sessions yet.</td></tr>}
             {sessions.map(s => (
-              <tr key={s.session_id}>
+              <tr key={s.session_id} style={selected.has(s.session_id) ? {background:"var(--bg-2)"} : null}>
+                <td>
+                  <input type="checkbox"
+                         checked={selected.has(s.session_id)}
+                         onChange={() => toggle(s.session_id)}/>
+                </td>
                 <td className="mono" style={{maxWidth:120, overflow:"hidden", textOverflow:"ellipsis"}}>{String(s.session_id).slice(0, 8)}</td>
                 <td className="mono">{s.agent_name || s.agent_id || "—"}</td>
                 <td>

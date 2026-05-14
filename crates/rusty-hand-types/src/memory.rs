@@ -156,6 +156,10 @@ pub enum EntityType {
 /// A relation between two entities in the knowledge graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Relation {
+    /// Stable ID for the relation row (UUID). Empty when the relation
+    /// is being constructed in-memory before insertion.
+    #[serde(default)]
+    pub id: String,
     /// Source entity ID.
     pub source: String,
     /// Relation type.
@@ -311,6 +315,22 @@ pub trait Memory: Send + Sync {
 
     /// Add a relation between entities.
     async fn add_relation(&self, relation: Relation) -> crate::error::RustyHandResult<String>;
+
+    /// Remove a relation by its ID. Returns true if a row was deleted.
+    async fn remove_relation(&self, id: String) -> crate::error::RustyHandResult<bool> {
+        let _ = id;
+        Err(crate::error::RustyHandError::Internal(
+            "remove_relation not implemented for this backend".to_string(),
+        ))
+    }
+
+    /// Remove an entity by ID. Cascade-deletes any relations referencing it.
+    async fn remove_entity(&self, id: String) -> crate::error::RustyHandResult<bool> {
+        let _ = id;
+        Err(crate::error::RustyHandError::Internal(
+            "remove_entity not implemented for this backend".to_string(),
+        ))
+    }
 
     /// Query the knowledge graph.
     async fn query_graph(

@@ -823,6 +823,20 @@ impl Memory for MemorySubstrate {
             .map_err(|e| RustyHandError::Internal(e.to_string()))?
     }
 
+    async fn remove_relation(&self, id: String) -> RustyHandResult<bool> {
+        let store = self.knowledge.clone();
+        tokio::task::spawn_blocking(move || store.remove_relation(&id))
+            .await
+            .map_err(|e| RustyHandError::Internal(e.to_string()))?
+    }
+
+    async fn remove_entity(&self, id: String) -> RustyHandResult<bool> {
+        let store = self.knowledge.clone();
+        tokio::task::spawn_blocking(move || store.remove_entity(&id))
+            .await
+            .map_err(|e| RustyHandError::Internal(e.to_string()))?
+    }
+
     async fn query_graph(&self, pattern: GraphPattern) -> RustyHandResult<Vec<GraphMatch>> {
         let store = self.knowledge.clone();
         tokio::task::spawn_blocking(move || store.query_graph(pattern))
@@ -1055,6 +1069,7 @@ mod tests {
             .unwrap();
         source
             .add_relation(Relation {
+                id: String::new(),
                 source: entity_id.clone(),
                 relation: RelationType::DependsOn,
                 target: entity_id,

@@ -408,8 +408,16 @@ pub async fn build_router(
             axum::routing::post(routes::knowledge_add_entity),
         )
         .route(
+            "/api/knowledge/entities/{id}",
+            axum::routing::delete(routes::knowledge_delete_entity),
+        )
+        .route(
             "/api/knowledge/relations",
             axum::routing::post(routes::knowledge_add_relation),
+        )
+        .route(
+            "/api/knowledge/relations/{id}",
+            axum::routing::delete(routes::knowledge_delete_relation),
         )
         // Config endpoints
         .route("/api/config", axum::routing::get(routes::get_config))
@@ -422,6 +430,10 @@ pub async fn build_router(
         .route(
             "/api/approvals",
             axum::routing::get(routes::list_approvals).post(routes::create_approval),
+        )
+        .route(
+            "/api/approvals/stream",
+            axum::routing::get(routes::approvals_stream),
         )
         .route(
             "/api/approvals/{id}/approve",

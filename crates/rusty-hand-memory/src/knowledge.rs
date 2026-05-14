@@ -56,7 +56,11 @@ impl KnowledgeStore {
             .conn
             .lock()
             .map_err(|e| RustyHandError::Internal(e.to_string()))?;
-        let id = Uuid::new_v4().to_string();
+        let id = if relation.id.is_empty() {
+            Uuid::new_v4().to_string()
+        } else {
+            relation.id.clone()
+        };
         let rel_type_str = serde_json::to_string(&relation.relation)
             .map_err(|e| RustyHandError::Serialization(e.to_string()))?;
         let props_str = serde_json::to_string(&relation.properties)
@@ -77,6 +81,36 @@ impl KnowledgeStore {
         )
         .map_err(|e| RustyHandError::Memory(e.to_string()))?;
         Ok(id)
+    }
+
+    /// Remove a relation by its ID. Returns true if a row was deleted.
+    pub fn remove_relation(&self, id: &str) -> RustyHandResult<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| RustyHandError::Internal(e.to_string()))?;
+        let affected = conn
+            .execute("DELETE FROM relations WHERE id = ?1", rusqlite::params![id])
+            .map_err(|e| RustyHandError::Memory(e.to_string()))?;
+        Ok(affected > 0)
+    }
+
+    /// Remove an entity by ID. Cascade-deletes any relations referencing it.
+    /// Returns true if the entity row was deleted.
+    pub fn remove_entity(&self, id: &str) -> RustyHandResult<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| RustyHandError::Internal(e.to_string()))?;
+        conn.execute(
+            "DELETE FROM relations WHERE source_entity = ?1 OR target_entity = ?1",
+            rusqlite::params![id],
+        )
+        .map_err(|e| RustyHandError::Memory(e.to_string()))?;
+        let affected = conn
+            .execute("DELETE FROM entities WHERE id = ?1", rusqlite::params![id])
+            .map_err(|e| RustyHandError::Memory(e.to_string()))?;
+        Ok(affected > 0)
     }
 
     /// Query the knowledge graph with a pattern.
@@ -164,6 +198,7 @@ impl KnowledgeStore {
                     &r.s_updated,
                 ),
                 relation: parse_relation(
+                    &r.r_id,
                     &r.r_source,
                     &r.r_type,
                     &r.r_target,
@@ -193,7 +228,6 @@ struct RawGraphRow {
     s_props: String,
     s_created: String,
     s_updated: String,
-    #[allow(dead_code)]
     r_id: String,
     r_source: String,
     r_type: String,
@@ -238,6 +272,7 @@ fn parse_entity(
 }
 
 fn parse_relation(
+    id: &str,
     source: &str,
     rtype: &str,
     target: &str,
@@ -252,6 +287,7 @@ fn parse_relation(
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or_else(|_| Utc::now());
     Relation {
+        id: id.to_string(),
         source: source.to_string(),
         relation,
         target: target.to_string(),
@@ -313,6 +349,7 @@ mod tests {
             .unwrap();
         store
             .add_relation(Relation {
+                id: String::new(),
                 source: alice_id.clone(),
                 relation: RelationType::WorksAt,
                 target: company_id,

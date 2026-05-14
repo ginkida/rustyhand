@@ -2442,6 +2442,7 @@ async fn tool_knowledge_add_relation(
         .unwrap_or_default();
 
     let relation = rusty_hand_types::memory::Relation {
+        id: String::new(),
         source: source.to_string(),
         relation: parse_relation_type(relation_str),
         target: target.to_string(),
