@@ -912,6 +912,21 @@ pub struct ExecPolicy {
     /// produce no stdout/stderr output for this duration. Default: 30.
     #[serde(default = "default_no_output_timeout")]
     pub no_output_timeout_secs: u64,
+    /// Enable the prompt-injection taint heuristic on shell commands.
+    /// When true, commands containing `curl `, `wget `, `| sh`, `eval `,
+    /// `python -c`, etc. get blocked as "potential exfil vectors". The
+    /// check is heuristic (trivial to bypass: `/usr/bin/curl`, `CURL`,
+    /// piping through subshells) so it's defense-in-depth at best.
+    ///
+    /// Default: `false` since v0.7.76. The check was on by default
+    /// pre-v0.7.76 but blocked legitimate operator-issued `curl` /
+    /// `ping` / `wget` commands in single-operator RustyHand
+    /// deployments where the channel adapter's `allowed_users` is the
+    /// real security boundary. Operators who run untrusted LLMs against
+    /// shared shells should flip this to `true` and harden further.
+    /// Mode == Full also bypasses this check independently.
+    #[serde(default)]
+    pub taint_check_enabled: bool,
 }
 
 fn default_no_output_timeout() -> u64 {
@@ -933,6 +948,7 @@ impl Default for ExecPolicy {
             timeout_secs: 30,
             max_output_bytes: 100 * 1024,
             no_output_timeout_secs: default_no_output_timeout(),
+            taint_check_enabled: false,
         }
     }
 }

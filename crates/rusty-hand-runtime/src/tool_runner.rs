@@ -271,10 +271,14 @@ pub async fn execute_tool(
                     };
                 }
             }
-            // Skip taint check for Full exec policy.
+            // Skip taint check unless the operator explicitly enabled it
+            // OR exec mode is Allowlist (Full bypasses everything, and
+            // since v0.7.76 the heuristic is opt-in via
+            // exec_policy.taint_check_enabled).
             let is_full_exec = exec_policy
                 .is_some_and(|p| p.mode == rusty_hand_types::config::ExecSecurityMode::Full);
-            if !is_full_exec {
+            let taint_enabled = exec_policy.is_some_and(|p| p.taint_check_enabled);
+            if !is_full_exec && taint_enabled {
                 if let Some(violation) = check_taint_shell_exec(command) {
                     return ToolResult {
                         tool_use_id: tool_use_id.to_string(),
