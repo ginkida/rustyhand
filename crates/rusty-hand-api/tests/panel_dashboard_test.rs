@@ -466,6 +466,14 @@ async fn dashboard_wires_write_paths() {
         ("rh.panel.agentsFilter", "Agents filter persistence"),
         ("rh.panel.auditActor", "Audit actor filter persistence"),
         ("topActorsForChips", "Audit actor chip list"),
+        // Iter 86-88: skills bulk uninstall + memory search + workflow run badge
+        ("bulkUninstall", "Skills bulk uninstall"),
+        (
+            "uninstallableSkills",
+            "Skills bulk-uninstall eligibility filter",
+        ),
+        ("rh.panel.memoryQ", "Memory page search persistence"),
+        ("last_run_state", "Workflow list last-run badge"),
     ];
     for (needle, what) in markers {
         assert!(

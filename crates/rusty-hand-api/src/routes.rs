@@ -1154,17 +1154,47 @@ pub async fn import_workflow_yaml(
 }
 
 /// GET /api/workflows — List all workflows.
+///
+/// Enriches each workflow with `last_run_state`, `last_run_at`, and
+/// `runs_24h` derived from the in-memory run map so the dashboard can
+/// render a status badge in the workflow list without per-workflow
+/// fan-out fetches.
 pub async fn list_workflows(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let workflows = state.kernel.workflows.list_workflows().await;
+    let all_runs = state.kernel.workflows.list_runs(None).await;
+    let now = chrono::Utc::now();
+    let twenty_four_hours_ago = now - chrono::Duration::hours(24);
     let list: Vec<serde_json::Value> = workflows
         .iter()
         .map(|w| {
+            // Latest run for this workflow, by completed_at (fall back to started_at)
+            let mut runs_for: Vec<&_> = all_runs.iter().filter(|r| r.workflow_id == w.id).collect();
+            runs_for.sort_by(|a, b| {
+                let ka = a.completed_at.unwrap_or(a.started_at);
+                let kb = b.completed_at.unwrap_or(b.started_at);
+                kb.cmp(&ka)
+            });
+            let last = runs_for.first().copied();
+            let runs_24h = runs_for
+                .iter()
+                .filter(|r| r.started_at >= twenty_four_hours_ago)
+                .count();
+            let (last_state, last_at) = match last {
+                Some(r) => (
+                    Some(format!("{:?}", r.state).to_lowercase()),
+                    Some(r.completed_at.unwrap_or(r.started_at).to_rfc3339()),
+                ),
+                None => (None, None),
+            };
             serde_json::json!({
                 "id": w.id.to_string(),
                 "name": w.name,
                 "description": w.description,
                 "steps": w.steps.len(),
                 "created_at": w.created_at.to_rfc3339(),
+                "last_run_state": last_state,
+                "last_run_at": last_at,
+                "runs_24h": runs_24h,
             })
         })
         .collect();

@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.62";
+  const version = (health && health.version) || "0.7.63";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -2366,14 +2366,27 @@ function WorkflowsPage() {
               )}
               {workflows.map(w => {
                 const stepCount = Array.isArray(w.steps) ? w.steps.length : (w.steps || 0);
+                // Status dot: green when last run succeeded, red when it
+                // failed, amber while running, neutral when never run.
+                const lastState = (w.last_run_state || "").toLowerCase();
+                const dotCls = lastState === "completed" ? "live"
+                  : lastState === "failed" ? "err"
+                  : lastState === "running" ? "warn"
+                  : "idle";
+                const dotTitle = w.last_run_state
+                  ? `Last run: ${w.last_run_state}${w.last_run_at ? ` (${relativeTime(w.last_run_at)})` : ""}`
+                  : "Never run";
                 return (
                   <div key={w.id} onClick={() => setActiveId(w.id)}
                        className="row between"
                        style={{padding:"10px 14px",borderBottom:"1px solid var(--border)",cursor:"pointer",
                                background: active && active.id===w.id ? "var(--surface-2)" : "transparent"}}>
-                    <div>
-                      <div className="mono" style={{fontSize:12.5}}>{w.name || w.id}</div>
-                      <div className="dim mono" style={{fontSize:10.5}}>{stepCount} steps{w.kind ? ` · ${w.kind}` : ""}</div>
+                    <div className="row gap-8">
+                      <span className={"dot " + dotCls} title={dotTitle}/>
+                      <div>
+                        <div className="mono" style={{fontSize:12.5}}>{w.name || w.id}</div>
+                        <div className="dim mono" style={{fontSize:10.5}}>{stepCount} steps{w.kind ? ` · ${w.kind}` : ""}</div>
+                      </div>
                     </div>
                     <div className="col" style={{alignItems:"flex-end",gap:2}}>
                       <span className="mono nums" style={{fontSize:12}}>{(w.runs_24h != null) ? w.runs_24h : "—"}</span>
@@ -4677,6 +4690,19 @@ function SkillsPage() {
   const [showClawHub, setShowClawHub] = useState(false);
   const [rowMenu, setRowMenu] = useState(null);
   const [inspect, setInspect] = useState(null);
+  const [selected, setSelected] = useState(() => new Set());
+  React.useEffect(() => {
+    if (selected.size === 0) return;
+    const live = new Set(skills.map(s => s.name));
+    const next = new Set([...selected].filter(n => live.has(n)));
+    if (next.size !== selected.size) setSelected(next);
+  }, [skills.map(s => s.name).join(",")]);
+
+  const isUninstallable = (s) => {
+    const o = (s.source || s.origin || (s.privileged ? "privileged" : "builtin")).toString().toLowerCase();
+    return o !== "bundled" && o !== "builtin";
+  };
+  const uninstallableSkills = skills.filter(isUninstallable);
 
   const uninstall = async (name) => {
     if (!(await confirmDialog({ title: "Uninstall skill", message: `Uninstall skill ${name}?`, danger: true, confirmLabel: "Uninstall" }))) return;
@@ -4688,6 +4714,46 @@ function SkillsPage() {
       });
       refresh();
     } catch (e) { toastErr(`uninstall failed: ${e.message || e}`); }
+  };
+  const toggle = (name) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
+  };
+  const toggleAllUninstallable = () => {
+    setSelected(prev => {
+      if (uninstallableSkills.length === 0) return prev;
+      if (prev.size === uninstallableSkills.length) return new Set();
+      return new Set(uninstallableSkills.map(s => s.name));
+    });
+  };
+  const bulkUninstall = async () => {
+    const names = [...selected];
+    if (names.length === 0) return;
+    const ok = await confirmDialog({
+      title: `Uninstall ${names.length} skill(s)?`,
+      message: `Uninstall all selected non-bundled skills. This cannot be undone.`,
+      danger: true,
+      confirmLabel: `Uninstall ${names.length}`,
+    });
+    if (!ok) return;
+    let okCount = 0, failCount = 0;
+    for (const name of names) {
+      try {
+        await rhFetch("/api/skills/uninstall", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+        okCount++;
+      } catch (_) { failCount++; }
+    }
+    setSelected(new Set());
+    if (failCount > 0) toastErr(`Uninstalled ${okCount}, failed ${failCount}`);
+    else toastOk(`Uninstalled ${okCount} skill(s)`);
+    refresh();
   };
 
   return (
@@ -4704,13 +4770,32 @@ function SkillsPage() {
         </div>
       </div>
 
+      {selected.size > 0 && (
+        <div className="bulk-bar">
+          <span className="mono" style={{fontSize:12}}>{selected.size} selected</span>
+          <button className="btn sm danger" onClick={bulkUninstall}>
+            <I.trash/> Uninstall {selected.size}
+          </button>
+          <button className="btn sm ghost" onClick={() => setSelected(new Set())} style={{marginLeft:"auto"}}>Clear</button>
+        </div>
+      )}
       <div className="card flush">
         <table className="tbl">
-          <thead><tr><th>Skill</th><th>Origin</th><th>Runtime</th><th>Version</th><th>Enabled</th><th></th></tr></thead>
+          <thead><tr>
+            <th style={{width:28}}>
+              <input type="checkbox"
+                     checked={uninstallableSkills.length > 0 && selected.size === uninstallableSkills.length}
+                     ref={el => { if (el) el.indeterminate = selected.size > 0 && selected.size < uninstallableSkills.length; }}
+                     onChange={toggleAllUninstallable}
+                     disabled={uninstallableSkills.length === 0}
+                     title={uninstallableSkills.length === 0 ? "Only bundled skills installed" : "Toggle all non-bundled skills"}/>
+            </th>
+            <th>Skill</th><th>Origin</th><th>Runtime</th><th>Version</th><th>Enabled</th><th></th>
+          </tr></thead>
           <tbody>
-            {!skillsResp && (<tr><td colSpan={6} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>)}
+            {!skillsResp && (<tr><td colSpan={7} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>)}
             {skillsResp && skills.length === 0 && (
-              <tr><td colSpan={6} style={{padding:"24px 14px", textAlign:"center"}}>
+              <tr><td colSpan={7} style={{padding:"24px 14px", textAlign:"center"}}>
                 <div className="dim" style={{fontSize:12, marginBottom:8}}>No skills installed yet — bundled tools work without registration.</div>
                 <span className="row gap-6" style={{justifyContent:"center"}}>
                   <button className="btn sm" onClick={() => setShowCustom(true)}><I.plus/> Custom</button>
@@ -4724,8 +4809,17 @@ function SkillsPage() {
               const ver = s.version || "—";
               const en = s.enabled !== false;
               const isBundled = origin === "bundled" || origin === "builtin";
+              const isSel = selected.has(s.name);
               return (
-                <tr key={s.name} style={{cursor:"pointer"}} onClick={() => setInspect(s)}>
+                <tr key={s.name} style={{cursor:"pointer", background: isSel ? "var(--surface-2)" : undefined}} onClick={() => setInspect(s)}>
+                  <td onClick={(e) => { e.stopPropagation(); if (!isBundled) toggle(s.name); }}>
+                    <input type="checkbox"
+                           checked={isSel}
+                           disabled={isBundled}
+                           readOnly
+                           tabIndex={-1}
+                           title={isBundled ? "Bundled skills can't be uninstalled" : ""}/>
+                  </td>
                   <td><span className="mono"><span style={{color:"var(--rust)"}}>›</span> {s.name}</span></td>
                   <td>
                     {origin === "clawhub" || origin === "claw" ? <span className="badge violet">ClawHub</span>
@@ -5597,7 +5691,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.62";
+  const version = (health && health.version) || "0.7.63";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 
@@ -5872,7 +5966,25 @@ function MemoryPage() {
   const [resp, fetchErr, refresh] = usePolling(
     `/api/sessions?limit=${pg.pageSize}&offset=${pg.offset}`, 20000);
   React.useEffect(() => { if (resp && resp.total != null) pg.setTotal(resp.total); }, [resp && resp.total]);
-  const sessions = (resp && resp.sessions) || [];
+  const rawSessions = (resp && resp.sessions) || [];
+  // Client-side substring filter across the current page. Server-side
+  // full-text would need a new endpoint; this is good enough for the
+  // typical 50-row page and renders instantly. Persisted to
+  // sessionStorage so navigating to a session and back keeps the query.
+  const [q, setQState] = useState(() => {
+    try { return sessionStorage.getItem("rh.panel.memoryQ") || ""; } catch (e) { return ""; }
+  });
+  const setQ = (v) => {
+    setQState(v);
+    try { sessionStorage.setItem("rh.panel.memoryQ", v || ""); } catch (e) {}
+  };
+  const ql = q.trim().toLowerCase();
+  const sessions = !ql ? rawSessions : rawSessions.filter(s =>
+    (s.label || "").toLowerCase().includes(ql) ||
+    (s.agent_name || "").toLowerCase().includes(ql) ||
+    (s.agent_id || "").toLowerCase().includes(ql) ||
+    String(s.session_id || "").toLowerCase().includes(ql)
+  );
   const [labelEditing, setLabelEditing] = useState(null);
   const [labelDraft, setLabelDraft] = useState("");
   const fileInputRef = useRef(null);
@@ -5986,10 +6098,17 @@ function MemoryPage() {
     <div>
       <div className="page-head">
         <div>
-          <h1 className="page-title">Memory <span className="dim mono" style={{fontSize:14}}>· {sessions.length} session(s)</span></h1>
+          <h1 className="page-title">Memory <span className="dim mono" style={{fontSize:14}}>
+            · {ql ? `${sessions.length} of ${rawSessions.length}` : sessions.length} session(s)
+          </span></h1>
           <p className="page-sub">SQLite-backed sessions · backup at <span className="mono">/api/memory/export</span> · restore at <span className="mono">/api/memory/import</span></p>
         </div>
         <div className="page-actions">
+          <div className="search-field" style={{minWidth:240}}>
+            <I.search/>
+            <input placeholder="filter by label / agent / session id…" value={q} onChange={e => setQ(e.target.value)}/>
+            {q && <button className="kbd" onClick={() => setQ("")} style={{cursor:"pointer"}}>clear</button>}
+          </div>
           <button className="btn ghost" onClick={refresh}><I.refresh/></button>
           {selected.size > 0 && (
             <>
