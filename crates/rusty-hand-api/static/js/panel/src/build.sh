@@ -20,13 +20,22 @@ ESBUILD="${ESBUILD:-npx --yes esbuild@0.24.0}"
 
 for f in api icons tweaks-panel pages app; do
   echo "compiling $f.jsx -> ../$f.js"
-  $ESBUILD \
-    --loader:.jsx=jsx \
-    --jsx=transform \
-    --jsx-factory=React.createElement \
-    --jsx-fragment=React.Fragment \
-    --target=es2018 \
-    "$f.jsx" > "$OUT_DIR/$f.js"
+  # Wrap each compiled module in an IIFE so top-level `const` /
+  # `function` declarations don't collide across script tags. Each file
+  # publishes the names it wants visible to siblings via
+  # `Object.assign(window, {...})` at the bottom (see api.jsx).
+  {
+    echo "(function(){"
+    $ESBUILD \
+      --loader:.jsx=jsx \
+      --jsx=transform \
+      --jsx-factory=React.createElement \
+      --jsx-fragment=React.Fragment \
+      --target=es2018 \
+      "$f.jsx"
+    echo ""
+    echo "})();"
+  } > "$OUT_DIR/$f.js"
 done
 
 echo "done."

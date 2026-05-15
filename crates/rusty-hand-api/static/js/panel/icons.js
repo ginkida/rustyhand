@@ -1,3 +1,4 @@
+(function(){
 const Icon = ({ children, size = 16, className = "" }) => /* @__PURE__ */ React.createElement(
   "svg",
   {
@@ -96,3 +97,5 @@ const BarRow = ({ label, value, max, unit = "" }) => {
   return /* @__PURE__ */ React.createElement("div", { className: "bar-row" }, /* @__PURE__ */ React.createElement("span", { className: "lbl" }, label), /* @__PURE__ */ React.createElement("span", { className: "bar" }, /* @__PURE__ */ React.createElement("span", { style: { width: `${w}%` } })), /* @__PURE__ */ React.createElement("span", { className: "val" }, value.toFixed(2), unit));
 };
 Object.assign(window, { I, ChannelIcon, Avatar, StateBadge, Spark, BarRow });
+
+})();

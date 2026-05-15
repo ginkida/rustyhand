@@ -1,3 +1,4 @@
+(function(){
 const __TWEAKS_STORAGE_KEY = "rh.panel.tweaks";
 function useTweaks(defaults) {
   const [values, setValues] = React.useState(() => {
@@ -47,3 +48,5 @@ function TweakSelect({ label, value, options, onChange }) {
   })));
 }
 Object.assign(window, { useTweaks, TweaksPanel, TweakSection, TweakToggle, TweakRadio, TweakSelect });
+
+})();

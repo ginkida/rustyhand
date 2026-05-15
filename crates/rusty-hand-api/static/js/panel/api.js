@@ -1,3 +1,4 @@
+(function(){
 const __API_BASE = "";
 const __API_KEY_STORAGE = "rh.panel.apiKey";
 function getApiKey() {
@@ -681,3 +682,5 @@ Object.assign(window, {
   confirmDialog,
   ConfirmHost
 });
+
+})();
