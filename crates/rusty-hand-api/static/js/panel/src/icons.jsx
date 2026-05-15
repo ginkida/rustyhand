@@ -83,11 +83,15 @@ const StateBadge = ({ state }) => {
 
 // Sparkline.
 const Spark = ({ data, width = 88, height = 28, color = "var(--rust)", fill = true }) => {
-  if (!data || !data.length) return null;
-  const max = Math.max(...data), min = Math.min(...data);
+  // Defensive: coerce to numbers, drop NaN/null/undefined entries, and
+  // bail out on degenerate inputs (no points, or single point — both
+  // would emit NaN coordinates from the 1/(n-1) divisor).
+  const clean = Array.isArray(data) ? data.map((v) => Number(v)).filter((v) => Number.isFinite(v)) : [];
+  if (clean.length < 2) return null;
+  const max = Math.max(...clean), min = Math.min(...clean);
   const span = Math.max(0.0001, max - min);
-  const pts = data.map((v, i) => {
-    const x = (i / (data.length - 1)) * (width - 2) + 1;
+  const pts = clean.map((v, i) => {
+    const x = (i / (clean.length - 1)) * (width - 2) + 1;
     const y = height - 2 - ((v - min) / span) * (height - 4);
     return [x, y];
   });

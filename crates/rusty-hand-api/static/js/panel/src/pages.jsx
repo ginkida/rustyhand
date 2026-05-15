@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.73";
+  const version = (health && health.version) || "0.7.74";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -1095,12 +1095,21 @@ tools = ["${customProfile}"]
 }
 
 function AgentDrawer({ agent, onClose }) {
+  // All hooks must run on every render — never early-return between
+  // hook calls. Previously this function did `if (!agent) return null;`
+  // BETWEEN useState and the three useApi calls, which violated React's
+  // rules of hooks the moment AgentDrawer was unmounted and remounted
+  // with a different `agent` prop (React error #310: rendered more
+  // hooks than during the previous render). Each useApi tolerates a
+  // null path, so we just pass null down and gate the JSX render at the
+  // end instead.
   const [tab, setTab] = useState("info");
   useEffect(() => { setTab("info"); }, [agent && agent.id]);
-  if (!agent) return null;
   const [detail, , refreshDetail] = useApi(agent ? `/api/agents/${agent.id}` : null);
   const [recent] = useApi(agent ? `/api/audit/recent?n=10&agent_id=${agent.id}` : null);
   const [budget] = useApi(agent ? `/api/budget/agents/${agent.id}` : null);
+
+  if (!agent) return null;
 
   const turns = (recent && recent.entries) || null;
   const cost24 = budget && budget.daily && budget.daily.spend != null ? Number(budget.daily.spend) : agent.cost;
@@ -1711,9 +1720,14 @@ function AgentIdentityForm({ agent, detail, onSaved }) {
 // + tool-trace layout once the agent's response lands.
 function ChatPage() {
   const [agentsResp] = usePolling("/api/agents?limit=200", 20000);
-  const agents = (agentsResp && agentsResp.agents) ? agentsResp.agents.map(normalizeAgent) : D.agents;
+  // Never fall back to D.agents (demo fixtures) here — those have
+  // human-readable string ids like "rusty" that the kernel rejects as
+  // 400 (agent id must parse as UUID), and the WebSocket then 401s on
+  // /api/agents/rusty/ws. Use a real fetch result or nothing. Empty
+  // list shows a clear "no agents yet" state instead of fake-fail.
+  const agents = (agentsResp && agentsResp.agents) ? agentsResp.agents.map(normalizeAgent) : [];
   const [activeId, setActiveId] = useState(null);
-  const active = agents.find(a => a.id === activeId) || agents[0];
+  const active = agents.find(a => a.id === activeId) || agents[0] || null;
 
   const [session, sessionErr, refreshSession] = useApi(active ? `/api/agents/${active.id}/session` : null);
   const [budget] = useApi(active ? `/api/budget/agents/${active.id}` : null);
@@ -1798,13 +1812,10 @@ function ChatPage() {
 
   const ws = useAgentWs(active && active.id, onWs);
 
-  if (!active) {
-    return (
-      <div className="muted mono" style={{padding:"40px 14px", fontSize:13}}>
-        No agents loaded. Spawn one from the Agents page first.
-      </div>
-    );
-  }
+  // NOTE: the early return for `!active` lives further down, after ALL
+  // hooks have been called (chatWrapRef + contextCollapsed state + the
+  // two useEffects that drive the side panel). Returning here would
+  // skip those hooks and trip React error #310 on the second render.
 
   const items = coalesceToolTraces(
     sessionToItems(session && session.messages).concat(pendingMessages)
@@ -1927,6 +1938,31 @@ function ChatPage() {
       wrap.style.setProperty("--chat-right", r);
     }
   }, [contextCollapsed]);
+
+  // Render an empty state when there's no active agent — either the
+  // agent list is still loading (agentsResp null) or there are no
+  // agents in the registry. Without this guard, the JSX below
+  // dereferences `active.name`, `active.id`, etc. and crashes the page.
+  if (!active) {
+    return (
+      <div className="chat-wrap" ref={chatWrapRef}>
+        <div className="chat-list">
+          <div className="chat-list-head row between">
+            <span className="mono dim" style={{fontSize:11,letterSpacing:".12em",textTransform:"uppercase"}}>Sessions</span>
+          </div>
+          <div className="chat-list-body">
+            <div className="muted mono" style={{padding:"24px 14px", fontSize:12, textAlign:"center"}}>
+              {agentsResp ? "No agents yet. Spawn one from the Agents page." : "loading agents…"}
+            </div>
+          </div>
+        </div>
+        <div aria-hidden style={{width:0}}/>
+        <div className="chat-panel"/>
+        <div aria-hidden style={{width:0}}/>
+        <div className="chat-side"/>
+      </div>
+    );
+  }
 
   return (
     <div className="chat-wrap" ref={chatWrapRef}>
@@ -4363,11 +4399,19 @@ const BreakerRow = ({ name, state, tail, warn, err }) => (
 
 const CostChart = ({ data }) => {
   const W = 800, H = 220, P = 28;
-  const max = Math.max(...data), min = 0;
-  const x = i => P + (i / (data.length - 1)) * (W - P*2);
-  const y = v => H - P - ((v - min) / (max - min)) * (H - P*2);
-  const path = data.map((v,i) => (i===0?`M${x(i)},${y(v)}`:`L${x(i)},${y(v)}`)).join(" ");
-  const area = `${path} L${x(data.length-1)},${H-P} L${x(0)},${H-P} Z`;
+  // Defensive: filter to finite numbers, then bail out if the result is
+  // degenerate. Single point → 1/(n-1) divisor → NaN coordinates. Empty
+  // → Math.max of nothing returns -Infinity → also NaN.
+  const clean = Array.isArray(data) ? data.map((v) => Number(v)).filter((v) => Number.isFinite(v)) : [];
+  if (clean.length < 2) {
+    return <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="220" style={{display:"block"}}/>;
+  }
+  const max = Math.max(...clean), min = 0;
+  const span = max - min || 1;
+  const x = i => P + (i / (clean.length - 1)) * (W - P*2);
+  const y = v => H - P - ((v - min) / span) * (H - P*2);
+  const path = clean.map((v,i) => (i===0?`M${x(i)},${y(v)}`:`L${x(i)},${y(v)}`)).join(" ");
+  const area = `${path} L${x(clean.length-1)},${H-P} L${x(0)},${H-P} Z`;
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="220" style={{display:"block"}}>
       <defs>
@@ -4386,7 +4430,7 @@ const CostChart = ({ data }) => {
       })}
       <path d={area} fill="url(#g1)"/>
       <path d={path} fill="none" stroke="var(--rust)" strokeWidth="1.8" strokeLinejoin="round"/>
-      {data.map((v,i) => i % 4 === 0 && (
+      {clean.map((v,i) => i % 4 === 0 && (
         <text key={i} x={x(i)} y={H-8} fill="var(--fg-4)" fontFamily="var(--ff-mono)" fontSize="9.5" textAnchor="middle">{i.toString().padStart(2,"0")}h</text>
       ))}
     </svg>
@@ -5886,7 +5930,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.73";
+  const version = (health && health.version) || "0.7.74";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 

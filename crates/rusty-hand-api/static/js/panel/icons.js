@@ -80,11 +80,12 @@ const StateBadge = ({ state }) => {
   return /* @__PURE__ */ React.createElement("span", { className: `badge ${m.cls}` }, /* @__PURE__ */ React.createElement("span", { className: `dot ${m.cls === "live" ? "live" : m.cls === "warn" ? "warn" : m.cls === "error" ? "err" : "idle"}` }), m.text);
 };
 const Spark = ({ data, width = 88, height = 28, color = "var(--rust)", fill = true }) => {
-  if (!data || !data.length) return null;
-  const max = Math.max(...data), min = Math.min(...data);
+  const clean = Array.isArray(data) ? data.map((v) => Number(v)).filter((v) => Number.isFinite(v)) : [];
+  if (clean.length < 2) return null;
+  const max = Math.max(...clean), min = Math.min(...clean);
   const span = Math.max(1e-4, max - min);
-  const pts = data.map((v, i) => {
-    const x = i / (data.length - 1) * (width - 2) + 1;
+  const pts = clean.map((v, i) => {
+    const x = i / (clean.length - 1) * (width - 2) + 1;
     const y = height - 2 - (v - min) / span * (height - 4);
     return [x, y];
   });
