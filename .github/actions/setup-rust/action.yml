@@ -1,0 +1,54 @@
+name: Setup Rust toolchain
+description: |
+  Wraps dtolnay/rust-toolchain with the macOS shim defense + an explicit
+  cargo probe. Both .github/workflows/ci.yml and release.yml use this so
+  the rustup-init-shim mitigation lives in one place.
+
+  Background: macos-15-arm64 runners intermittently expose
+  /opt/homebrew/bin/cargo as a rustup-init shim that shadows the
+  rustup-installed real cargo. dtolnay's $GITHUB_PATH write should
+  prepend the right path, but ordering races on some runner images. We
+  force-prepend $HOME/.cargo/bin and assert that `cargo --version`
+  actually starts with "cargo " — fails fast with a useful PATH dump if
+  the shim still wins.
+
+inputs:
+  targets:
+    description: "Comma-separated rustup targets to install (e.g. x86_64-pc-windows-msvc)"
+    required: false
+    default: ""
+  components:
+    description: "Comma-separated rustup components (e.g. clippy,rustfmt)"
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust stable toolchain
+      uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      with:
+        toolchain: stable
+        targets: ${{ inputs.targets }}
+        components: ${{ inputs.components }}
+    - name: Force real cargo on PATH (macOS shim defense)
+      shell: bash
+      run: |
+        if [ -x "$HOME/.cargo/bin/cargo" ]; then
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+        fi
+        echo "which cargo: $(which cargo)"
+        ver=$(cargo --version 2>&1 || true)
+        echo "cargo --version: $ver"
+        case "$ver" in
+          cargo\ *) echo "cargo OK" ;;
+          *)
+            echo "ERROR: 'cargo' on PATH is not real cargo (got: $ver)"
+            echo "PATH=$PATH"
+            ls -la /opt/homebrew/bin/cargo 2>/dev/null || true
+            ls -la /usr/local/bin/cargo 2>/dev/null || true
+            ls -la "$HOME/.cargo/bin/cargo" 2>/dev/null || true
+            exit 1
+            ;;
+        esac

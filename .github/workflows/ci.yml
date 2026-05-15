@@ -25,32 +25,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-      - name: Force real cargo on PATH (macOS shim defense)
-        shell: bash
-        run: |
-          # macos-latest runners intermittently have /opt/homebrew/bin/cargo
-          # as a rustup-init shim that shadows the rustup-installed cargo
-          # in $HOME/.cargo/bin. dtolnay's $GITHUB_PATH write should prepend
-          # the right path, but ordering races have shipped twice now.
-          # Force-prepend + assert `cargo --version` is real cargo to fail
-          # fast with a useful message if the shim is still winning.
-          if [ -x "$HOME/.cargo/bin/cargo" ]; then
-            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-            export PATH="$HOME/.cargo/bin:$PATH"
-          fi
-          echo "PATH=$PATH"
-          echo "which cargo: $(which cargo)"
-          ver=$(cargo --version 2>&1 || true)
-          echo "cargo --version: $ver"
-          case "$ver" in
-            cargo\ *) echo "cargo OK" ;;
-            *) echo "ERROR: 'cargo' on PATH is not real cargo (got: $ver)"; exit 1 ;;
-          esac
+      - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          # v3 suffix invalidates earlier caches that on macos-latest
-          # captured a rustup-init shim as `cargo`. See v0.7.70 changelog.
           key: check-${{ matrix.os }}-v3
       - run: cargo check --workspace
 
@@ -63,25 +40,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-      - name: Force real cargo on PATH (macOS shim defense)
-        shell: bash
-        run: |
-          if [ -x "$HOME/.cargo/bin/cargo" ]; then
-            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-            export PATH="$HOME/.cargo/bin:$PATH"
-          fi
-          echo "PATH=$PATH"
-          echo "which cargo: $(which cargo)"
-          ver=$(cargo --version 2>&1 || true)
-          echo "cargo --version: $ver"
-          case "$ver" in
-            cargo\ *) echo "cargo OK" ;;
-            *) echo "ERROR: 'cargo' on PATH is not real cargo (got: $ver)"; exit 1 ;;
-          esac
+      - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          # See check job above for rationale.
           key: test-${{ matrix.os }}-v3
       - run: cargo test --workspace
 
@@ -90,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: ./.github/actions/setup-rust
         with:
           components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
@@ -101,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: ./.github/actions/setup-rust
         with:
           components: rustfmt
       - run: cargo fmt --check
@@ -111,7 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
