@@ -1,6 +1,6 @@
 // RustyHand control panel — app shell + router + sidebar + topbar + tweaks.
 
-const { useState, useEffect } = React;
+const { useState, useEffect, useRef, useMemo } = React;
 
 const TWEAKS_DEFAULTS = /*EDITMODE-BEGIN*/{
   "theme": "dark",
@@ -94,7 +94,7 @@ function Sidebar({ page, go }) {
         <div className="sb-mark">RH</div>
         <div>
           <div className="sb-title">Rusty Hand</div>
-          <div className="sb-sub">v0.7.67 · schema v8</div>
+          <div className="sb-sub">v0.7.68 · schema v8</div>
         </div>
       </div>
 
