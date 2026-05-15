@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.72";
+  const version = (health && health.version) || "0.7.73";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -1888,7 +1888,21 @@ function ChatPage() {
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
   };
-  // Restore persisted widths on mount.
+  // Collapse the right "Run context" panel — defaults to collapsed
+  // because it eats ~340px even when the operator isn't looking at it.
+  // Persisted in localStorage so a one-time expand stays expanded
+  // across page navigations.
+  const [contextCollapsed, setContextCollapsedState] = useState(() => {
+    try {
+      const v = localStorage.getItem("rh.panel.chatContextCollapsed");
+      return v == null ? true : v === "1";
+    } catch (_) { return true; }
+  });
+  const setContextCollapsed = (v) => {
+    setContextCollapsedState(v);
+    try { localStorage.setItem("rh.panel.chatContextCollapsed", v ? "1" : "0"); } catch (_) {}
+  };
+  // Restore persisted widths + collapse state on mount.
   React.useEffect(() => {
     const wrap = chatWrapRef.current;
     if (!wrap) return;
@@ -1896,9 +1910,23 @@ function ChatPage() {
       const l = localStorage.getItem("rh.panel.chatLeft");
       const r = localStorage.getItem("rh.panel.chatRight");
       if (l) wrap.style.setProperty("--chat-left", l);
-      if (r) wrap.style.setProperty("--chat-right", r);
+      if (r && !contextCollapsed) wrap.style.setProperty("--chat-right", r);
     } catch (_) {}
   }, []);
+  // Drive the right-column width via the same CSS variable the drag
+  // handle owns — 32px when collapsed (just the toggle strip), restored
+  // to the previous width when expanded.
+  React.useEffect(() => {
+    const wrap = chatWrapRef.current;
+    if (!wrap) return;
+    if (contextCollapsed) {
+      wrap.style.setProperty("--chat-right", "32px");
+    } else {
+      let r = "340px";
+      try { r = localStorage.getItem("rh.panel.chatRight") || "340px"; } catch (_) {}
+      wrap.style.setProperty("--chat-right", r);
+    }
+  }, [contextCollapsed]);
 
   return (
     <div className="chat-wrap" ref={chatWrapRef}>
@@ -2009,37 +2037,79 @@ function ChatPage() {
         />
       </div>
 
-      <div className="chat-resize" onMouseDown={startResize("right")} aria-hidden/>
+      {/* Drag handle is only useful when the side panel is expanded.
+          When collapsed, hide it — the strip itself is the toggle. */}
+      {!contextCollapsed && (
+        <div className="chat-resize" onMouseDown={startResize("right")} aria-hidden/>
+      )}
+      {contextCollapsed && <div aria-hidden style={{width:0}}/>}
 
       {/* side: context */}
-      <div className="chat-side">
-        <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Run context</div>
-        <div className="kv mb-16">
-          <dt>session</dt><dd>{session ? String(session.session_id || "—").slice(0, 12) : "…"}</dd>
-          <dt>messages</dt><dd>{session && session.messages ? session.messages.length : 0}</dd>
-          <dt>pressure</dt><dd style={{color:"var(--live)"}}>{(session && session.context_pressure) || "—"}</dd>
-          <dt>budget · day</dt><dd>{budget && budget.daily ? `$${Number(budget.daily.spend || 0).toFixed(2)} / $${Number(budget.daily.limit || 0).toFixed(2)}` : "—"}</dd>
-          <dt>budget · hour</dt><dd>{budget && budget.hourly ? `$${Number(budget.hourly.spend || 0).toFixed(2)} / $${Number(budget.hourly.limit || 0).toFixed(2)}` : "—"}</dd>
+      {contextCollapsed ? (
+        <div
+          className="chat-side"
+          style={{
+            display:"flex",
+            alignItems:"flex-start",
+            justifyContent:"center",
+            padding:"8px 4px",
+            cursor:"pointer",
+            background:"var(--surface)",
+            borderLeft:"1px solid var(--border)",
+          }}
+          onClick={() => setContextCollapsed(false)}
+          title="Show run context"
+        >
+          <span
+            className="mono dim"
+            style={{
+              fontSize:10,
+              writingMode:"vertical-rl",
+              transform:"rotate(180deg)",
+              letterSpacing:".2em",
+              textTransform:"uppercase",
+              userSelect:"none",
+            }}
+          >‹ context</span>
         </div>
+      ) : (
+        <div className="chat-side">
+          <div className="row between mb-8">
+            <span className="muted mono" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Run context</span>
+            <button
+              className="kbd"
+              style={{cursor:"pointer"}}
+              title="Hide run context"
+              onClick={() => setContextCollapsed(true)}
+            >›</button>
+          </div>
+          <div className="kv mb-16">
+            <dt>session</dt><dd>{session ? String(session.session_id || "—").slice(0, 12) : "…"}</dd>
+            <dt>messages</dt><dd>{session && session.messages ? session.messages.length : 0}</dd>
+            <dt>pressure</dt><dd style={{color:"var(--live)"}}>{(session && session.context_pressure) || "—"}</dd>
+            <dt>budget · day</dt><dd>{budget && budget.daily ? `$${Number(budget.daily.spend || 0).toFixed(2)} / $${Number(budget.daily.limit || 0).toFixed(2)}` : "—"}</dd>
+            <dt>budget · hour</dt><dd>{budget && budget.hourly ? `$${Number(budget.hourly.spend || 0).toFixed(2)} / $${Number(budget.hourly.limit || 0).toFixed(2)}` : "—"}</dd>
+          </div>
 
-        <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Memory · session</div>
-        <pre className="codebox mb-16" style={{maxHeight:120}}>
+          <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Memory · session</div>
+          <pre className="codebox mb-16" style={{maxHeight:120}}>
 {`session_id = ${session ? (session.session_id || "—") : "loading…"}\nagent_id   = ${active.id}\nmessages   = ${session && session.messages ? session.messages.length : 0}\nmodel      = ${active.model}\nprovider   = ${active.provider}`}
-        </pre>
+          </pre>
 
-        <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Allowed tools</div>
-        <div className="col gap-4" style={{maxHeight:200, overflow:"auto"}}>
-          {(tools || []).slice(0, 16).map(t => (
-            <div key={t.name} className="row between" style={{padding:"4px 8px",background:"var(--bg-2)",borderRadius:5}}>
-              <span className="mono" style={{fontSize:11.5}}>{t.name}</span>
-              <span className="badge live" style={{padding:"1px 5px"}}>ok</span>
-            </div>
-          ))}
-          {!tools && (
-            <div className="dim mono" style={{fontSize:11, padding:"4px 8px"}}>loading…</div>
-          )}
+          <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Allowed tools</div>
+          <div className="col gap-4" style={{maxHeight:200, overflow:"auto"}}>
+            {(tools || []).slice(0, 16).map(t => (
+              <div key={t.name} className="row between" style={{padding:"4px 8px",background:"var(--bg-2)",borderRadius:5}}>
+                <span className="mono" style={{fontSize:11.5}}>{t.name}</span>
+                <span className="badge live" style={{padding:"1px 5px"}}>ok</span>
+              </div>
+            ))}
+            {!tools && (
+              <div className="dim mono" style={{fontSize:11, padding:"4px 8px"}}>loading…</div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -5816,7 +5886,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.72";
+  const version = (health && health.version) || "0.7.73";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 

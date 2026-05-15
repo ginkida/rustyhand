@@ -490,6 +490,11 @@ async fn dashboard_wires_write_paths() {
             "(function(){",
             "panel JS files must be wrapped in IIFE (build.sh)",
         ),
+        // v0.7.73: chat run-context collapse toggle
+        (
+            "rh.panel.chatContextCollapsed",
+            "Chat run-context collapse persistence",
+        ),
     ];
     for (needle, what) in markers {
         assert!(
