@@ -3791,6 +3791,95 @@ pub async fn knowledge_add_relation(
     }
 }
 
+/// PUT /api/knowledge/relations/:id — Replace a relation in place.
+/// Same body shape as POST /api/knowledge/relations.
+pub async fn knowledge_update_relation(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    use rusty_hand_types::memory::Relation;
+
+    if id.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Empty relation id"})),
+        );
+    }
+    let source = match body.get("source").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Missing or empty 'source' field"})),
+            );
+        }
+    };
+    let target = match body.get("target").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Missing or empty 'target' field"})),
+            );
+        }
+    };
+    let relation_v = match body.get("relation").cloned() {
+        Some(v) => v,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "Missing 'relation' field — use a snake_case RelationType variant"
+                })),
+            );
+        }
+    };
+    let relation: rusty_hand_types::memory::RelationType = match serde_json::from_value(relation_v)
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Unknown relation type: {e}")})),
+            );
+        }
+    };
+    let confidence = body
+        .get("confidence")
+        .and_then(|v| v.as_f64())
+        .map(|c| c.clamp(0.0, 1.0) as f32)
+        .unwrap_or(1.0);
+    let properties: std::collections::HashMap<String, serde_json::Value> = body
+        .get("properties")
+        .and_then(|v| v.as_object())
+        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        .unwrap_or_default();
+    let rel = Relation {
+        id: id.clone(),
+        source,
+        relation,
+        target,
+        properties,
+        confidence,
+        created_at: chrono::Utc::now(),
+    };
+    match state.kernel.memory.update_relation(id.clone(), rel).await {
+        Ok(true) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"status": "updated", "id": id})),
+        ),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Relation not found"})),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Update failed: {e}")})),
+        ),
+    }
+}
+
 /// DELETE /api/knowledge/relations/:id — Delete a relation by ID.
 pub async fn knowledge_delete_relation(
     State(state): State<Arc<AppState>>,

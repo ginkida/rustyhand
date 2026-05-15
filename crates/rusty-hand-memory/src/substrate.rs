@@ -830,6 +830,13 @@ impl Memory for MemorySubstrate {
             .map_err(|e| RustyHandError::Internal(e.to_string()))?
     }
 
+    async fn update_relation(&self, id: String, relation: Relation) -> RustyHandResult<bool> {
+        let store = self.knowledge.clone();
+        tokio::task::spawn_blocking(move || store.update_relation(&id, relation))
+            .await
+            .map_err(|e| RustyHandError::Internal(e.to_string()))?
+    }
+
     async fn remove_entity(&self, id: String) -> RustyHandResult<bool> {
         let store = self.knowledge.clone();
         tokio::task::spawn_blocking(move || store.remove_entity(&id))

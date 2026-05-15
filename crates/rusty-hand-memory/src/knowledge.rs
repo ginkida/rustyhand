@@ -83,6 +83,36 @@ impl KnowledgeStore {
         Ok(id)
     }
 
+    /// Update an existing relation in-place. Only the fields present in
+    /// the provided Relation are written. Returns true when a row was
+    /// updated, false when no relation with that id exists.
+    pub fn update_relation(&self, id: &str, relation: Relation) -> RustyHandResult<bool> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| RustyHandError::Internal(e.to_string()))?;
+        let rel_type_str = serde_json::to_string(&relation.relation)
+            .map_err(|e| RustyHandError::Serialization(e.to_string()))?;
+        let props_str = serde_json::to_string(&relation.properties)
+            .map_err(|e| RustyHandError::Serialization(e.to_string()))?;
+        let affected = conn
+            .execute(
+                "UPDATE relations SET source_entity = ?1, relation_type = ?2,
+                    target_entity = ?3, properties = ?4, confidence = ?5
+                 WHERE id = ?6",
+                rusqlite::params![
+                    relation.source,
+                    rel_type_str,
+                    relation.target,
+                    props_str,
+                    relation.confidence as f64,
+                    id,
+                ],
+            )
+            .map_err(|e| RustyHandError::Memory(e.to_string()))?;
+        Ok(affected > 0)
+    }
+
     /// Remove a relation by its ID. Returns true if a row was deleted.
     pub fn remove_relation(&self, id: &str) -> RustyHandResult<bool> {
         let conn = self

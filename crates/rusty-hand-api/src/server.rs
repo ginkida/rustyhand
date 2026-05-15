@@ -425,7 +425,8 @@ pub async fn build_router(
         )
         .route(
             "/api/knowledge/relations/{id}",
-            axum::routing::delete(routes::knowledge_delete_relation),
+            axum::routing::delete(routes::knowledge_delete_relation)
+                .put(routes::knowledge_update_relation),
         )
         // Config endpoints
         .route("/api/config", axum::routing::get(routes::get_config))

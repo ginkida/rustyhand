@@ -22,7 +22,7 @@ function OverviewPage({ go }) {
     refreshApprovals();
   };
   const approvalRows = approvalsResp && approvalsResp.approvals || D.approvals;
-  const version = health && health.version || "0.7.63";
+  const version = health && health.version || "0.7.64";
   const uptime = health && health.uptime_seconds ? formatUptime(health.uptime_seconds) : null;
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(Banner, { go, onboarding }), /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Overview"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "System pulse \xB7 kernel ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v", version), uptime && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 uptime ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, uptime)), " ", "\xB7 schema ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v8"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null), " Refresh"), /* @__PURE__ */ React.createElement("button", { className: "btn primary" }, /* @__PURE__ */ React.createElement(I.plus, null), " New agent"))), /* @__PURE__ */ React.createElement("div", { className: "tiles" }, /* @__PURE__ */ React.createElement(Tile, { label: "Agents running", value: `${live}`, foot: `of ${totalAgents} total`, spark: sparkOf(agents.map((_, i) => live + (i % 3 - 1)), 12) }), /* @__PURE__ */ React.createElement(Tile, { label: "Cost \xB7 today", value: `$${(cost24 || 0).toFixed(2)}`, foot: usage ? "from /api/usage/daily" : "loading\u2026", spark: days.slice(-12).map((d) => d.cost_usd || 0) }), /* @__PURE__ */ React.createElement(Tile, { label: "Audit entries", value: audit && audit.total != null ? audit.total.toLocaleString() : "\u2014", foot: audit && audit.tip_hash ? `tip ${String(audit.tip_hash).slice(0, 8)}` : "loading\u2026", spark: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] }), /* @__PURE__ */ React.createElement(Tile, { label: "Errors \xB7 agents", value: `${errors}`, foot: errors ? `${errors} crashed agent(s)` : "all green", spark: [0, 0, 1, 0, 0, 0, 0, 0, errors, 0, 0, 0], deltaCls: "up", warn: errors > 0 })), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 col" }, /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Live activity"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: refreshAudit }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost" }, /* @__PURE__ */ React.createElement(I.download, null), " Export"))), /* @__PURE__ */ React.createElement(ActivityFeed, { entries: audit && audit.entries })), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Approvals \xB7 waiting"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("approvals") }, "Open queue"))), approvalRows.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, "No approvals waiting.") : /* @__PURE__ */ React.createElement(ApprovalsTable, { rows: approvalRows.slice(0, 3), compact: true, onChange: refreshApprovals }))), /* @__PURE__ */ React.createElement("div", { className: "col-4 col" }, onboarding && onboarding.demo_mode && /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Demo seed"), /* @__PURE__ */ React.createElement("span", { className: "badge demo" }, /* @__PURE__ */ React.createElement("span", { className: "dot demo" }), "active")), /* @__PURE__ */ React.createElement("div", { className: "col gap-8" }, /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.agents, null), title: "rusty", sub: "welcome agent \xB7 chat-ready", onClick: () => go("chat") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.workflows, null), title: "demo-pipeline", sub: "2-step sample workflow \xB7 click to run", onClick: () => go("workflows") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.event, null), title: "sample trigger", sub: "agent-spawn on webhook", onClick: () => go("automation") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.cron, null), title: "demo-daily-ping", sub: "cron 0 9 * * * \xB7 disabled", onClick: () => go("automation") }))), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Providers"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("settings") }, "Manage")), /* @__PURE__ */ React.createElement(ProvidersList, { providers: providersResp && providersResp.providers })), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Audit chain"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("audit") }, "View")), /* @__PURE__ */ React.createElement("div", { className: "col gap-4" }, /* @__PURE__ */ React.createElement(AuditSummary, { audit }))))));
 }
@@ -1699,15 +1699,33 @@ steps:
 }
 function WorkflowRunInspector({ run, onClose }) {
   useEscapeKey(onClose);
-  const steps = Array.isArray(run.step_results) ? run.step_results : [];
+  const [liveRun, setLiveRun] = useState(run);
+  React.useEffect(() => {
+    setLiveRun(run);
+  }, [run && (run.id || run.run_id)]);
+  const liveState = typeof liveRun.state === "string" ? liveRun.state.toLowerCase() : "";
+  const terminal = liveState === "completed" || liveState === "failed" || liveState === "cancelled";
+  const runWorkflowId = liveRun.workflow_id || run.workflow_id || run && run.workflow && run.workflow.id;
+  const pollPath = !terminal && runWorkflowId ? `/api/workflows/${encodeURIComponent(runWorkflowId)}/runs` : null;
+  const [runsResp] = usePolling(pollPath, 1500);
+  React.useEffect(() => {
+    if (!runsResp) return;
+    const list = Array.isArray(runsResp) ? runsResp : runsResp && runsResp.runs || [];
+    const myId = liveRun.id || liveRun.run_id;
+    const hit = list.find((r2) => (r2.id || r2.run_id) === myId);
+    if (hit) setLiveRun((prev) => ({ ...prev, ...hit }));
+  }, [runsResp]);
+  const steps = Array.isArray(liveRun.step_results) ? liveRun.step_results : [];
   const totalDur = steps.reduce((s, x) => s + (x.duration_ms || 0), 0);
   const totalTokens = steps.reduce((s, x) => s + (x.input_tokens || 0) + (x.output_tokens || 0), 0);
-  const state = typeof run.state === "string" ? run.state : "\u2014";
-  const isFailed = state.toLowerCase() === "failed" || !!run.error;
-  return /* @__PURE__ */ React.createElement("div", { className: "modal-back", onClick: onClose }, /* @__PURE__ */ React.createElement("div", { className: "modal wide", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "modal-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("b", { className: "mono" }, "Run \xB7 ", String(run.id || "").slice(0, 12)), /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11, marginTop: 2 } }, run.workflow_name || run.workflow_id, " \xB7 started ", formatTime(run.started_at), run.completed_at ? ` \xB7 completed ${formatTime(run.completed_at)}` : " \xB7 running\u2026")), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", onClick: onClose }, /* @__PURE__ */ React.createElement(I.close, null))), /* @__PURE__ */ React.createElement("div", { className: "modal-body" }, /* @__PURE__ */ React.createElement("div", { className: "row gap-12 mb-12" }, /* @__PURE__ */ React.createElement(Stat, { label: "State", value: state }), /* @__PURE__ */ React.createElement(Stat, { label: "Steps", value: `${steps.length}` }), /* @__PURE__ */ React.createElement(Stat, { label: "Duration", value: totalDur ? `${(totalDur / 1e3).toFixed(2)}s` : "\u2014" }), /* @__PURE__ */ React.createElement(Stat, { label: "Tokens", value: totalTokens.toLocaleString() })), run.input && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Initial input"), /* @__PURE__ */ React.createElement("pre", { className: "codebox mb-16", style: { maxHeight: 100, whiteSpace: "pre-wrap" } }, run.input)), isFailed && run.error && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--crimson)" } }, "Error"), /* @__PURE__ */ React.createElement("pre", { className: "codebox mb-16", style: { color: "var(--crimson)", maxHeight: 120 } }, run.error)), /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Steps (", steps.length, ")"), /* @__PURE__ */ React.createElement("div", { className: "col gap-6", style: { maxHeight: 420, overflow: "auto" } }, steps.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11, padding: "6px 8px" } }, "No step output recorded yet."), steps.map((s, i) => {
+  const state = typeof liveRun.state === "string" ? liveRun.state : "\u2014";
+  const isFailed = state.toLowerCase() === "failed" || !!liveRun.error;
+  const isRunning = !terminal && pollPath != null;
+  const r = liveRun;
+  return /* @__PURE__ */ React.createElement("div", { className: "modal-back", onClick: onClose }, /* @__PURE__ */ React.createElement("div", { className: "modal wide", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "modal-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("b", { className: "mono" }, "Run \xB7 ", String(r.id || r.run_id || "").slice(0, 12)), isRunning && /* @__PURE__ */ React.createElement("span", { className: "badge live", style: { marginLeft: 8 }, title: "Polling /api/workflows/.../runs every 1.5s" }, /* @__PURE__ */ React.createElement("span", { className: "dot live" }), "live"), /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11, marginTop: 2 } }, r.workflow_name || r.workflow_id, " \xB7 started ", formatTime(r.started_at), r.completed_at ? ` \xB7 completed ${formatTime(r.completed_at)}` : " \xB7 running\u2026")), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", onClick: onClose }, /* @__PURE__ */ React.createElement(I.close, null))), /* @__PURE__ */ React.createElement("div", { className: "modal-body" }, /* @__PURE__ */ React.createElement("div", { className: "row gap-12 mb-12" }, /* @__PURE__ */ React.createElement(Stat, { label: "State", value: state }), /* @__PURE__ */ React.createElement(Stat, { label: "Steps", value: `${steps.length}` }), /* @__PURE__ */ React.createElement(Stat, { label: "Duration", value: totalDur ? `${(totalDur / 1e3).toFixed(2)}s` : "\u2014" }), /* @__PURE__ */ React.createElement(Stat, { label: "Tokens", value: totalTokens.toLocaleString() })), r.input && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Initial input"), /* @__PURE__ */ React.createElement("pre", { className: "codebox mb-16", style: { maxHeight: 100, whiteSpace: "pre-wrap" } }, r.input)), isFailed && r.error && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--crimson)" } }, "Error"), /* @__PURE__ */ React.createElement("pre", { className: "codebox mb-16", style: { color: "var(--crimson)", maxHeight: 120 } }, r.error)), /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Steps (", steps.length, ")"), /* @__PURE__ */ React.createElement("div", { className: "col gap-6", style: { maxHeight: 420, overflow: "auto" } }, steps.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11, padding: "6px 8px" } }, isRunning ? "Awaiting first step\u2026" : "No step output recorded yet."), steps.map((s, i) => {
     const tokens = (s.input_tokens || 0) + (s.output_tokens || 0);
     return /* @__PURE__ */ React.createElement(RunStepCard, { key: i, index: i, step: s, tokens });
-  })), run.output && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8 mt-16", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Final output"), /* @__PURE__ */ React.createElement("pre", { className: "codebox", style: { maxHeight: 160, whiteSpace: "pre-wrap" } }, run.output))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: onClose }, "Close"))));
+  })), r.output && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8 mt-16", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Final output"), /* @__PURE__ */ React.createElement("pre", { className: "codebox", style: { maxHeight: 160, whiteSpace: "pre-wrap" } }, r.output))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: onClose }, "Close"))));
 }
 function RunStepCard({ index, step, tokens }) {
   const [open, setOpen] = useState(false);
@@ -2485,7 +2503,22 @@ function AnalyticsPage() {
   const [byModel] = usePolling("/api/usage/by-model", 3e4);
   const [stats] = usePolling("/api/usage", 3e4);
   const [agentsResp] = usePolling("/api/agents?limit=200", 3e4);
+  const [usageAgents] = usePolling("/api/usage", 3e4);
   const agents = agentsResp && agentsResp.agents ? agentsResp.agents.map(normalizeAgent) : [];
+  const usageList = usageAgents && Array.isArray(usageAgents.agents) ? usageAgents.agents : [];
+  const agentById = new Map(agents.map((a) => [a.id, a]));
+  const usageJoined = usageList.map((u) => {
+    const a = agentById.get(u.agent_id);
+    return {
+      id: u.agent_id,
+      name: u.name || a && a.name || u.agent_id,
+      model: a ? a.model : "\u2014",
+      state: a ? a.state : "unknown",
+      total_tokens: Number(u.total_tokens || 0),
+      tool_calls: Number(u.tool_calls || 0)
+    };
+  }).filter((u) => u.total_tokens > 0 || u.tool_calls > 0).sort((x, y) => y.total_tokens - x.total_tokens);
+  const maxTokens = Math.max(1, ...usageJoined.map((u) => u.total_tokens));
   const days = daily && daily.days || [];
   const dailyCosts = days.map((d) => Number(d.cost_usd || 0));
   const totalSpend7d = dailyCosts.slice(-7).reduce((s, v) => s + v, 0);
@@ -2506,7 +2539,15 @@ function AnalyticsPage() {
       { key: "requests", label: "requests" }
     ]);
     downloadBlob(`rustyhand-usage-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.csv`, csv, "text/csv");
-  } }, /* @__PURE__ */ React.createElement(I.download, null), " CSV"))), /* @__PURE__ */ React.createElement("div", { className: "tiles" }, /* @__PURE__ */ React.createElement(Tile, { label: "Total spend \xB7 7d", value: `$${totalSpend7d.toFixed(2)}`, foot: daily ? `${days.length} day(s) of data` : "loading\u2026", spark: dailyCosts.slice(-12) }), /* @__PURE__ */ React.createElement(Tile, { label: "LLM requests \xB7 7d", value: totalRequests7d.toLocaleString(), foot: daily ? `${avgPerDay.toFixed(0)} / day avg` : "loading\u2026", spark: days.slice(-12).map((d) => d.requests || 0) }), /* @__PURE__ */ React.createElement(Tile, { label: "Cache hit-rate", value: cacheHitRate, foot: stats ? "LLM cache \xB7 24h TTL" : "loading\u2026", spark: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }), /* @__PURE__ */ React.createElement(Tile, { label: "p95 latency", value: p95, foot: stats ? "kernel telemetry" : "loading\u2026", spark: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] })), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Cost \xB7 daily (last 24 buckets)"), /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11 } }, "$", totalForChart.toFixed(2))), /* @__PURE__ */ React.createElement(CostChart, { data: seriesForChart })), /* @__PURE__ */ React.createElement("div", { className: "col-4 card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Spend by model"), /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11 } }, "$", modelRows.reduce((s, m) => s + Number(m.spend || m.cost_usd || 0), 0).toFixed(2))), /* @__PURE__ */ React.createElement("div", { className: "col", style: { gap: 4 } }, !byModel && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { fontSize: 11, padding: "6px 0" } }, "loading\u2026"), byModel && modelRows.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { fontSize: 11, padding: "6px 0" } }, "no model usage data yet."), modelRows.slice(0, 8).map((m) => /* @__PURE__ */ React.createElement(BarRow, { key: m.model || m.name, label: m.model || m.name, value: Number(m.spend || m.cost_usd || 0), max: maxModelSpend, unit: "$" })))), /* @__PURE__ */ React.createElement("div", { className: "col-6 card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Agents \xB7 by activity")), /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Agent"), /* @__PURE__ */ React.createElement("th", null, "Model"), /* @__PURE__ */ React.createElement("th", null, "State"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Updated"))), /* @__PURE__ */ React.createElement("tbody", null, agents.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 4, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), agents.slice(0, 8).map((a) => /* @__PURE__ */ React.createElement("tr", { key: a.id }, /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("div", { className: "agent-row" }, /* @__PURE__ */ React.createElement(Avatar, { agent: a }), /* @__PURE__ */ React.createElement("span", { className: "name" }, a.name))), /* @__PURE__ */ React.createElement("td", { className: "mono muted" }, a.model), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(StateBadge, { state: a.state })), /* @__PURE__ */ React.createElement("td", { className: "num mono muted" }, a.updated)))))), /* @__PURE__ */ React.createElement("div", { className: "col-6 card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Provider state"), /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 11 } }, "from /api/providers")), /* @__PURE__ */ React.createElement(ProviderState, null))));
+  } }, /* @__PURE__ */ React.createElement(I.download, null), " CSV"))), /* @__PURE__ */ React.createElement("div", { className: "tiles" }, /* @__PURE__ */ React.createElement(Tile, { label: "Total spend \xB7 7d", value: `$${totalSpend7d.toFixed(2)}`, foot: daily ? `${days.length} day(s) of data` : "loading\u2026", spark: dailyCosts.slice(-12) }), /* @__PURE__ */ React.createElement(Tile, { label: "LLM requests \xB7 7d", value: totalRequests7d.toLocaleString(), foot: daily ? `${avgPerDay.toFixed(0)} / day avg` : "loading\u2026", spark: days.slice(-12).map((d) => d.requests || 0) }), /* @__PURE__ */ React.createElement(Tile, { label: "Cache hit-rate", value: cacheHitRate, foot: stats ? "LLM cache \xB7 24h TTL" : "loading\u2026", spark: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }), /* @__PURE__ */ React.createElement(Tile, { label: "p95 latency", value: p95, foot: stats ? "kernel telemetry" : "loading\u2026", spark: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] })), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Cost \xB7 daily (last 24 buckets)"), /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11 } }, "$", totalForChart.toFixed(2))), /* @__PURE__ */ React.createElement(CostChart, { data: seriesForChart })), /* @__PURE__ */ React.createElement("div", { className: "col-4 card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Spend by model"), /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11 } }, "$", modelRows.reduce((s, m) => s + Number(m.spend || m.cost_usd || 0), 0).toFixed(2))), /* @__PURE__ */ React.createElement("div", { className: "col", style: { gap: 4 } }, !byModel && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { fontSize: 11, padding: "6px 0" } }, "loading\u2026"), byModel && modelRows.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { fontSize: 11, padding: "6px 0" } }, "no model usage data yet."), modelRows.slice(0, 8).map((m) => /* @__PURE__ */ React.createElement(BarRow, { key: m.model || m.name, label: m.model || m.name, value: Number(m.spend || m.cost_usd || 0), max: maxModelSpend, unit: "$" })))), /* @__PURE__ */ React.createElement("div", { className: "col-6 card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Agents \xB7 by spend"), /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 11 } }, "top ", Math.min(usageJoined.length, 10), " of ", usageJoined.length)), /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Agent"), /* @__PURE__ */ React.createElement("th", null, "Model"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Tokens"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Tool calls"), /* @__PURE__ */ React.createElement("th", null, "State"))), /* @__PURE__ */ React.createElement("tbody", null, !usageAgents && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 5, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), usageAgents && usageJoined.length === 0 && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 5, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "No usage recorded yet \u2014 agents start showing here after their first LLM call.")), usageJoined.slice(0, 10).map((u) => {
+    const pct = u.total_tokens / maxTokens * 100;
+    return /* @__PURE__ */ React.createElement("tr", { key: u.id }, /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("div", { className: "agent-row" }, /* @__PURE__ */ React.createElement(Avatar, { agent: { name: u.name, hue: hueFromId(u.id), emoji: u.name.charAt(0).toUpperCase() } }), /* @__PURE__ */ React.createElement("span", { className: "name" }, u.name))), /* @__PURE__ */ React.createElement("td", { className: "mono muted" }, u.model), /* @__PURE__ */ React.createElement("td", { className: "num mono", style: { position: "relative", minWidth: 90 } }, /* @__PURE__ */ React.createElement("span", { style: {
+      position: "absolute",
+      inset: 0,
+      background: `linear-gradient(90deg, transparent ${100 - pct}%, oklch(0.665 0.165 50 / .12) ${100 - pct}%)`,
+      pointerEvents: "none"
+    } }), /* @__PURE__ */ React.createElement("span", { style: { position: "relative" } }, u.total_tokens.toLocaleString())), /* @__PURE__ */ React.createElement("td", { className: "num mono" }, u.tool_calls.toLocaleString()), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement(StateBadge, { state: u.state })));
+  })))), /* @__PURE__ */ React.createElement("div", { className: "col-6 card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Provider state"), /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 11 } }, "from /api/providers")), /* @__PURE__ */ React.createElement(ProviderState, null))));
 }
 function ProviderState() {
   const [resp] = usePolling("/api/providers", 3e4);
@@ -2549,6 +2590,7 @@ function KnowledgePage() {
   const [graph, , refresh] = usePolling("/api/knowledge", 3e4);
   const [showAdd, setShowAdd] = useState(false);
   const [showRel, setShowRel] = useState(false);
+  const [editingRel, setEditingRel] = useState(null);
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState(null);
   const [serverResult, setServerResult] = useState(null);
@@ -2645,7 +2687,26 @@ function KnowledgePage() {
     const dst = e.target || e.target_id;
     const other = src === active.id ? dst : src;
     const relId = e.id || e.relation_id || "";
-    return /* @__PURE__ */ React.createElement("div", { key: relId || i, className: "row between", style: { padding: "5px 8px", background: "var(--bg-2)", borderRadius: 5, fontSize: 11.5, fontFamily: "var(--ff-mono)" } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--rust)" } }, e.relation || e.label || "\u2192"), /* @__PURE__ */ React.createElement("span", { className: "muted", style: { flex: 1, textAlign: "right" } }, "\u2192 ", ((_a = nodes.find((n) => n.id === other)) == null ? void 0 : _a.name) || other), relId && /* @__PURE__ */ React.createElement(
+    return /* @__PURE__ */ React.createElement("div", { key: relId || i, className: "row between", style: { padding: "5px 8px", background: "var(--bg-2)", borderRadius: 5, fontSize: 11.5, fontFamily: "var(--ff-mono)" } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--rust)" } }, e.relation || e.label || "\u2192"), /* @__PURE__ */ React.createElement("span", { className: "muted", style: { flex: 1, textAlign: "right" } }, "\u2192 ", ((_a = nodes.find((n) => n.id === other)) == null ? void 0 : _a.name) || other), relId && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: "kbd",
+        style: { marginLeft: 6, cursor: "pointer" },
+        title: "Edit this relation",
+        onClick: (ev) => {
+          ev.stopPropagation();
+          setEditingRel({
+            id: relId,
+            source: src,
+            target: dst,
+            relation: e.relation || "related_to",
+            confidence: e.confidence != null ? e.confidence : 1,
+            properties: e.properties || {}
+          });
+        }
+      },
+      "edit"
+    ), /* @__PURE__ */ React.createElement(
       "button",
       {
         className: "kbd",
@@ -2670,23 +2731,43 @@ function KnowledgePage() {
         }
       },
       "del"
-    ));
+    )));
   })))))), showAdd && /* @__PURE__ */ React.createElement(KnowledgeAddNodeModal, { onClose: () => setShowAdd(false), onAdded: () => {
     setShowAdd(false);
     refresh();
   } }), showRel && /* @__PURE__ */ React.createElement(KnowledgeAddRelationModal, { nodes: allNodes, onClose: () => setShowRel(false), onAdded: () => {
     setShowRel(false);
     refresh();
-  } }));
+  } }), editingRel && /* @__PURE__ */ React.createElement(
+    KnowledgeAddRelationModal,
+    {
+      nodes: allNodes,
+      edit: editingRel,
+      onClose: () => setEditingRel(null),
+      onAdded: () => {
+        setEditingRel(null);
+        refresh();
+      }
+    }
+  ));
 }
-function KnowledgeAddRelationModal({ nodes, onClose, onAdded }) {
+function KnowledgeAddRelationModal({ nodes, onClose, onAdded, edit }) {
   useEscapeKey(onClose);
+  const isEdit = !!edit;
   const sortedNodes = React.useMemo(() => (nodes || []).slice().sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)), [nodes]);
-  const [source, setSource] = useState(sortedNodes[0] ? sortedNodes[0].id : "");
-  const [target, setTarget] = useState(sortedNodes[1] ? sortedNodes[1].id : sortedNodes[0] ? sortedNodes[0].id : "");
-  const [relation, setRelation] = useState("works_at");
-  const [confidence, setConfidence] = useState("1.0");
-  const [propsJson, setPropsJson] = useState("{}");
+  const [source, setSource] = useState(
+    isEdit ? edit.source : sortedNodes[0] ? sortedNodes[0].id : ""
+  );
+  const [target, setTarget] = useState(
+    isEdit ? edit.target : sortedNodes[1] ? sortedNodes[1].id : sortedNodes[0] ? sortedNodes[0].id : ""
+  );
+  const [relation, setRelation] = useState(isEdit ? edit.relation : "works_at");
+  const [confidence, setConfidence] = useState(
+    isEdit ? String(edit.confidence != null ? edit.confidence : 1) : "1.0"
+  );
+  const [propsJson, setPropsJson] = useState(
+    isEdit ? JSON.stringify(edit.properties || {}, null, 2) : "{}"
+  );
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const RELATIONS = [
@@ -2737,12 +2818,22 @@ function KnowledgeAddRelationModal({ nodes, onClose, onAdded }) {
     setBusy(true);
     setErr(null);
     try {
-      await rhFetch("/api/knowledge/relations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source, target, relation, confidence: c, properties })
-      });
-      toastOk(`Added ${relation} relation`);
+      const body = JSON.stringify({ source, target, relation, confidence: c, properties });
+      if (isEdit) {
+        await rhFetch(`/api/knowledge/relations/${encodeURIComponent(edit.id)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body
+        });
+        toastOk(`Updated ${relation} relation`);
+      } else {
+        await rhFetch("/api/knowledge/relations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body
+        });
+        toastOk(`Added ${relation} relation`);
+      }
       onAdded();
     } catch (e) {
       setErr(String(e.message || e));
@@ -2750,7 +2841,7 @@ function KnowledgeAddRelationModal({ nodes, onClose, onAdded }) {
       setBusy(false);
     }
   };
-  return /* @__PURE__ */ React.createElement("div", { className: "modal-back", onClick: onClose }, /* @__PURE__ */ React.createElement("div", { className: "modal", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "modal-head" }, /* @__PURE__ */ React.createElement("b", { className: "mono" }, "Add knowledge relation"), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", onClick: onClose }, /* @__PURE__ */ React.createElement(I.close, null))), /* @__PURE__ */ React.createElement("div", { className: "modal-body" }, sortedNodes.length < 2 && /* @__PURE__ */ React.createElement("div", { className: "banner mb-12", style: { borderColor: "oklch(0.78 0.14 88 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot warn" }), /* @__PURE__ */ React.createElement("span", { className: "banner-body", style: { fontSize: 11.5 } }, "Need at least 2 nodes to create a relation. Add a node first.")), /* @__PURE__ */ React.createElement("div", { className: "col gap-8" }, /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Source"), /* @__PURE__ */ React.createElement("select", { className: "t-select", value: source, onChange: (e) => setSource(e.target.value) }, sortedNodes.map((n) => /* @__PURE__ */ React.createElement("option", { key: n.id, value: n.id }, n.name || n.id, " ", /* @__PURE__ */ React.createElement("span", null, "(", n.type || "?", ")"))))), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Relation", /* @__PURE__ */ React.createElement(Tip, null, "One of the RelationType variants \u2014 these are the same labels the kernel uses for graph traversal queries.")), /* @__PURE__ */ React.createElement("select", { className: "t-select", value: relation, onChange: (e) => setRelation(e.target.value) }, RELATIONS.map((r) => /* @__PURE__ */ React.createElement("option", { key: r, value: r }, r)))), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Target"), /* @__PURE__ */ React.createElement("select", { className: "t-select", value: target, onChange: (e) => setTarget(e.target.value) }, sortedNodes.map((n) => /* @__PURE__ */ React.createElement("option", { key: n.id, value: n.id }, n.name || n.id, " ", /* @__PURE__ */ React.createElement("span", null, "(", n.type || "?", ")"))))), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Confidence (0..1)", /* @__PURE__ */ React.createElement(Tip, null, "Float weight on the relation. Used by graph-query ranking. Default 1.0 = certain.")), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "modal-back", onClick: onClose }, /* @__PURE__ */ React.createElement("div", { className: "modal", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "modal-head" }, /* @__PURE__ */ React.createElement("b", { className: "mono" }, isEdit ? "Edit knowledge relation" : "Add knowledge relation"), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", onClick: onClose }, /* @__PURE__ */ React.createElement(I.close, null))), /* @__PURE__ */ React.createElement("div", { className: "modal-body" }, sortedNodes.length < 2 && /* @__PURE__ */ React.createElement("div", { className: "banner mb-12", style: { borderColor: "oklch(0.78 0.14 88 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot warn" }), /* @__PURE__ */ React.createElement("span", { className: "banner-body", style: { fontSize: 11.5 } }, "Need at least 2 nodes to create a relation. Add a node first.")), /* @__PURE__ */ React.createElement("div", { className: "col gap-8" }, /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Source"), /* @__PURE__ */ React.createElement("select", { className: "t-select", value: source, onChange: (e) => setSource(e.target.value) }, sortedNodes.map((n) => /* @__PURE__ */ React.createElement("option", { key: n.id, value: n.id }, n.name || n.id, " ", /* @__PURE__ */ React.createElement("span", null, "(", n.type || "?", ")"))))), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Relation", /* @__PURE__ */ React.createElement(Tip, null, "One of the RelationType variants \u2014 these are the same labels the kernel uses for graph traversal queries.")), /* @__PURE__ */ React.createElement("select", { className: "t-select", value: relation, onChange: (e) => setRelation(e.target.value) }, RELATIONS.map((r) => /* @__PURE__ */ React.createElement("option", { key: r, value: r }, r)))), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Target"), /* @__PURE__ */ React.createElement("select", { className: "t-select", value: target, onChange: (e) => setTarget(e.target.value) }, sortedNodes.map((n) => /* @__PURE__ */ React.createElement("option", { key: n.id, value: n.id }, n.name || n.id, " ", /* @__PURE__ */ React.createElement("span", null, "(", n.type || "?", ")"))))), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Confidence (0..1)", /* @__PURE__ */ React.createElement(Tip, null, "Float weight on the relation. Used by graph-query ranking. Default 1.0 = certain.")), /* @__PURE__ */ React.createElement(
     "input",
     {
       className: "modal-field",
@@ -2769,7 +2860,7 @@ function KnowledgeAddRelationModal({ nodes, onClose, onAdded }) {
       value: propsJson,
       onChange: (e) => setPropsJson(e.target.value)
     }
-  ))), err && /* @__PURE__ */ React.createElement("div", { className: "banner mt-12", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, err))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: onClose }, "Cancel"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: submit, disabled: busy || sortedNodes.length < 2 }, busy ? "Adding\u2026" : "Add relation"))));
+  ))), err && /* @__PURE__ */ React.createElement("div", { className: "banner mt-12", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, err))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: onClose }, "Cancel"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: submit, disabled: busy || sortedNodes.length < 2 }, busy ? isEdit ? "Saving\u2026" : "Adding\u2026" : isEdit ? "Save changes" : "Add relation"))));
 }
 function KnowledgeAddNodeModal({ onClose, onAdded }) {
   useEscapeKey(onClose);
@@ -3461,7 +3552,7 @@ function SettingsPage() {
   const users = usersResp && usersResp.users || [];
   const apiListen = config && (config.api_listen || config.api && config.api.listen) || "\u2014";
   const proxy = config && (config.proxy_url || config.proxy && config.proxy.url) || null;
-  const version = health && health.version || "0.7.63";
+  const version = health && health.version || "0.7.64";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "\u2014";
   const agentCount = health && health.agent_count != null ? health.agent_count : "\u2014";
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Settings"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Config at ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "~/.rustyhand/config.toml"), " \xB7 50+ fields with serde defaults \xB7 live from ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/config"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement(

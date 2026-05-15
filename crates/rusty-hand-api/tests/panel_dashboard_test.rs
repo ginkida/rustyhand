@@ -474,6 +474,14 @@ async fn dashboard_wires_write_paths() {
         ),
         ("rh.panel.memoryQ", "Memory page search persistence"),
         ("last_run_state", "Workflow list last-run badge"),
+        // Iter 90-92: analytics per-agent + run inspector live + relation edit
+        ("usageJoined", "Analytics per-agent spend join"),
+        ("Awaiting first step", "Run inspector live empty-state"),
+        ("setEditingRel", "Knowledge relation edit handler"),
+        (
+            "Edit knowledge relation",
+            "Knowledge edit-relation modal title",
+        ),
     ];
     for (needle, what) in markers {
         assert!(

@@ -324,6 +324,19 @@ pub trait Memory: Send + Sync {
         ))
     }
 
+    /// Update an existing relation by id. Returns true on success, false
+    /// if no row with that id exists.
+    async fn update_relation(
+        &self,
+        id: String,
+        relation: Relation,
+    ) -> crate::error::RustyHandResult<bool> {
+        let _ = (id, relation);
+        Err(crate::error::RustyHandError::Internal(
+            "update_relation not implemented for this backend".to_string(),
+        ))
+    }
+
     /// Remove an entity by ID. Cascade-deletes any relations referencing it.
     async fn remove_entity(&self, id: String) -> crate::error::RustyHandResult<bool> {
         let _ = id;

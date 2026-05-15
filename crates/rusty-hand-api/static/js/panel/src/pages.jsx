@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.63";
+  const version = (health && health.version) || "0.7.64";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -2780,20 +2780,50 @@ steps:
 
 function WorkflowRunInspector({ run, onClose }) {
   useEscapeKey(onClose);
-  const steps = Array.isArray(run.step_results) ? run.step_results : [];
+  // Keep a live mirror of the run prop: when the inspector opens on a
+  // run that's still in flight, we re-fetch its workflow's runs list at
+  // 1.5s and patch our local view from the matching entry. Once the
+  // server reports a terminal state we drop the poll.
+  const [liveRun, setLiveRun] = useState(run);
+  React.useEffect(() => { setLiveRun(run); }, [run && (run.id || run.run_id)]);
+  const liveState = typeof liveRun.state === "string" ? liveRun.state.toLowerCase() : "";
+  const terminal = liveState === "completed" || liveState === "failed" || liveState === "cancelled";
+  const runWorkflowId = liveRun.workflow_id || run.workflow_id || (run && run.workflow && run.workflow.id);
+  const pollPath = !terminal && runWorkflowId
+    ? `/api/workflows/${encodeURIComponent(runWorkflowId)}/runs`
+    : null;
+  const [runsResp] = usePolling(pollPath, 1500);
+  React.useEffect(() => {
+    if (!runsResp) return;
+    const list = Array.isArray(runsResp) ? runsResp : (runsResp && runsResp.runs) || [];
+    const myId = liveRun.id || liveRun.run_id;
+    const hit = list.find(r => (r.id || r.run_id) === myId);
+    if (hit) setLiveRun(prev => ({ ...prev, ...hit }));
+  }, [runsResp]);
+
+  const steps = Array.isArray(liveRun.step_results) ? liveRun.step_results : [];
   const totalDur = steps.reduce((s, x) => s + (x.duration_ms || 0), 0);
   const totalTokens = steps.reduce((s, x) => s + (x.input_tokens || 0) + (x.output_tokens || 0), 0);
-  const state = typeof run.state === "string" ? run.state : "—";
-  const isFailed = state.toLowerCase() === "failed" || !!run.error;
+  const state = typeof liveRun.state === "string" ? liveRun.state : "—";
+  const isFailed = state.toLowerCase() === "failed" || !!liveRun.error;
+  const isRunning = !terminal && pollPath != null;
+  // Alias for the rest of the render — liveRun reflects the latest poll
+  // tick, so everything downstream sees fresh state.
+  const r = liveRun;
   return (
     <div className="modal-back" onClick={onClose}>
       <div className="modal wide" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <div>
-            <b className="mono">Run · {String(run.id || "").slice(0, 12)}</b>
+            <b className="mono">Run · {String(r.id || r.run_id || "").slice(0, 12)}</b>
+            {isRunning && (
+              <span className="badge live" style={{marginLeft:8}} title="Polling /api/workflows/.../runs every 1.5s">
+                <span className="dot live"/>live
+              </span>
+            )}
             <div className="dim mono" style={{fontSize:11, marginTop:2}}>
-              {run.workflow_name || run.workflow_id} · started {formatTime(run.started_at)}
-              {run.completed_at ? ` · completed ${formatTime(run.completed_at)}` : " · running…"}
+              {r.workflow_name || r.workflow_id} · started {formatTime(r.started_at)}
+              {r.completed_at ? ` · completed ${formatTime(r.completed_at)}` : " · running…"}
             </div>
           </div>
           <button className="icon-btn" onClick={onClose}><I.close/></button>
@@ -2805,21 +2835,21 @@ function WorkflowRunInspector({ run, onClose }) {
             <Stat label="Duration" value={totalDur ? `${(totalDur / 1000).toFixed(2)}s` : "—"}/>
             <Stat label="Tokens" value={totalTokens.toLocaleString()}/>
           </div>
-          {run.input && (
+          {r.input && (
             <>
               <div className="muted mono mb-8" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>Initial input</div>
-              <pre className="codebox mb-16" style={{maxHeight:100, whiteSpace:"pre-wrap"}}>{run.input}</pre>
+              <pre className="codebox mb-16" style={{maxHeight:100, whiteSpace:"pre-wrap"}}>{r.input}</pre>
             </>
           )}
-          {isFailed && run.error && (
+          {isFailed && r.error && (
             <>
               <div className="muted mono mb-8" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase", color:"var(--crimson)"}}>Error</div>
-              <pre className="codebox mb-16" style={{color:"var(--crimson)", maxHeight:120}}>{run.error}</pre>
+              <pre className="codebox mb-16" style={{color:"var(--crimson)", maxHeight:120}}>{r.error}</pre>
             </>
           )}
           <div className="muted mono mb-8" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>Steps ({steps.length})</div>
           <div className="col gap-6" style={{maxHeight:420, overflow:"auto"}}>
-            {steps.length === 0 && <div className="dim mono" style={{fontSize:11, padding:"6px 8px"}}>No step output recorded yet.</div>}
+            {steps.length === 0 && <div className="dim mono" style={{fontSize:11, padding:"6px 8px"}}>{isRunning ? "Awaiting first step…" : "No step output recorded yet."}</div>}
             {steps.map((s, i) => {
               const tokens = (s.input_tokens || 0) + (s.output_tokens || 0);
               return (
@@ -2827,10 +2857,10 @@ function WorkflowRunInspector({ run, onClose }) {
               );
             })}
           </div>
-          {run.output && (
+          {r.output && (
             <>
               <div className="muted mono mb-8 mt-16" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>Final output</div>
-              <pre className="codebox" style={{maxHeight:160, whiteSpace:"pre-wrap"}}>{run.output}</pre>
+              <pre className="codebox" style={{maxHeight:160, whiteSpace:"pre-wrap"}}>{r.output}</pre>
             </>
           )}
         </div>
@@ -4073,11 +4103,33 @@ function AnalyticsPage() {
   // /api/usage/daily returns up to 30 daily buckets: {days:[{date, cost_usd, requests}], today_cost_usd, first_event_date}.
   // /api/usage/by-model returns per-model spend totals.
   // /api/usage returns aggregate stats including cache hit-rate.
+  // /api/usage/agents (legacy /api/usage path) returns per-agent token + tool_call counts.
   const [daily] = usePolling("/api/usage/daily", 30000);
   const [byModel] = usePolling("/api/usage/by-model", 30000);
   const [stats] = usePolling("/api/usage", 30000);
   const [agentsResp] = usePolling("/api/agents?limit=200", 30000);
+  const [usageAgents] = usePolling("/api/usage", 30000);
   const agents = (agentsResp && agentsResp.agents) ? agentsResp.agents.map(normalizeAgent) : [];
+  // Join the agent registry with the usage list so the breakdown shows
+  // both identity (name, model) and consumption (tokens, tool calls).
+  // Sorted by total_tokens DESC so the heavy hitters are obvious.
+  const usageList = (usageAgents && Array.isArray(usageAgents.agents)) ? usageAgents.agents : [];
+  const agentById = new Map(agents.map(a => [a.id, a]));
+  const usageJoined = usageList
+    .map(u => {
+      const a = agentById.get(u.agent_id);
+      return {
+        id: u.agent_id,
+        name: u.name || (a && a.name) || u.agent_id,
+        model: a ? a.model : "—",
+        state: a ? a.state : "unknown",
+        total_tokens: Number(u.total_tokens || 0),
+        tool_calls: Number(u.tool_calls || 0),
+      };
+    })
+    .filter(u => u.total_tokens > 0 || u.tool_calls > 0)
+    .sort((x, y) => y.total_tokens - x.total_tokens);
+  const maxTokens = Math.max(1, ...usageJoined.map(u => u.total_tokens));
 
   const days = (daily && daily.days) || [];
   const dailyCosts = days.map(d => Number(d.cost_usd || 0));
@@ -4150,19 +4202,46 @@ function AnalyticsPage() {
         </div>
 
         <div className="col-6 card flush">
-          <div className="card-head"><span>Agents · by activity</span></div>
+          <div className="card-head">
+            <span>Agents · by spend</span>
+            <span className="dim mono" style={{fontSize:11}}>top {Math.min(usageJoined.length, 10)} of {usageJoined.length}</span>
+          </div>
           <table className="tbl">
-            <thead><tr><th>Agent</th><th>Model</th><th>State</th><th className="right">Updated</th></tr></thead>
+            <thead><tr>
+              <th>Agent</th><th>Model</th><th className="right">Tokens</th><th className="right">Tool calls</th><th>State</th>
+            </tr></thead>
             <tbody>
-              {agents.length === 0 && (<tr><td colSpan={4} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>)}
-              {agents.slice(0, 8).map(a => (
-                <tr key={a.id}>
-                  <td><div className="agent-row"><Avatar agent={a}/><span className="name">{a.name}</span></div></td>
-                  <td className="mono muted">{a.model}</td>
-                  <td><StateBadge state={a.state}/></td>
-                  <td className="num mono muted">{a.updated}</td>
-                </tr>
-              ))}
+              {!usageAgents && (<tr><td colSpan={5} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>)}
+              {usageAgents && usageJoined.length === 0 && (
+                <tr><td colSpan={5} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>
+                  No usage recorded yet — agents start showing here after their first LLM call.
+                </td></tr>
+              )}
+              {usageJoined.slice(0, 10).map(u => {
+                const pct = (u.total_tokens / maxTokens) * 100;
+                return (
+                  <tr key={u.id}>
+                    <td>
+                      <div className="agent-row">
+                        <Avatar agent={{ name: u.name, hue: hueFromId(u.id), emoji: u.name.charAt(0).toUpperCase() }}/>
+                        <span className="name">{u.name}</span>
+                      </div>
+                    </td>
+                    <td className="mono muted">{u.model}</td>
+                    <td className="num mono" style={{position:"relative", minWidth:90}}>
+                      <span style={{
+                        position:"absolute",
+                        inset:0,
+                        background: `linear-gradient(90deg, transparent ${100 - pct}%, oklch(0.665 0.165 50 / .12) ${100 - pct}%)`,
+                        pointerEvents:"none",
+                      }}/>
+                      <span style={{position:"relative"}}>{u.total_tokens.toLocaleString()}</span>
+                    </td>
+                    <td className="num mono">{u.tool_calls.toLocaleString()}</td>
+                    <td><StateBadge state={u.state}/></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -4252,6 +4331,7 @@ function KnowledgePage() {
   const [graph, , refresh] = usePolling("/api/knowledge", 30000);
   const [showAdd, setShowAdd] = useState(false);
   const [showRel, setShowRel] = useState(false);
+  const [editingRel, setEditingRel] = useState(null);
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState(null);
   const [serverResult, setServerResult] = useState(null);
@@ -4412,26 +4492,44 @@ function KnowledgePage() {
                         <span style={{color:"var(--rust)"}}>{e.relation || e.label || "→"}</span>
                         <span className="muted" style={{flex:1, textAlign:"right"}}>→ {nodes.find(n => n.id === other)?.name || other}</span>
                         {relId && (
-                          <button
-                            className="kbd"
-                            style={{marginLeft:6, cursor:"pointer", color:"oklch(0.66 0.18 25)"}}
-                            title="Delete this relation"
-                            onClick={async (ev) => {
-                              ev.stopPropagation();
-                              const ok = await confirmDialog({
-                                title: "Delete relation?",
-                                body: `${e.relation || "→"} between these two entities will be removed.`,
-                                confirmLabel: "Delete",
-                                danger: true,
-                              });
-                              if (!ok) return;
-                              try {
-                                await rhFetch(`/api/knowledge/relations/${encodeURIComponent(relId)}`, { method: "DELETE" });
-                                toastOk("Relation deleted");
-                                refresh();
-                              } catch (err) { toastErr(`Delete failed: ${err.message || err}`); }
-                            }}
-                          >del</button>
+                          <>
+                            <button
+                              className="kbd"
+                              style={{marginLeft:6, cursor:"pointer"}}
+                              title="Edit this relation"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                setEditingRel({
+                                  id: relId,
+                                  source: src,
+                                  target: dst,
+                                  relation: e.relation || "related_to",
+                                  confidence: e.confidence != null ? e.confidence : 1.0,
+                                  properties: e.properties || {},
+                                });
+                              }}
+                            >edit</button>
+                            <button
+                              className="kbd"
+                              style={{marginLeft:6, cursor:"pointer", color:"oklch(0.66 0.18 25)"}}
+                              title="Delete this relation"
+                              onClick={async (ev) => {
+                                ev.stopPropagation();
+                                const ok = await confirmDialog({
+                                  title: "Delete relation?",
+                                  body: `${e.relation || "→"} between these two entities will be removed.`,
+                                  confirmLabel: "Delete",
+                                  danger: true,
+                                });
+                                if (!ok) return;
+                                try {
+                                  await rhFetch(`/api/knowledge/relations/${encodeURIComponent(relId)}`, { method: "DELETE" });
+                                  toastOk("Relation deleted");
+                                  refresh();
+                                } catch (err) { toastErr(`Delete failed: ${err.message || err}`); }
+                              }}
+                            >del</button>
+                          </>
                         )}
                       </div>
                     );
@@ -4444,18 +4542,35 @@ function KnowledgePage() {
       </div>
       {showAdd && <KnowledgeAddNodeModal onClose={() => setShowAdd(false)} onAdded={() => { setShowAdd(false); refresh(); }}/>}
       {showRel && <KnowledgeAddRelationModal nodes={allNodes} onClose={() => setShowRel(false)} onAdded={() => { setShowRel(false); refresh(); }}/>}
+      {editingRel && (
+        <KnowledgeAddRelationModal
+          nodes={allNodes}
+          edit={editingRel}
+          onClose={() => setEditingRel(null)}
+          onAdded={() => { setEditingRel(null); refresh(); }}
+        />
+      )}
     </div>
   );
 }
 
-function KnowledgeAddRelationModal({ nodes, onClose, onAdded }) {
+function KnowledgeAddRelationModal({ nodes, onClose, onAdded, edit }) {
   useEscapeKey(onClose);
+  const isEdit = !!edit;
   const sortedNodes = React.useMemo(() => (nodes || []).slice().sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)), [nodes]);
-  const [source, setSource] = useState(sortedNodes[0] ? sortedNodes[0].id : "");
-  const [target, setTarget] = useState(sortedNodes[1] ? sortedNodes[1].id : (sortedNodes[0] ? sortedNodes[0].id : ""));
-  const [relation, setRelation] = useState("works_at");
-  const [confidence, setConfidence] = useState("1.0");
-  const [propsJson, setPropsJson] = useState("{}");
+  const [source, setSource] = useState(
+    isEdit ? edit.source : (sortedNodes[0] ? sortedNodes[0].id : "")
+  );
+  const [target, setTarget] = useState(
+    isEdit ? edit.target : (sortedNodes[1] ? sortedNodes[1].id : (sortedNodes[0] ? sortedNodes[0].id : ""))
+  );
+  const [relation, setRelation] = useState(isEdit ? edit.relation : "works_at");
+  const [confidence, setConfidence] = useState(
+    isEdit ? String(edit.confidence != null ? edit.confidence : 1.0) : "1.0"
+  );
+  const [propsJson, setPropsJson] = useState(
+    isEdit ? JSON.stringify(edit.properties || {}, null, 2) : "{}"
+  );
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
@@ -4481,12 +4596,22 @@ function KnowledgeAddRelationModal({ nodes, onClose, onAdded }) {
     if (Number.isNaN(c) || c < 0 || c > 1) { setErr("Confidence must be 0..1"); return; }
     setBusy(true); setErr(null);
     try {
-      await rhFetch("/api/knowledge/relations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source, target, relation, confidence: c, properties }),
-      });
-      toastOk(`Added ${relation} relation`);
+      const body = JSON.stringify({ source, target, relation, confidence: c, properties });
+      if (isEdit) {
+        await rhFetch(`/api/knowledge/relations/${encodeURIComponent(edit.id)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body,
+        });
+        toastOk(`Updated ${relation} relation`);
+      } else {
+        await rhFetch("/api/knowledge/relations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+        });
+        toastOk(`Added ${relation} relation`);
+      }
       onAdded();
     } catch (e) { setErr(String(e.message || e)); }
     finally { setBusy(false); }
@@ -4495,7 +4620,7 @@ function KnowledgeAddRelationModal({ nodes, onClose, onAdded }) {
   return (
     <div className="modal-back" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head"><b className="mono">Add knowledge relation</b><button className="icon-btn" onClick={onClose}><I.close/></button></div>
+        <div className="modal-head"><b className="mono">{isEdit ? "Edit knowledge relation" : "Add knowledge relation"}</b><button className="icon-btn" onClick={onClose}><I.close/></button></div>
         <div className="modal-body">
           {sortedNodes.length < 2 && (
             <div className="banner mb-12" style={{borderColor:"oklch(0.78 0.14 88 / .35)"}}>
@@ -4542,7 +4667,7 @@ function KnowledgeAddRelationModal({ nodes, onClose, onAdded }) {
         <div className="modal-foot">
           <button className="btn ghost" onClick={onClose}>Cancel</button>
           <button className="btn primary" onClick={submit} disabled={busy || sortedNodes.length < 2}>
-            {busy ? "Adding…" : "Add relation"}
+            {busy ? (isEdit ? "Saving…" : "Adding…") : (isEdit ? "Save changes" : "Add relation")}
           </button>
         </div>
       </div>
@@ -5691,7 +5816,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.63";
+  const version = (health && health.version) || "0.7.64";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 
