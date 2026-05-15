@@ -28,6 +28,15 @@ jobs:
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
+          # cache-bin: false is the *real* fix for the macOS rustup-init
+          # shim bug. Swatinem/rust-cache's default cache-bin: true
+          # caches ~/.cargo/bin/, which on a flaky macOS run will capture
+          # the rustup-init shim AS cargo and restore it on every
+          # subsequent run forever. Bumping the cache key doesn't help —
+          # any future bad run repopulates the new key with the same
+          # poison. Disabling cache-bin keeps the kernel real cargo
+          # untouched between runs.
+          cache-bin: false
           key: check-${{ matrix.os }}-v3
       - run: cargo check --workspace
 
@@ -43,6 +52,7 @@ jobs:
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
+          cache-bin: false  # see check job above for rationale
           key: test-${{ matrix.os }}-v3
       - run: cargo test --workspace
 
@@ -55,6 +65,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          cache-bin: false  # see check job for rationale
       - run: cargo clippy --workspace -- -D warnings
 
   fmt:
@@ -74,6 +86,8 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          cache-bin: false  # see check job for rationale
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - run: cargo audit

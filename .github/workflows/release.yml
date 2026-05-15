@@ -53,6 +53,12 @@ jobs:
         run: cargo install cross --locked
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
+          # cache-bin: false prevents Swatinem from caching ~/.cargo/bin/
+          # — without this, a single flaky macOS run where rustup-init
+          # was on PATH as `cargo` will poison the cache forever (key
+          # bumps don't help; future bad runs repopulate the new key
+          # with the same shim). See ci.yml check job for full context.
+          cache-bin: false
           # v2 suffix invalidates previous caches that on macos-latest
           # captured the rustup-init shim. Matches ci.yml v3 bump.
           key: cli-${{ matrix.target }}-v2
