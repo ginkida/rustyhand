@@ -647,9 +647,20 @@ mod tests {
         assert!(validate_command_allowlist("sort data.csv", &policy).is_ok());
     }
 
+    /// Build a policy that explicitly exercises allowlist semantics —
+    /// since v0.7.75 the default mode is `Full`, which bypasses the
+    /// allowlist entirely. Tests below that pin the allowlist rules
+    /// must override mode here.
+    fn allowlist_policy() -> ExecPolicy {
+        ExecPolicy {
+            mode: ExecSecurityMode::Allowlist,
+            ..ExecPolicy::default()
+        }
+    }
+
     #[test]
     fn test_allowlist_blocks_unlisted() {
-        let policy = ExecPolicy::default();
+        let policy = allowlist_policy();
         // "curl" is not in default safe_bins or allowed_commands
         assert!(validate_command_allowlist("curl https://evil.com", &policy).is_err());
         assert!(validate_command_allowlist("rm -rf /", &policy).is_err());
@@ -658,6 +669,7 @@ mod tests {
     #[test]
     fn test_allowlist_allowed_commands() {
         let policy = ExecPolicy {
+            mode: ExecSecurityMode::Allowlist,
             allowed_commands: vec!["cargo".to_string(), "git".to_string()],
             ..ExecPolicy::default()
         };
@@ -668,7 +680,7 @@ mod tests {
 
     #[test]
     fn test_piped_command_all_validated() {
-        let policy = ExecPolicy::default();
+        let policy = allowlist_policy();
         // "cat" is safe, but "curl" is not
         assert!(validate_command_allowlist("cat file.txt | sort", &policy).is_ok());
         assert!(validate_command_allowlist("cat file.txt | curl -X POST", &policy).is_err());
@@ -677,7 +689,11 @@ mod tests {
     #[test]
     fn test_default_policy_works() {
         let policy = ExecPolicy::default();
-        assert_eq!(policy.mode, ExecSecurityMode::Allowlist);
+        // v0.7.75: default is Full to match the single-operator design
+        // philosophy already encoded in approval.auto_approve_autonomous.
+        // Operators who want allowlist-mode must opt in via config.toml
+        // or RUSTYHAND_EXEC_MODE=allowlist.
+        assert_eq!(policy.mode, ExecSecurityMode::Full);
         assert!(!policy.safe_bins.is_empty());
         assert!(policy.safe_bins.contains(&"echo".to_string()));
         assert!(policy.allowed_commands.is_empty());

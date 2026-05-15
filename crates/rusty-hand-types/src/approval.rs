@@ -193,11 +193,17 @@ pub struct ApprovalPolicy {
 impl Default for ApprovalPolicy {
     fn default() -> Self {
         Self {
-            // Tools that prompt the operator if interactive approval is
-            // re-enabled (auto_approve_autonomous = false). The default
-            // singleton list is the highest-risk tool; expand or shrink
-            // in config.toml to match your trust posture.
-            require_approval: vec!["shell_exec".to_string()],
+            // Empty by default since v0.7.75 — combined with
+            // auto_approve_autonomous = true (default since v0.7.21) the
+            // old singleton "shell_exec" was a dead entry that only
+            // logged WARN-level audit lines without producing any prompt.
+            // Operators who flip auto_approve_autonomous back to false
+            // for shared/stricter setups should explicitly populate this
+            // list with the tools they want gated. Common choices:
+            //   require_approval = ["shell_exec"]                  # classic
+            //   require_approval = ["shell_exec", "file_write"]    # stricter
+            //   require_approval = ["shell_exec", "skill_install"] # self-extend gate
+            require_approval: vec![],
             // 5 minutes — gives the user time to open Telegram, read the
             // request, and decide. Pre-v0.7.20 this was 60s, which often
             // expired before the user even saw the notification, leaving
@@ -526,7 +532,10 @@ mod tests {
     fn policy_default_valid() {
         let policy = ApprovalPolicy::default();
         assert!(policy.validate().is_ok());
-        assert_eq!(policy.require_approval, vec!["shell_exec".to_string()]);
+        // v0.7.75: empty by default. Combined with auto_approve_autonomous=true
+        // the singleton "shell_exec" entry was a dead marker — it only
+        // generated WARN-level audit lines without producing any prompt.
+        assert!(policy.require_approval.is_empty());
         assert_eq!(policy.timeout_secs, 300);
         // v0.7.21: trust mode is the default for single-operator deployments.
         // Operators who want interactive prompts must opt in via config.
@@ -538,7 +547,7 @@ mod tests {
         // An empty JSON object should deserialize to defaults via #[serde(default)].
         let policy: ApprovalPolicy = serde_json::from_str("{}").unwrap();
         assert_eq!(policy.timeout_secs, 300);
-        assert_eq!(policy.require_approval, vec!["shell_exec".to_string()]);
+        assert!(policy.require_approval.is_empty());
         assert!(policy.auto_approve_autonomous);
     }
 

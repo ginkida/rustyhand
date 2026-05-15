@@ -877,9 +877,19 @@ pub enum ExecSecurityMode {
     /// Block all shell execution.
     Deny,
     /// Only allow commands in safe_bins or allowed_commands.
-    #[default]
     Allowlist,
     /// Allow all commands (unsafe, dev only).
+    /// Default since v0.7.75 — RustyHand's design assumption is a
+    /// single-operator deployment where the operator authorized the
+    /// action by sending the message and the channel adapter's
+    /// `allowed_users` is the real security gate. Approval policy's
+    /// `auto_approve_autonomous = true` (default since v0.7.21) already
+    /// made interactive prompts vestigial; this matches the friction
+    /// reduction at the exec-policy layer.
+    /// Override to `Allowlist` or `Deny` in config.toml for shared /
+    /// untrusted deployments, or set `RUSTYHAND_EXEC_MODE=allowlist`
+    /// (or `=deny`) at boot.
+    #[default]
     Full,
 }
 

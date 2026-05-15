@@ -549,10 +549,42 @@ impl RustyHandKernel {
 
     /// Boot the kernel with an explicit configuration.
     pub fn boot_with_config(mut config: KernelConfig) -> KernelResult<Self> {
-        use rusty_hand_types::config::KernelMode;
+        use rusty_hand_types::config::{ExecSecurityMode, KernelMode};
 
         // Clamp configuration bounds to prevent zero-value or unbounded misconfigs
         config.clamp_bounds();
+
+        // Env override: RUSTYHAND_EXEC_MODE=full|allowlist|deny lets ops
+        // tighten or loosen the shell_exec gate without re-rendering
+        // config.toml. Useful in CI / Docker / Portainer flows where the
+        // config file is baked into the image but the deployment posture
+        // varies. Unknown values are warned and ignored.
+        if let Ok(val) = std::env::var("RUSTYHAND_EXEC_MODE") {
+            let trimmed = val.trim().to_lowercase();
+            let new_mode = match trimmed.as_str() {
+                "full" => Some(ExecSecurityMode::Full),
+                "allowlist" | "allow" => Some(ExecSecurityMode::Allowlist),
+                "deny" | "block" => Some(ExecSecurityMode::Deny),
+                "" => None,
+                _ => {
+                    warn!(
+                        "RUSTYHAND_EXEC_MODE='{trimmed}' is not one of \
+                         full|allowlist|deny — ignoring, keeping config value"
+                    );
+                    None
+                }
+            };
+            if let Some(m) = new_mode {
+                if m != config.exec_policy.mode {
+                    info!(
+                        "exec_policy.mode overridden by RUSTYHAND_EXEC_MODE: \
+                         was {:?}, now {:?}",
+                        config.exec_policy.mode, m
+                    );
+                    config.exec_policy.mode = m;
+                }
+            }
+        }
 
         match config.mode {
             KernelMode::Stable => {

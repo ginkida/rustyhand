@@ -239,8 +239,11 @@ mod tests {
 
     #[test]
     fn test_requires_approval_default() {
+        // v0.7.75: default policy has empty require_approval (trust mode
+        // on). No tool requires approval by default — operators opt in
+        // by explicitly populating the list.
         let mgr = default_manager();
-        assert!(mgr.requires_approval("shell_exec"));
+        assert!(!mgr.requires_approval("shell_exec"));
         assert!(!mgr.requires_approval("file_read"));
     }
 
@@ -319,7 +322,14 @@ mod tests {
 
     #[test]
     fn test_update_policy() {
-        let mgr = default_manager();
+        // Start with a non-default policy so we can prove update_policy
+        // actually replaces it (the v0.7.75 default has empty
+        // require_approval, which would hide a buggy update).
+        let mgr = ApprovalManager::new(ApprovalPolicy {
+            require_approval: vec!["shell_exec".to_string()],
+            timeout_secs: 300,
+            auto_approve_autonomous: false,
+        });
         assert!(mgr.requires_approval("shell_exec"));
         assert!(!mgr.requires_approval("file_write"));
 
@@ -465,7 +475,8 @@ mod tests {
     fn test_policy_defaults() {
         let mgr = default_manager();
         let policy = mgr.policy();
-        assert_eq!(policy.require_approval, vec!["shell_exec".to_string()]);
+        // v0.7.75: empty require_approval default; see ApprovalPolicy doc.
+        assert!(policy.require_approval.is_empty());
         assert_eq!(policy.timeout_secs, 300);
         // v0.7.21: trust mode is the default; see ApprovalPolicy doc.
         assert!(policy.auto_approve_autonomous);
