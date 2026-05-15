@@ -77,14 +77,14 @@ function Sidebar({ page, go }) {
       if (fresh.length > 0 && page !== "approvals") {
         const first = msg.pending.find((p) => p.id === fresh[0]);
         const label = first ? first.action_summary || first.tool_name || "Approval pending" : "Approval pending";
-        toast("warn", `${fresh.length === 1 ? "" : `${fresh.length}\xD7 `}${label}`, { duration: 6e3 });
+        toastWarn(`${fresh.length === 1 ? "" : `${fresh.length}\xD7 `}${label}`, { ttl: 6e3 });
       }
     }
     lastIdsRef.current = ids;
     setApprovalsCount(ids.length);
   });
   const uptime = health && health.uptime_seconds != null ? formatUptimeShort(health.uptime_seconds) : null;
-  return /* @__PURE__ */ React.createElement("nav", { className: "sidebar" }, /* @__PURE__ */ React.createElement("div", { className: "sb-brand" }, /* @__PURE__ */ React.createElement("div", { className: "sb-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sb-title" }, "Rusty Hand"), /* @__PURE__ */ React.createElement("div", { className: "sb-sub" }, "v0.7.65 \xB7 schema v8"))), /* @__PURE__ */ React.createElement("div", { className: "sb-nav", style: { flex: 1, overflow: "auto", padding: "6px 6px" } }, pinned.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-section-label", style: { marginTop: 4 } }, "Pinned"), pinned.map((id) => NAV.find((n) => n.id === id)).filter(Boolean).map((it) => {
+  return /* @__PURE__ */ React.createElement("nav", { className: "sidebar" }, /* @__PURE__ */ React.createElement("div", { className: "sb-brand" }, /* @__PURE__ */ React.createElement("div", { className: "sb-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sb-title" }, "Rusty Hand"), /* @__PURE__ */ React.createElement("div", { className: "sb-sub" }, "v0.7.66 \xB7 schema v8"))), /* @__PURE__ */ React.createElement("div", { className: "sb-nav", style: { flex: 1, overflow: "auto", padding: "6px 6px" } }, pinned.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-section-label", style: { marginTop: 4 } }, "Pinned"), pinned.map((id) => NAV.find((n) => n.id === id)).filter(Boolean).map((it) => {
     const active = page === it.id;
     const liveCount = it.id === "approvals" && approvalsCount != null ? approvalsCount : it.count;
     const liveBadge = it.id === "approvals" && approvalsCount > 0 ? "warn" : it.badge;

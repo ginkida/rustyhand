@@ -81,7 +81,7 @@ function Sidebar({ page, go }) {
       if (fresh.length > 0 && page !== "approvals") {
         const first = msg.pending.find(p => p.id === fresh[0]);
         const label = first ? (first.action_summary || first.tool_name || "Approval pending") : "Approval pending";
-        toast("warn", `${fresh.length === 1 ? "" : `${fresh.length}× `}${label}`, { duration: 6000 });
+        toastWarn(`${fresh.length === 1 ? "" : `${fresh.length}× `}${label}`, { ttl: 6000 });
       }
     }
     lastIdsRef.current = ids;
@@ -94,7 +94,7 @@ function Sidebar({ page, go }) {
         <div className="sb-mark">RH</div>
         <div>
           <div className="sb-title">Rusty Hand</div>
-          <div className="sb-sub">v0.7.65 · schema v8</div>
+          <div className="sb-sub">v0.7.66 · schema v8</div>
         </div>
       </div>
 

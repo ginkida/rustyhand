@@ -482,6 +482,14 @@ async fn dashboard_wires_write_paths() {
             "Edit knowledge relation",
             "Knowledge edit-relation modal title",
         ),
+        // v0.7.65 hotfix: IIFE wrap prevents top-level const collisions
+        // between pages.js/app.js. If `(function(){` disappears the
+        // build.sh wrapper has been reverted and the redeclare bug will
+        // come back the next time both files declare `const useState`.
+        (
+            "(function(){",
+            "panel JS files must be wrapped in IIFE (build.sh)",
+        ),
     ];
     for (needle, what) in markers {
         assert!(
