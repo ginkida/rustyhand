@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.61";
+  const version = (health && health.version) || "0.7.62";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -457,13 +457,41 @@ function Pagination({ pg }) {
 
 /* ============================== AGENTS ============================== */
 function AgentsPage({ openAgent }) {
-  const [filter, setFilter] = useState("all");
-  const [q, setQ] = useState("");
+  // Persist filter + grouped + search so a return-to-agents trip keeps
+  // the operator's working set instead of resetting to "all". Search
+  // text is intentionally session-scoped though — bouncing away and
+  // back is fine, but stale searches across full reloads are noisy.
+  const [filter, setFilterState] = useState(() => {
+    try {
+      const stored = localStorage.getItem("rh.panel.agentsFilter") || "all";
+      return ["all", "running", "error", "idle"].includes(stored) ? stored : "all";
+    } catch (e) { return "all"; }
+  });
+  const setFilter = (v) => {
+    setFilterState(v);
+    try { localStorage.setItem("rh.panel.agentsFilter", v); } catch (e) {}
+  };
+  const [q, setQState] = useState(() => {
+    try { return sessionStorage.getItem("rh.panel.agentsQ") || ""; } catch (e) { return ""; }
+  });
+  const setQ = (v) => {
+    setQState(v);
+    try { sessionStorage.setItem("rh.panel.agentsQ", v || ""); } catch (e) {}
+  };
   const [showSpawn, setShowSpawn] = useState(false);
   const [rowMenu, setRowMenu] = useState(null);
   const [selected, setSelected] = useState(() => new Set());
   const [showDiff, setShowDiff] = useState(false);
-  const [grouped, setGrouped] = useState(true);
+  const [grouped, setGroupedState] = useState(() => {
+    try { return localStorage.getItem("rh.panel.agentsGrouped") !== "0"; } catch (e) { return true; }
+  });
+  const setGrouped = (v) => {
+    setGroupedState(prev => {
+      const next = typeof v === "function" ? v(prev) : v;
+      try { localStorage.setItem("rh.panel.agentsGrouped", next ? "1" : "0"); } catch (e) {}
+      return next;
+    });
+  };
   const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
   // Per-page density override. Persists to localStorage so an operator
   // who always wants compact rows doesn't reset the global tweak.
@@ -1698,7 +1726,11 @@ function ChatPage() {
   // pendingMessages is the local optimistic buffer: user bubbles, the
   // currently-streaming assistant bubble, and any tool traces that have
   // arrived over WS but aren't yet reflected in the persisted session.
+  // Each entry carries a monotonically-increasing _key so React's
+  // reconciliation doesn't confuse positions across appends.
   const [pendingMessages, setPendingMessages] = useState([]);
+  const pendingKeyRef = React.useRef(0);
+  const nextPendingKey = () => `p${++pendingKeyRef.current}`;
   const [streamingText, setStreamingText] = useState("");
   const [streamingTools, setStreamingTools] = useState([]);
   const [sending, setSending] = useState(false);
@@ -1735,7 +1767,7 @@ function ChatPage() {
         break;
       case "response":
         // Final assistant message; flush to pending buffer + clear stream.
-        setPendingMessages((prev) => prev.concat([{ role: "assistant", content: msg.content || streamingText, _local: true }]));
+        setPendingMessages((prev) => prev.concat([{ _key: nextPendingKey(), role: "assistant", content: msg.content || streamingText, _local: true }]));
         setStreamingText("");
         setStreamingTools([]);
         setSending(false);
@@ -1748,13 +1780,13 @@ function ChatPage() {
         refreshSession();
         break;
       case "error":
-        setPendingMessages((prev) => prev.concat([{ role: "assistant", content: `[error] ${msg.content || msg.error || "unknown"}`, _local: true, error: true }]));
+        setPendingMessages((prev) => prev.concat([{ _key: nextPendingKey(), role: "assistant", content: `[error] ${msg.content || msg.error || "unknown"}`, _local: true, error: true }]));
         setStreamingText("");
         setStreamingTools([]);
         setSending(false);
         break;
       case "command_result":
-        setPendingMessages((prev) => prev.concat([{ role: "assistant", content: msg.message || msg.content || "ok", _local: true, command: true }]));
+        setPendingMessages((prev) => prev.concat([{ _key: nextPendingKey(), role: "assistant", content: msg.message || msg.content || "ok", _local: true, command: true }]));
         setSending(false);
         break;
       default:
@@ -1782,7 +1814,7 @@ function ChatPage() {
     const text = typed.trim();
     if (!text || sending) return;
     setTyped("");
-    setPendingMessages((prev) => prev.concat([{ role: "user", content: text, _local: true }]));
+    setPendingMessages((prev) => prev.concat([{ _key: nextPendingKey(), role: "user", content: text, _local: true }]));
     setStreamingText("");
     setStreamingTools([]);
     setSending(true);
@@ -1805,10 +1837,10 @@ function ChatPage() {
         body: JSON.stringify({ message: text }),
       });
       if (resp && resp.response) {
-        setPendingMessages((prev) => prev.concat([{ role: "assistant", content: resp.response, _local: true }]));
+        setPendingMessages((prev) => prev.concat([{ _key: nextPendingKey(), role: "assistant", content: resp.response, _local: true }]));
       }
     } catch (e) {
-      setPendingMessages((prev) => prev.concat([{ role: "assistant", content: `[error] ${e.message || e}`, _local: true, error: true }]));
+      setPendingMessages((prev) => prev.concat([{ _key: nextPendingKey(), role: "assistant", content: `[error] ${e.message || e}`, _local: true, error: true }]));
     } finally {
       setSending(false);
       refreshSession();
@@ -1932,8 +1964,9 @@ function ChatPage() {
             </div>
           )}
           {items.map((it, i) => {
+            const k = it._key || `i${i}`;
             if (it.role === "user") return (
-              <div key={i} className="msg user">
+              <div key={k} className="msg user">
                 <Avatar agent={{ name: "you", hue: 22, emoji: "Y" }}/>
                 <div>
                   <div className="who" style={{textAlign:"right"}}>operator · just now</div>
@@ -1941,9 +1974,9 @@ function ChatPage() {
                 </div>
               </div>
             );
-            if (it.role === "tool") return <ToolTraceCard key={i} tool={it}/>;
+            if (it.role === "tool") return <ToolTraceCard key={k} tool={it}/>;
             return (
-              <div key={i} className="msg">
+              <div key={k} className="msg">
                 <Avatar agent={active}/>
                 <div>
                   <div className="who">{active.name}</div>
@@ -2115,16 +2148,32 @@ function ChatInput({ typed, setTyped, sending, send, active, ws }) {
 function sessionToItems(messages) {
   if (!Array.isArray(messages)) return [];
   const items = [];
+  let counter = 0;
   for (const m of messages) {
     const role = (m.role || "").toLowerCase();
+    const baseId = m.id || m.message_id || m.seq != null ? `m${m.id || m.message_id || m.seq}` : `i${counter}`;
     if (Array.isArray(m.tools)) {
-      for (const t of m.tools) {
-        items.push({ role: "tool", name: t.name, input: t.input, result: t.result, is_error: !!t.is_error, running: !!t.running });
+      for (let ti = 0; ti < m.tools.length; ti++) {
+        const t = m.tools[ti];
+        items.push({
+          _key: `${baseId}-t${ti}`,
+          role: "tool",
+          name: t.name,
+          input: t.input,
+          result: t.result,
+          is_error: !!t.is_error,
+          running: !!t.running,
+        });
       }
     }
     if (m.content) {
-      items.push({ role: role === "user" ? "user" : "assistant", content: m.content });
+      items.push({
+        _key: `${baseId}-c`,
+        role: role === "user" ? "user" : "assistant",
+        content: m.content,
+      });
     }
+    counter++;
   }
   return items;
 }
@@ -5285,11 +5334,38 @@ function AuditPage() {
     ? rawEntries
     : rawEntries.filter(e => auditLevelOf(e) === levelFilter);
 
+  // Actor filter: pick a single actor name from the chip row to narrow
+  // the audit window. "all" means no actor filter. Persisted in
+  // sessionStorage so toggling pages doesn't reset the focused actor.
+  const [actorFilter, setActorFilterState] = useState(() => {
+    try { return sessionStorage.getItem("rh.panel.auditActor") || "all"; } catch (e) { return "all"; }
+  });
+  const setActorFilter = (a) => {
+    setActorFilterState(a);
+    try { sessionStorage.setItem("rh.panel.auditActor", a); } catch (e) {}
+  };
+  // Per-actor counts pulled from the level-filtered (not text-filtered)
+  // window so the chip labels reflect "everything matching level X by
+  // this actor" — independent of the typed query.
+  const actorCountsAll = React.useMemo(() => {
+    const m = new Map();
+    for (const e of levelFiltered) {
+      const a = e.agent_name || e.agent_id || "kernel";
+      m.set(a, (m.get(a) || 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [levelFiltered]);
+  const topActorsForChips = actorCountsAll.slice(0, 5);
+
+  const actorFiltered = actorFilter === "all"
+    ? levelFiltered
+    : levelFiltered.filter(e => (e.agent_name || e.agent_id || "kernel") === actorFilter);
+
   // Client-side substring filter across the loaded window. Real
   // full-text search would need a server-side index; for typical ops
   // windows of ~200 entries this is plenty fast and renders instantly.
   const ql = q.trim().toLowerCase();
-  const entries = !ql ? levelFiltered : levelFiltered.filter(e =>
+  const entries = !ql ? actorFiltered : actorFiltered.filter(e =>
     (e.action || "").toLowerCase().includes(ql) ||
     (e.agent_name || "").toLowerCase().includes(ql) ||
     (e.agent_id || "").toLowerCase().includes(ql) ||
@@ -5391,6 +5467,30 @@ function AuditPage() {
           }}><I.download/> JSON</button>
         </div>
       </div>
+
+      {topActorsForChips.length > 0 && (
+        <div className="row gap-6 mb-8" style={{flexWrap:"wrap"}}>
+          <span className="dim mono" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase", alignSelf:"center", marginRight:4}}>
+            Actor
+          </span>
+          <button
+            className={"btn sm " + (actorFilter === "all" ? "primary" : "ghost")}
+            onClick={() => setActorFilter("all")}
+          >
+            all · {levelFiltered.length}
+          </button>
+          {topActorsForChips.map(([name, n]) => (
+            <button
+              key={name}
+              className={"btn sm " + (actorFilter === name ? "primary" : "ghost")}
+              onClick={() => setActorFilter(actorFilter === name ? "all" : name)}
+              title={`Restrict the audit list to entries by ${name}`}
+            >
+              {name} · {n}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="grid-12">
         <div className="col-3 card">
@@ -5497,7 +5597,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.61";
+  const version = (health && health.version) || "0.7.62";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 

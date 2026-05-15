@@ -458,6 +458,14 @@ async fn dashboard_wires_write_paths() {
         ("AgentLiveSpark", "Per-agent live throughput sparkline"),
         ("WorkflowEditYamlModal", "Workflow YAML inline editor"),
         ("SAVE = DELETE + RECREATE", "Edit YAML modal warning banner"),
+        // Iter 82-84: chat keys + persisted agents filter + audit actor chips
+        (
+            "nextPendingKey",
+            "Chat pending-message stable key allocator",
+        ),
+        ("rh.panel.agentsFilter", "Agents filter persistence"),
+        ("rh.panel.auditActor", "Audit actor filter persistence"),
+        ("topActorsForChips", "Audit actor chip list"),
     ];
     for (needle, what) in markers {
         assert!(

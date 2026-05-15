@@ -22,7 +22,7 @@ function OverviewPage({ go }) {
     refreshApprovals();
   };
   const approvalRows = approvalsResp && approvalsResp.approvals || D.approvals;
-  const version = health && health.version || "0.7.61";
+  const version = health && health.version || "0.7.62";
   const uptime = health && health.uptime_seconds ? formatUptime(health.uptime_seconds) : null;
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(Banner, { go, onboarding }), /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Overview"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "System pulse \xB7 kernel ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v", version), uptime && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 uptime ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, uptime)), " ", "\xB7 schema ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v8"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null), " Refresh"), /* @__PURE__ */ React.createElement("button", { className: "btn primary" }, /* @__PURE__ */ React.createElement(I.plus, null), " New agent"))), /* @__PURE__ */ React.createElement("div", { className: "tiles" }, /* @__PURE__ */ React.createElement(Tile, { label: "Agents running", value: `${live}`, foot: `of ${totalAgents} total`, spark: sparkOf(agents.map((_, i) => live + (i % 3 - 1)), 12) }), /* @__PURE__ */ React.createElement(Tile, { label: "Cost \xB7 today", value: `$${(cost24 || 0).toFixed(2)}`, foot: usage ? "from /api/usage/daily" : "loading\u2026", spark: days.slice(-12).map((d) => d.cost_usd || 0) }), /* @__PURE__ */ React.createElement(Tile, { label: "Audit entries", value: audit && audit.total != null ? audit.total.toLocaleString() : "\u2014", foot: audit && audit.tip_hash ? `tip ${String(audit.tip_hash).slice(0, 8)}` : "loading\u2026", spark: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] }), /* @__PURE__ */ React.createElement(Tile, { label: "Errors \xB7 agents", value: `${errors}`, foot: errors ? `${errors} crashed agent(s)` : "all green", spark: [0, 0, 1, 0, 0, 0, 0, 0, errors, 0, 0, 0], deltaCls: "up", warn: errors > 0 })), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 col" }, /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Live activity"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: refreshAudit }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost" }, /* @__PURE__ */ React.createElement(I.download, null), " Export"))), /* @__PURE__ */ React.createElement(ActivityFeed, { entries: audit && audit.entries })), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Approvals \xB7 waiting"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("approvals") }, "Open queue"))), approvalRows.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, "No approvals waiting.") : /* @__PURE__ */ React.createElement(ApprovalsTable, { rows: approvalRows.slice(0, 3), compact: true, onChange: refreshApprovals }))), /* @__PURE__ */ React.createElement("div", { className: "col-4 col" }, onboarding && onboarding.demo_mode && /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Demo seed"), /* @__PURE__ */ React.createElement("span", { className: "badge demo" }, /* @__PURE__ */ React.createElement("span", { className: "dot demo" }), "active")), /* @__PURE__ */ React.createElement("div", { className: "col gap-8" }, /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.agents, null), title: "rusty", sub: "welcome agent \xB7 chat-ready", onClick: () => go("chat") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.workflows, null), title: "demo-pipeline", sub: "2-step sample workflow \xB7 click to run", onClick: () => go("workflows") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.event, null), title: "sample trigger", sub: "agent-spawn on webhook", onClick: () => go("automation") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.cron, null), title: "demo-daily-ping", sub: "cron 0 9 * * * \xB7 disabled", onClick: () => go("automation") }))), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Providers"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("settings") }, "Manage")), /* @__PURE__ */ React.createElement(ProvidersList, { providers: providersResp && providersResp.providers })), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Audit chain"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("audit") }, "View")), /* @__PURE__ */ React.createElement("div", { className: "col gap-4" }, /* @__PURE__ */ React.createElement(AuditSummary, { audit }))))));
 }
@@ -210,13 +210,56 @@ function Pagination({ pg }) {
   return /* @__PURE__ */ React.createElement("div", { className: "row gap-8", style: { padding: "10px 14px", borderTop: "1px solid var(--border)", justifyContent: "flex-end" } }, /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 11 } }, pg.offset + 1, "\u2013", Math.min(pg.offset + pg.pageSize, pg.total), " of ", pg.total.toLocaleString()), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: pg.prev, disabled: !pg.hasPrev }, "\u2190 Prev"), /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 11.5, minWidth: 60, textAlign: "center" } }, pg.page, " / ", pg.totalPages), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: pg.next, disabled: !pg.hasNext }, "Next \u2192"));
 }
 function AgentsPage({ openAgent }) {
-  const [filter, setFilter] = useState("all");
-  const [q, setQ] = useState("");
+  const [filter, setFilterState] = useState(() => {
+    try {
+      const stored = localStorage.getItem("rh.panel.agentsFilter") || "all";
+      return ["all", "running", "error", "idle"].includes(stored) ? stored : "all";
+    } catch (e) {
+      return "all";
+    }
+  });
+  const setFilter = (v) => {
+    setFilterState(v);
+    try {
+      localStorage.setItem("rh.panel.agentsFilter", v);
+    } catch (e) {
+    }
+  };
+  const [q, setQState] = useState(() => {
+    try {
+      return sessionStorage.getItem("rh.panel.agentsQ") || "";
+    } catch (e) {
+      return "";
+    }
+  });
+  const setQ = (v) => {
+    setQState(v);
+    try {
+      sessionStorage.setItem("rh.panel.agentsQ", v || "");
+    } catch (e) {
+    }
+  };
   const [showSpawn, setShowSpawn] = useState(false);
   const [rowMenu, setRowMenu] = useState(null);
   const [selected, setSelected] = useState(() => /* @__PURE__ */ new Set());
   const [showDiff, setShowDiff] = useState(false);
-  const [grouped, setGrouped] = useState(true);
+  const [grouped, setGroupedState] = useState(() => {
+    try {
+      return localStorage.getItem("rh.panel.agentsGrouped") !== "0";
+    } catch (e) {
+      return true;
+    }
+  });
+  const setGrouped = (v) => {
+    setGroupedState((prev) => {
+      const next = typeof v === "function" ? v(prev) : v;
+      try {
+        localStorage.setItem("rh.panel.agentsGrouped", next ? "1" : "0");
+      } catch (e) {
+      }
+      return next;
+    });
+  };
   const [collapsedGroups, setCollapsedGroups] = useState(() => /* @__PURE__ */ new Set());
   const [compact, setCompactState] = useState(() => {
     try {
@@ -973,6 +1016,8 @@ function ChatPage() {
   const [toolsResp] = useApi("/api/tools");
   const tools = Array.isArray(toolsResp) ? toolsResp : toolsResp && toolsResp.tools;
   const [pendingMessages, setPendingMessages] = useState([]);
+  const pendingKeyRef = React.useRef(0);
+  const nextPendingKey = () => `p${++pendingKeyRef.current}`;
   const [streamingText, setStreamingText] = useState("");
   const [streamingTools, setStreamingTools] = useState([]);
   const [sending, setSending] = useState(false);
@@ -1001,7 +1046,7 @@ function ChatPage() {
         setStreamingTools((prev) => prev.map((t, i, arr) => i === arr.length - 1 && t.running ? { ...t, running: false, result: msg.result, is_error: !!msg.is_error } : t));
         break;
       case "response":
-        setPendingMessages((prev) => prev.concat([{ role: "assistant", content: msg.content || streamingText, _local: true }]));
+        setPendingMessages((prev) => prev.concat([{ _key: nextPendingKey(), role: "assistant", content: msg.content || streamingText, _local: true }]));
         setStreamingText("");
         setStreamingTools([]);
         setSending(false);
@@ -1014,13 +1059,13 @@ function ChatPage() {
         refreshSession();
         break;
       case "error":
-        setPendingMessages((prev) => prev.concat([{ role: "assistant", content: `[error] ${msg.content || msg.error || "unknown"}`, _local: true, error: true }]));
+        setPendingMessages((prev) => prev.concat([{ _key: nextPendingKey(), role: "assistant", content: `[error] ${msg.content || msg.error || "unknown"}`, _local: true, error: true }]));
         setStreamingText("");
         setStreamingTools([]);
         setSending(false);
         break;
       case "command_result":
-        setPendingMessages((prev) => prev.concat([{ role: "assistant", content: msg.message || msg.content || "ok", _local: true, command: true }]));
+        setPendingMessages((prev) => prev.concat([{ _key: nextPendingKey(), role: "assistant", content: msg.message || msg.content || "ok", _local: true, command: true }]));
         setSending(false);
         break;
       default:
@@ -1038,7 +1083,7 @@ function ChatPage() {
     const text = typed.trim();
     if (!text || sending) return;
     setTyped("");
-    setPendingMessages((prev) => prev.concat([{ role: "user", content: text, _local: true }]));
+    setPendingMessages((prev) => prev.concat([{ _key: nextPendingKey(), role: "user", content: text, _local: true }]));
     setStreamingText("");
     setStreamingTools([]);
     setSending(true);
@@ -1057,10 +1102,10 @@ function ChatPage() {
         body: JSON.stringify({ message: text })
       });
       if (resp && resp.response) {
-        setPendingMessages((prev) => prev.concat([{ role: "assistant", content: resp.response, _local: true }]));
+        setPendingMessages((prev) => prev.concat([{ _key: nextPendingKey(), role: "assistant", content: resp.response, _local: true }]));
       }
     } catch (e) {
-      setPendingMessages((prev) => prev.concat([{ role: "assistant", content: `[error] ${e.message || e}`, _local: true, error: true }]));
+      setPendingMessages((prev) => prev.concat([{ _key: nextPendingKey(), role: "assistant", content: `[error] ${e.message || e}`, _local: true, error: true }]));
     } finally {
       setSending(false);
       refreshSession();
@@ -1130,9 +1175,10 @@ function ChatPage() {
     /* @__PURE__ */ React.createElement(I.refresh, null),
     " Regenerate"
   ), /* @__PURE__ */ React.createElement("button", { className: "btn sm" }, /* @__PURE__ */ React.createElement(I.download, null), " Export"), /* @__PURE__ */ React.createElement("button", { className: "icon-btn" }, /* @__PURE__ */ React.createElement(I.more, null)))), /* @__PURE__ */ React.createElement("div", { className: "chat-stream", ref: streamRef }, !session && !sessionErr && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { padding: "24px 6px", fontSize: 12 } }, "Loading session\u2026"), sessionErr && pendingMessages.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { padding: "24px 6px", fontSize: 12, color: "var(--crimson)" } }, "Session load failed: ", sessionErr), items.map((it, i) => {
-    if (it.role === "user") return /* @__PURE__ */ React.createElement("div", { key: i, className: "msg user" }, /* @__PURE__ */ React.createElement(Avatar, { agent: { name: "you", hue: 22, emoji: "Y" } }), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "who", style: { textAlign: "right" } }, "operator \xB7 just now"), /* @__PURE__ */ React.createElement("div", { className: "bubble", style: { whiteSpace: "pre-wrap" } }, it.content)));
-    if (it.role === "tool") return /* @__PURE__ */ React.createElement(ToolTraceCard, { key: i, tool: it });
-    return /* @__PURE__ */ React.createElement("div", { key: i, className: "msg" }, /* @__PURE__ */ React.createElement(Avatar, { agent: active }), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "who" }, active.name), /* @__PURE__ */ React.createElement("div", { className: "bubble", style: { color: it.error ? "var(--crimson)" : void 0 } }, it.error || it.command ? it.content : renderMarkdown(it.content))));
+    const k = it._key || `i${i}`;
+    if (it.role === "user") return /* @__PURE__ */ React.createElement("div", { key: k, className: "msg user" }, /* @__PURE__ */ React.createElement(Avatar, { agent: { name: "you", hue: 22, emoji: "Y" } }), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "who", style: { textAlign: "right" } }, "operator \xB7 just now"), /* @__PURE__ */ React.createElement("div", { className: "bubble", style: { whiteSpace: "pre-wrap" } }, it.content)));
+    if (it.role === "tool") return /* @__PURE__ */ React.createElement(ToolTraceCard, { key: k, tool: it });
+    return /* @__PURE__ */ React.createElement("div", { key: k, className: "msg" }, /* @__PURE__ */ React.createElement(Avatar, { agent: active }), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "who" }, active.name), /* @__PURE__ */ React.createElement("div", { className: "bubble", style: { color: it.error ? "var(--crimson)" : void 0 } }, it.error || it.command ? it.content : renderMarkdown(it.content))));
   }), streamingTools.map((t, i) => /* @__PURE__ */ React.createElement(ToolTraceCard, { key: `stool-${i}`, tool: t })), (sending || streamingText) && /* @__PURE__ */ React.createElement("div", { className: "msg" }, /* @__PURE__ */ React.createElement(Avatar, { agent: active }), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "who" }, active.name, " \xB7 streaming"), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, streamingText ? renderMarkdown(streamingText) : null, /* @__PURE__ */ React.createElement("span", { className: "cursor" }))))), /* @__PURE__ */ React.createElement(
     ChatInput,
     {
@@ -1234,16 +1280,32 @@ function ChatInput({ typed, setTyped, sending, send, active, ws }) {
 function sessionToItems(messages) {
   if (!Array.isArray(messages)) return [];
   const items = [];
+  let counter = 0;
   for (const m of messages) {
     const role = (m.role || "").toLowerCase();
+    const baseId = m.id || m.message_id || m.seq != null ? `m${m.id || m.message_id || m.seq}` : `i${counter}`;
     if (Array.isArray(m.tools)) {
-      for (const t of m.tools) {
-        items.push({ role: "tool", name: t.name, input: t.input, result: t.result, is_error: !!t.is_error, running: !!t.running });
+      for (let ti = 0; ti < m.tools.length; ti++) {
+        const t = m.tools[ti];
+        items.push({
+          _key: `${baseId}-t${ti}`,
+          role: "tool",
+          name: t.name,
+          input: t.input,
+          result: t.result,
+          is_error: !!t.is_error,
+          running: !!t.running
+        });
       }
     }
     if (m.content) {
-      items.push({ role: role === "user" ? "user" : "assistant", content: m.content });
+      items.push({
+        _key: `${baseId}-c`,
+        role: role === "user" ? "user" : "assistant",
+        content: m.content
+      });
     }
+    counter++;
   }
   return items;
 }
@@ -3152,8 +3214,32 @@ function AuditPage() {
     levelCounts[lvl] = (levelCounts[lvl] || 0) + 1;
   }
   const levelFiltered = levelFilter === "all" ? rawEntries : rawEntries.filter((e) => auditLevelOf(e) === levelFilter);
+  const [actorFilter, setActorFilterState] = useState(() => {
+    try {
+      return sessionStorage.getItem("rh.panel.auditActor") || "all";
+    } catch (e) {
+      return "all";
+    }
+  });
+  const setActorFilter = (a) => {
+    setActorFilterState(a);
+    try {
+      sessionStorage.setItem("rh.panel.auditActor", a);
+    } catch (e) {
+    }
+  };
+  const actorCountsAll = React.useMemo(() => {
+    const m = /* @__PURE__ */ new Map();
+    for (const e of levelFiltered) {
+      const a = e.agent_name || e.agent_id || "kernel";
+      m.set(a, (m.get(a) || 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [levelFiltered]);
+  const topActorsForChips = actorCountsAll.slice(0, 5);
+  const actorFiltered = actorFilter === "all" ? levelFiltered : levelFiltered.filter((e) => (e.agent_name || e.agent_id || "kernel") === actorFilter);
   const ql = q.trim().toLowerCase();
-  const entries = !ql ? levelFiltered : levelFiltered.filter(
+  const entries = !ql ? actorFiltered : actorFiltered.filter(
     (e) => (e.action || "").toLowerCase().includes(ql) || (e.agent_name || "").toLowerCase().includes(ql) || (e.agent_id || "").toLowerCase().includes(ql) || (e.detail || "").toLowerCase().includes(ql) || (e.outcome || "").toLowerCase().includes(ql) || (e.hash || "").toLowerCase().includes(ql)
   );
   const actorCounts = {};
@@ -3239,7 +3325,26 @@ function AuditPage() {
       JSON.stringify(audit, null, 2),
       "application/json"
     );
-  } }, /* @__PURE__ */ React.createElement(I.download, null), " JSON"))), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-3 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Chain head"), /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 14, color: "var(--rust)", wordBreak: "break-all" } }, audit && audit.tip_hash ? String(audit.tip_hash).slice(0, 16) : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 11 } }, "depth ", audit ? audit.total != null ? audit.total.toLocaleString() : "\u2014" : "\u2026"), /* @__PURE__ */ React.createElement("div", { className: "divider" }), verify ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "row gap-6" }, verify.valid ? /* @__PURE__ */ React.createElement("span", { className: "badge live" }, /* @__PURE__ */ React.createElement(I.check, null), " verified") : /* @__PURE__ */ React.createElement("span", { className: "badge error" }, /* @__PURE__ */ React.createElement(I.warn, null), " mismatch"), /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 11 } }, (verify.entries || []).length || verify.total || 0, " entries")), lastVerifiedAt && /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 10.5 } }, "last manual check: ", lastVerifiedAt.toLocaleTimeString("en-GB", { hour12: false })), !verify.valid && verify.error && /* @__PURE__ */ React.createElement("div", { className: "mono mt-4", style: { fontSize: 10.5, color: "var(--crimson)", wordBreak: "break-word" } }, verify.error)) : /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, verifyErr || "verifying\u2026")), /* @__PURE__ */ React.createElement("div", { className: "col-3 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Loaded window"), /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 20 } }, entries.length, " ", /* @__PURE__ */ React.createElement("span", { className: "dim", style: { fontSize: 13 } }, "entries")), /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 11 } }, "from /api/audit/recent?n=", windowSize)), /* @__PURE__ */ React.createElement("div", { className: "col-3 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Top actor"), /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 14 } }, topActor ? topActor[0] : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 11 } }, topActor ? `${topActor[1]} entries (in window)` : "no activity")), /* @__PURE__ */ React.createElement("div", { className: "col-3 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Warning"), /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 14, color: verify && verify.warning ? "var(--amber)" : "var(--live)" } }, verify && verify.warning ? "see below" : "none"), /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 11 } }, verify && verify.warning ? verify.warning : "audit chain stable"))), /* @__PURE__ */ React.createElement("div", { className: "card flush mt-16" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Chain \xB7 most recent"), /* @__PURE__ */ React.createElement("span", { className: "mono dim" }, "descending")), /* @__PURE__ */ React.createElement("div", null, !audit && Array.from({ length: 6 }).map((_, i) => /* @__PURE__ */ React.createElement("div", { key: `sa-${i}`, className: "merkle-row" }, /* @__PURE__ */ React.createElement("div", { className: "chain" }), /* @__PURE__ */ React.createElement(Skel, { w: 50, h: 10 }), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement(Skel, { w: "50%", h: 10 }), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 4 } }, /* @__PURE__ */ React.createElement(Skel, { w: "70%", h: 9 }))), /* @__PURE__ */ React.createElement(Skel, { w: 70, h: 10 }), /* @__PURE__ */ React.createElement(Skel, { w: 50, h: 10 }))), audit && entries.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, ql ? `No entries matching "${q}" in the loaded window of ${rawEntries.length}.` : "No audit entries yet."), entries.map((a) => {
+  } }, /* @__PURE__ */ React.createElement(I.download, null), " JSON"))), topActorsForChips.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "row gap-6 mb-8", style: { flexWrap: "wrap" } }, /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase", alignSelf: "center", marginRight: 4 } }, "Actor"), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      className: "btn sm " + (actorFilter === "all" ? "primary" : "ghost"),
+      onClick: () => setActorFilter("all")
+    },
+    "all \xB7 ",
+    levelFiltered.length
+  ), topActorsForChips.map(([name, n]) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: name,
+      className: "btn sm " + (actorFilter === name ? "primary" : "ghost"),
+      onClick: () => setActorFilter(actorFilter === name ? "all" : name),
+      title: `Restrict the audit list to entries by ${name}`
+    },
+    name,
+    " \xB7 ",
+    n
+  ))), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-3 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Chain head"), /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 14, color: "var(--rust)", wordBreak: "break-all" } }, audit && audit.tip_hash ? String(audit.tip_hash).slice(0, 16) : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 11 } }, "depth ", audit ? audit.total != null ? audit.total.toLocaleString() : "\u2014" : "\u2026"), /* @__PURE__ */ React.createElement("div", { className: "divider" }), verify ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "row gap-6" }, verify.valid ? /* @__PURE__ */ React.createElement("span", { className: "badge live" }, /* @__PURE__ */ React.createElement(I.check, null), " verified") : /* @__PURE__ */ React.createElement("span", { className: "badge error" }, /* @__PURE__ */ React.createElement(I.warn, null), " mismatch"), /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 11 } }, (verify.entries || []).length || verify.total || 0, " entries")), lastVerifiedAt && /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 10.5 } }, "last manual check: ", lastVerifiedAt.toLocaleTimeString("en-GB", { hour12: false })), !verify.valid && verify.error && /* @__PURE__ */ React.createElement("div", { className: "mono mt-4", style: { fontSize: 10.5, color: "var(--crimson)", wordBreak: "break-word" } }, verify.error)) : /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, verifyErr || "verifying\u2026")), /* @__PURE__ */ React.createElement("div", { className: "col-3 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Loaded window"), /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 20 } }, entries.length, " ", /* @__PURE__ */ React.createElement("span", { className: "dim", style: { fontSize: 13 } }, "entries")), /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 11 } }, "from /api/audit/recent?n=", windowSize)), /* @__PURE__ */ React.createElement("div", { className: "col-3 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Top actor"), /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 14 } }, topActor ? topActor[0] : "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 11 } }, topActor ? `${topActor[1]} entries (in window)` : "no activity")), /* @__PURE__ */ React.createElement("div", { className: "col-3 card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Warning"), /* @__PURE__ */ React.createElement("div", { className: "mono", style: { fontSize: 14, color: verify && verify.warning ? "var(--amber)" : "var(--live)" } }, verify && verify.warning ? "see below" : "none"), /* @__PURE__ */ React.createElement("div", { className: "dim mono mt-4", style: { fontSize: 11 } }, verify && verify.warning ? verify.warning : "audit chain stable"))), /* @__PURE__ */ React.createElement("div", { className: "card flush mt-16" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Chain \xB7 most recent"), /* @__PURE__ */ React.createElement("span", { className: "mono dim" }, "descending")), /* @__PURE__ */ React.createElement("div", null, !audit && Array.from({ length: 6 }).map((_, i) => /* @__PURE__ */ React.createElement("div", { key: `sa-${i}`, className: "merkle-row" }, /* @__PURE__ */ React.createElement("div", { className: "chain" }), /* @__PURE__ */ React.createElement(Skel, { w: 50, h: 10 }), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement(Skel, { w: "50%", h: 10 }), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 4 } }, /* @__PURE__ */ React.createElement(Skel, { w: "70%", h: 9 }))), /* @__PURE__ */ React.createElement(Skel, { w: 70, h: 10 }), /* @__PURE__ */ React.createElement(Skel, { w: 50, h: 10 }))), audit && entries.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, ql ? `No entries matching "${q}" in the loaded window of ${rawEntries.length}.` : "No audit entries yet."), entries.map((a) => {
     const hash = a.hash ? String(a.hash).slice(0, 12) : "\u2014";
     const pulsing = pulse && a.hash && String(a.hash).startsWith(pulse);
     return /* @__PURE__ */ React.createElement(
@@ -3272,7 +3377,7 @@ function SettingsPage() {
   const users = usersResp && usersResp.users || [];
   const apiListen = config && (config.api_listen || config.api && config.api.listen) || "\u2014";
   const proxy = config && (config.proxy_url || config.proxy && config.proxy.url) || null;
-  const version = health && health.version || "0.7.61";
+  const version = health && health.version || "0.7.62";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "\u2014";
   const agentCount = health && health.agent_count != null ? health.agent_count : "\u2014";
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Settings"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Config at ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "~/.rustyhand/config.toml"), " \xB7 50+ fields with serde defaults \xB7 live from ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/config"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement(
