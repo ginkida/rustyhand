@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.77";
+  const version = (health && health.version) || "0.7.78";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -959,22 +959,124 @@ function AgentRow({ agent, selected, onSelect, openAgent, rowMenu, setRowMenu, r
   );
 }
 
+// Provider/model derivation used by SpawnAgentModal. A provider is
+// "usable" if it's authenticated (`auth_status === "ok"`), is local +
+// reachable (ollama/vllm/lmstudio with the daemon up), or is the mock
+// fallback driver (`id === "mock"` in demo mode). Anything else is
+// hidden — picking a provider with no key/endpoint just produces a
+// runtime error on first message.
+function isProviderUsable(p) {
+  if (!p) return false;
+  const auth = (p.auth_status || "").toLowerCase();
+  if (auth === "ok") return true;
+  if (auth === "fallback") return true;
+  if (p.is_local && p.reachable) return true;
+  if ((p.id || "").toLowerCase() === "mock") return true;
+  return false;
+}
+
+// Pick the best initial provider/model from the API responses. Prefers
+// the kernel's configured `default_model` (so the form mirrors what the
+// daemon would use without any overrides). Falls back to the first
+// usable provider + its first model. Returns { provider, model } or
+// nulls when nothing is configured (rare — kernel always seeds at
+// least mock).
+function pickDefaultProviderModel(providers, modelsForProvider, configDefault) {
+  const usable = providers.filter(isProviderUsable);
+  if (usable.length === 0) return { provider: null, model: null };
+  const wantProvider = (configDefault && configDefault.provider) || "";
+  const matchedProvider =
+    usable.find((p) => (p.id || "").toLowerCase() === wantProvider.toLowerCase()) || usable[0];
+  const wantModel = (configDefault && configDefault.model) || "";
+  let pickedModel = null;
+  if (Array.isArray(modelsForProvider) && modelsForProvider.length > 0) {
+    pickedModel =
+      modelsForProvider.find((m) => (m.id || "") === wantModel) || modelsForProvider[0];
+  }
+  return {
+    provider: matchedProvider.id,
+    model: pickedModel ? pickedModel.id : (wantProvider && wantProvider === matchedProvider.id ? wantModel : ""),
+  };
+}
+
 function SpawnAgentModal({ onClose, onSpawned }) {
   useEscapeKey(onClose);
   const [templates] = useApi("/api/templates");
   const [profiles] = useApi("/api/profiles");
+  const [providersResp] = useApi("/api/providers");
+  const [config] = useApi("/api/config");
   const [mode, setMode] = useState("template"); // "template" | "custom"
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [customName, setCustomName] = useState("");
   const [customProfile, setCustomProfile] = useState("research");
-  const [customModel, setCustomModel] = useState("claude-sonnet-4");
-  const [customProvider, setCustomProvider] = useState("anthropic");
+  const [customProvider, setCustomProvider] = useState("");
+  const [customModel, setCustomModel] = useState("");
+  const [customSystemPrompt, setCustomSystemPrompt] = useState("You are a helpful agent.");
   const [customManifest, setCustomManifest] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
   const tmplList = Array.isArray(templates) ? templates : (templates && templates.templates) || [];
   const profileList = Array.isArray(profiles) ? profiles : (profiles && profiles.profiles) || [];
+  const providerList = (providersResp && providersResp.providers) || [];
+  const usableProviders = providerList.filter(isProviderUsable);
+
+  // Models for the currently-selected provider. We hit
+  // /api/models?provider=X&available=true so the dropdown only contains
+  // models from providers that have a key configured (or are local +
+  // reachable). For local providers without a catalog entry we fall
+  // back to provider.discovered_models[] which the health probe surfaces.
+  const [modelsForProvider] = useApi(
+    customProvider
+      ? `/api/models?provider=${encodeURIComponent(customProvider)}&available=true`
+      : null
+  );
+  // Filter the catalog response by current provider client-side too.
+  // `useApi` keeps the previous fetch's data while a new one is in
+  // flight, so when the user switches provider we briefly see models
+  // from the OLD provider until the new request resolves. Filtering
+  // here means the dropdown only ever lists models belonging to the
+  // currently-selected provider — no stale flash, no risk of submitting
+  // a provider/model mismatch if the user clicks Spawn mid-fetch.
+  const catalogModels = ((modelsForProvider && modelsForProvider.models) || []).filter(
+    (m) => !customProvider || !m.provider || m.provider.toLowerCase() === customProvider.toLowerCase()
+  );
+  const currentProviderEntry = usableProviders.find((p) => p.id === customProvider);
+  const discoveredModels = (currentProviderEntry && currentProviderEntry.discovered_models) || [];
+  const modelOptions = catalogModels.length > 0
+    ? catalogModels.map((m) => ({ id: m.id, label: m.display_name || m.id, hint: m.tier }))
+    : discoveredModels.map((id) => ({ id, label: id, hint: "local" }));
+
+  // Seed the provider on first load: prefer kernel default, otherwise
+  // first usable provider. Runs once providers + config are both back.
+  React.useEffect(() => {
+    if (!providersResp || !config) return;
+    if (customProvider) return;
+    const pick = pickDefaultProviderModel(providerList, [], config.default_model || {});
+    if (pick.provider) {
+      setCustomProvider(pick.provider);
+      if (pick.model) setCustomModel(pick.model);
+    }
+  }, [providersResp, config]);
+
+  // When the model list arrives (or the user switches provider), pick a
+  // model. Prefer (a) the currently-selected model if it's still in the
+  // list, (b) the kernel's default_model.model if it matches this
+  // provider, (c) the first model in the list.
+  React.useEffect(() => {
+    if (!customProvider || modelOptions.length === 0) return;
+    if (customModel && modelOptions.some((m) => m.id === customModel)) return;
+    const cfgDefault = (config && config.default_model) || {};
+    if (
+      cfgDefault.provider === customProvider &&
+      cfgDefault.model &&
+      modelOptions.some((m) => m.id === cfgDefault.model)
+    ) {
+      setCustomModel(cfgDefault.model);
+      return;
+    }
+    setCustomModel(modelOptions[0].id);
+  }, [customProvider, modelOptions.length]);
 
   // When the user picks a template, prefetch its manifest_toml so we can
   // POST exactly what the server hands out (avoids us re-generating).
@@ -988,7 +1090,21 @@ function SpawnAgentModal({ onClose, onSpawned }) {
   }, [mode, selectedTemplate]);
 
   const generateManifest = () => {
-    const name = customName.trim() || "new-agent";
+    // Escape user-provided strings for a TOML basic string ("..."):
+    // backslash FIRST (so we don't re-escape our own escapes), then
+    // double-quote, then literal newline/CR/tab characters which TOML
+    // basic strings forbid as raw bytes. Without the newline pass a
+    // pasted multi-line system_prompt would produce invalid TOML and
+    // the kernel would reject the spawn with a parse error.
+    const tomlEscape = (s) =>
+      (s || "")
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, '\\"')
+        .replace(/\r/g, "\\r")
+        .replace(/\n/g, "\\n")
+        .replace(/\t/g, "\\t");
+    const name = tomlEscape(customName.trim() || "new-agent");
+    const sp = tomlEscape(customSystemPrompt || "You are a helpful agent.");
     return `name = "${name}"
 version = "0.1.0"
 description = "Spawned from RustyHand control panel"
@@ -996,16 +1112,18 @@ author = "operator"
 module = "builtin:chat"
 
 [model]
-provider = "${customProvider}"
-model = "${customModel}"
-system_prompt = "You are a helpful agent."
+provider = "${tomlEscape(customProvider || "mock")}"
+model = "${tomlEscape(customModel || "mock-echo")}"
+system_prompt = "${sp}"
 temperature = 0.4
 max_tokens = 2048
 
 [capabilities]
-tools = ["${customProfile}"]
+tools = ["${tomlEscape(customProfile || "research")}"]
 `;
   };
+
+  const customReady = !!customProvider && !!customModel;
 
   const spawn = async () => {
     setBusy(true);
@@ -1024,6 +1142,14 @@ tools = ["${customProfile}"]
     } finally {
       setBusy(false);
     }
+  };
+
+  const providerBadge = (p) => {
+    const auth = (p.auth_status || "").toLowerCase();
+    if (auth === "ok") return "ok";
+    if (p.is_local && p.reachable) return "local";
+    if (auth === "fallback" || (p.id || "").toLowerCase() === "mock") return "fallback";
+    return auth || "?";
   };
 
   return (
@@ -1062,23 +1188,94 @@ tools = ["${customProfile}"]
           )}
           {mode === "custom" && (
             <div className="col gap-8">
+              {!providersResp && (
+                <div className="dim mono" style={{fontSize:11}}>loading providers…</div>
+              )}
+              {providersResp && usableProviders.length === 0 && (
+                <div className="banner" style={{borderColor:"oklch(0.66 0.18 25 / .35)"}}>
+                  <span className="dot err"/>
+                  <span className="banner-title">No usable provider</span>
+                  <span className="banner-body" style={{fontSize:11}}>
+                    No provider is authenticated and no local provider is reachable. Add a key in Settings → LLM providers, or start ollama/vllm/lmstudio.
+                  </span>
+                </div>
+              )}
               <label className="t-row col">
                 <span className="t-lbl">Name</span>
                 <input className="modal-field" placeholder="my-agent" value={customName} onChange={e => setCustomName(e.target.value)}/>
               </label>
               <label className="t-row col">
-                <span className="t-lbl">Provider</span>
-                <input className="modal-field" value={customProvider} onChange={e => setCustomProvider(e.target.value)}/>
+                <span className="t-lbl">
+                  Provider
+                  <span className="dim" style={{marginLeft:6, fontSize:10.5}}>
+                    {usableProviders.length} usable
+                    {config && config.default_model && config.default_model.provider && (
+                      <> · kernel default: <span className="mono">{config.default_model.provider}</span></>
+                    )}
+                  </span>
+                </span>
+                <select
+                  className="t-select"
+                  value={customProvider}
+                  onChange={e => { setCustomProvider(e.target.value); setCustomModel(""); }}
+                  disabled={usableProviders.length === 0}>
+                  {usableProviders.length === 0 && <option value="">(none)</option>}
+                  {usableProviders.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {(p.display_name || p.id)} — {providerBadge(p)}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className="t-row col">
-                <span className="t-lbl">Model</span>
-                <input className="modal-field" value={customModel} onChange={e => setCustomModel(e.target.value)}/>
+                <span className="t-lbl">
+                  Model
+                  <span className="dim" style={{marginLeft:6, fontSize:10.5}}>
+                    {modelOptions.length} available
+                    {currentProviderEntry && currentProviderEntry.is_local && (
+                      <> · local{currentProviderEntry.reachable ? "" : " (unreachable)"}</>
+                    )}
+                  </span>
+                </span>
+                <select
+                  className="t-select"
+                  value={customModel}
+                  onChange={e => setCustomModel(e.target.value)}
+                  disabled={!customProvider || modelOptions.length === 0}>
+                  {!customProvider && <option value="">pick a provider first</option>}
+                  {customProvider && modelOptions.length === 0 && (
+                    <option value="">no models discovered — type below</option>
+                  )}
+                  {modelOptions.map(m => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}{m.hint ? ` · ${m.hint}` : ""}
+                    </option>
+                  ))}
+                </select>
+                {customProvider && modelOptions.length === 0 && (
+                  <input
+                    className="modal-field mt-4"
+                    style={{marginTop:6, fontFamily:"ui-monospace, monospace", fontSize:12}}
+                    placeholder="model id (e.g. llama3.2:latest)"
+                    value={customModel}
+                    onChange={e => setCustomModel(e.target.value)}/>
+                )}
               </label>
               <label className="t-row col">
                 <span className="t-lbl">Tool profile</span>
                 <select className="t-select" value={customProfile} onChange={e => setCustomProfile(e.target.value)}>
+                  {profileList.length === 0 && <option value="research">research</option>}
                   {profileList.map(p => <option key={p.name || p} value={p.name || p}>{p.name || p}</option>)}
                 </select>
+              </label>
+              <label className="t-row col">
+                <span className="t-lbl">System prompt</span>
+                <textarea
+                  className="modal-field"
+                  rows={3}
+                  value={customSystemPrompt}
+                  onChange={e => setCustomSystemPrompt(e.target.value)}
+                  style={{fontFamily:"ui-monospace, monospace", fontSize:12, resize:"vertical"}}/>
               </label>
               <span className="muted mono" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>Manifest preview</span>
               <pre className="codebox" style={{maxHeight:160, overflow:"auto"}}>{generateManifest()}</pre>
@@ -1091,7 +1288,9 @@ tools = ["${customProfile}"]
         </div>
         <div className="modal-foot">
           <button className="btn ghost" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={busy || (mode === "template" && !selectedTemplate)} onClick={spawn}>
+          <button className="btn primary"
+                  disabled={busy || (mode === "template" && !selectedTemplate) || (mode === "custom" && !customReady)}
+                  onClick={spawn}>
             {busy ? "Spawning…" : "Spawn"}
           </button>
         </div>
@@ -5937,7 +6136,7 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.77";
+  const version = (health && health.version) || "0.7.78";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 

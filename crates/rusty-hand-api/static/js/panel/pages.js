@@ -23,7 +23,7 @@ function OverviewPage({ go }) {
     refreshApprovals();
   };
   const approvalRows = approvalsResp && approvalsResp.approvals || D.approvals;
-  const version = health && health.version || "0.7.77";
+  const version = health && health.version || "0.7.78";
   const uptime = health && health.uptime_seconds ? formatUptime(health.uptime_seconds) : null;
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(Banner, { go, onboarding }), /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Overview"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "System pulse \xB7 kernel ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v", version), uptime && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 uptime ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, uptime)), " ", "\xB7 schema ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v8"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null), " Refresh"), /* @__PURE__ */ React.createElement(
     "button",
@@ -621,21 +621,78 @@ function AgentRow({ agent, selected, onSelect, openAgent, rowMenu, setRowMenu, r
     }, style: { color: "var(--crimson)" } }, /* @__PURE__ */ React.createElement(I.close, null), " Kill")))
   );
 }
+function isProviderUsable(p) {
+  if (!p) return false;
+  const auth = (p.auth_status || "").toLowerCase();
+  if (auth === "ok") return true;
+  if (auth === "fallback") return true;
+  if (p.is_local && p.reachable) return true;
+  if ((p.id || "").toLowerCase() === "mock") return true;
+  return false;
+}
+function pickDefaultProviderModel(providers, modelsForProvider, configDefault) {
+  const usable = providers.filter(isProviderUsable);
+  if (usable.length === 0) return { provider: null, model: null };
+  const wantProvider = configDefault && configDefault.provider || "";
+  const matchedProvider = usable.find((p) => (p.id || "").toLowerCase() === wantProvider.toLowerCase()) || usable[0];
+  const wantModel = configDefault && configDefault.model || "";
+  let pickedModel = null;
+  if (Array.isArray(modelsForProvider) && modelsForProvider.length > 0) {
+    pickedModel = modelsForProvider.find((m) => (m.id || "") === wantModel) || modelsForProvider[0];
+  }
+  return {
+    provider: matchedProvider.id,
+    model: pickedModel ? pickedModel.id : wantProvider && wantProvider === matchedProvider.id ? wantModel : ""
+  };
+}
 function SpawnAgentModal({ onClose, onSpawned }) {
   useEscapeKey(onClose);
   const [templates] = useApi("/api/templates");
   const [profiles] = useApi("/api/profiles");
+  const [providersResp] = useApi("/api/providers");
+  const [config] = useApi("/api/config");
   const [mode, setMode] = useState("template");
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [customName, setCustomName] = useState("");
   const [customProfile, setCustomProfile] = useState("research");
-  const [customModel, setCustomModel] = useState("claude-sonnet-4");
-  const [customProvider, setCustomProvider] = useState("anthropic");
+  const [customProvider, setCustomProvider] = useState("");
+  const [customModel, setCustomModel] = useState("");
+  const [customSystemPrompt, setCustomSystemPrompt] = useState("You are a helpful agent.");
   const [customManifest, setCustomManifest] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const tmplList = Array.isArray(templates) ? templates : templates && templates.templates || [];
   const profileList = Array.isArray(profiles) ? profiles : profiles && profiles.profiles || [];
+  const providerList = providersResp && providersResp.providers || [];
+  const usableProviders = providerList.filter(isProviderUsable);
+  const [modelsForProvider] = useApi(
+    customProvider ? `/api/models?provider=${encodeURIComponent(customProvider)}&available=true` : null
+  );
+  const catalogModels = (modelsForProvider && modelsForProvider.models || []).filter(
+    (m) => !customProvider || !m.provider || m.provider.toLowerCase() === customProvider.toLowerCase()
+  );
+  const currentProviderEntry = usableProviders.find((p) => p.id === customProvider);
+  const discoveredModels = currentProviderEntry && currentProviderEntry.discovered_models || [];
+  const modelOptions = catalogModels.length > 0 ? catalogModels.map((m) => ({ id: m.id, label: m.display_name || m.id, hint: m.tier })) : discoveredModels.map((id) => ({ id, label: id, hint: "local" }));
+  React.useEffect(() => {
+    if (!providersResp || !config) return;
+    if (customProvider) return;
+    const pick = pickDefaultProviderModel(providerList, [], config.default_model || {});
+    if (pick.provider) {
+      setCustomProvider(pick.provider);
+      if (pick.model) setCustomModel(pick.model);
+    }
+  }, [providersResp, config]);
+  React.useEffect(() => {
+    if (!customProvider || modelOptions.length === 0) return;
+    if (customModel && modelOptions.some((m) => m.id === customModel)) return;
+    const cfgDefault = config && config.default_model || {};
+    if (cfgDefault.provider === customProvider && cfgDefault.model && modelOptions.some((m) => m.id === cfgDefault.model)) {
+      setCustomModel(cfgDefault.model);
+      return;
+    }
+    setCustomModel(modelOptions[0].id);
+  }, [customProvider, modelOptions.length]);
   React.useEffect(() => {
     if (mode !== "template" || !selectedTemplate) return;
     let aborted = false;
@@ -649,7 +706,9 @@ function SpawnAgentModal({ onClose, onSpawned }) {
     };
   }, [mode, selectedTemplate]);
   const generateManifest = () => {
-    const name = customName.trim() || "new-agent";
+    const tomlEscape = (s) => (s || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r/g, "\\r").replace(/\n/g, "\\n").replace(/\t/g, "\\t");
+    const name = tomlEscape(customName.trim() || "new-agent");
+    const sp = tomlEscape(customSystemPrompt || "You are a helpful agent.");
     return `name = "${name}"
 version = "0.1.0"
 description = "Spawned from RustyHand control panel"
@@ -657,16 +716,17 @@ author = "operator"
 module = "builtin:chat"
 
 [model]
-provider = "${customProvider}"
-model = "${customModel}"
-system_prompt = "You are a helpful agent."
+provider = "${tomlEscape(customProvider || "mock")}"
+model = "${tomlEscape(customModel || "mock-echo")}"
+system_prompt = "${sp}"
 temperature = 0.4
 max_tokens = 2048
 
 [capabilities]
-tools = ["${customProfile}"]
+tools = ["${tomlEscape(customProfile || "research")}"]
 `;
   };
+  const customReady = !!customProvider && !!customModel;
   const spawn = async () => {
     setBusy(true);
     setErr(null);
@@ -685,6 +745,13 @@ tools = ["${customProfile}"]
       setBusy(false);
     }
   };
+  const providerBadge = (p) => {
+    const auth = (p.auth_status || "").toLowerCase();
+    if (auth === "ok") return "ok";
+    if (p.is_local && p.reachable) return "local";
+    if (auth === "fallback" || (p.id || "").toLowerCase() === "mock") return "fallback";
+    return auth || "?";
+  };
   return /* @__PURE__ */ React.createElement("div", { className: "modal-back", onClick: onClose }, /* @__PURE__ */ React.createElement("div", { className: "modal", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "modal-head" }, /* @__PURE__ */ React.createElement("b", { className: "mono" }, "Spawn agent"), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", onClick: onClose }, /* @__PURE__ */ React.createElement(I.close, null))), /* @__PURE__ */ React.createElement("div", { className: "modal-body" }, /* @__PURE__ */ React.createElement("div", { className: "tabs", style: { marginBottom: 14 } }, /* @__PURE__ */ React.createElement("button", { className: mode === "template" ? "on" : "", onClick: () => setMode("template") }, "From template"), /* @__PURE__ */ React.createElement("button", { className: mode === "custom" ? "on" : "", onClick: () => setMode("custom") }, "Custom")), mode === "template" && /* @__PURE__ */ React.createElement("div", { className: "col gap-8" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Templates (", tmplList.length, ")"), /* @__PURE__ */ React.createElement("div", { className: "col gap-4", style: { maxHeight: 200, overflow: "auto" } }, tmplList.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, "loading templates\u2026"), tmplList.map((t) => /* @__PURE__ */ React.createElement(
     "button",
     {
@@ -701,7 +768,57 @@ tools = ["${customProfile}"]
     },
     /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 12 } }, t.name),
     t.description && /* @__PURE__ */ React.createElement("span", { className: "dim", style: { fontSize: 11, marginLeft: "auto", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, t.description)
-  ))), customManifest && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Manifest preview"), /* @__PURE__ */ React.createElement("pre", { className: "codebox", style: { maxHeight: 160, overflow: "auto" } }, customManifest))), mode === "custom" && /* @__PURE__ */ React.createElement("div", { className: "col gap-8" }, /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Name"), /* @__PURE__ */ React.createElement("input", { className: "modal-field", placeholder: "my-agent", value: customName, onChange: (e) => setCustomName(e.target.value) })), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Provider"), /* @__PURE__ */ React.createElement("input", { className: "modal-field", value: customProvider, onChange: (e) => setCustomProvider(e.target.value) })), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Model"), /* @__PURE__ */ React.createElement("input", { className: "modal-field", value: customModel, onChange: (e) => setCustomModel(e.target.value) })), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Tool profile"), /* @__PURE__ */ React.createElement("select", { className: "t-select", value: customProfile, onChange: (e) => setCustomProfile(e.target.value) }, profileList.map((p) => /* @__PURE__ */ React.createElement("option", { key: p.name || p, value: p.name || p }, p.name || p)))), /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Manifest preview"), /* @__PURE__ */ React.createElement("pre", { className: "codebox", style: { maxHeight: 160, overflow: "auto" } }, generateManifest())), err && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { marginTop: 12, borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, err))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: onClose }, "Cancel"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", disabled: busy || mode === "template" && !selectedTemplate, onClick: spawn }, busy ? "Spawning\u2026" : "Spawn"))));
+  ))), customManifest && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Manifest preview"), /* @__PURE__ */ React.createElement("pre", { className: "codebox", style: { maxHeight: 160, overflow: "auto" } }, customManifest))), mode === "custom" && /* @__PURE__ */ React.createElement("div", { className: "col gap-8" }, !providersResp && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, "loading providers\u2026"), providersResp && usableProviders.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "No usable provider"), /* @__PURE__ */ React.createElement("span", { className: "banner-body", style: { fontSize: 11 } }, "No provider is authenticated and no local provider is reachable. Add a key in Settings \u2192 LLM providers, or start ollama/vllm/lmstudio.")), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Name"), /* @__PURE__ */ React.createElement("input", { className: "modal-field", placeholder: "my-agent", value: customName, onChange: (e) => setCustomName(e.target.value) })), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Provider", /* @__PURE__ */ React.createElement("span", { className: "dim", style: { marginLeft: 6, fontSize: 10.5 } }, usableProviders.length, " usable", config && config.default_model && config.default_model.provider && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 kernel default: ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, config.default_model.provider)))), /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      className: "t-select",
+      value: customProvider,
+      onChange: (e) => {
+        setCustomProvider(e.target.value);
+        setCustomModel("");
+      },
+      disabled: usableProviders.length === 0
+    },
+    usableProviders.length === 0 && /* @__PURE__ */ React.createElement("option", { value: "" }, "(none)"),
+    usableProviders.map((p) => /* @__PURE__ */ React.createElement("option", { key: p.id, value: p.id }, p.display_name || p.id, " \u2014 ", providerBadge(p)))
+  )), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Model", /* @__PURE__ */ React.createElement("span", { className: "dim", style: { marginLeft: 6, fontSize: 10.5 } }, modelOptions.length, " available", currentProviderEntry && currentProviderEntry.is_local && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 local", currentProviderEntry.reachable ? "" : " (unreachable)"))), /* @__PURE__ */ React.createElement(
+    "select",
+    {
+      className: "t-select",
+      value: customModel,
+      onChange: (e) => setCustomModel(e.target.value),
+      disabled: !customProvider || modelOptions.length === 0
+    },
+    !customProvider && /* @__PURE__ */ React.createElement("option", { value: "" }, "pick a provider first"),
+    customProvider && modelOptions.length === 0 && /* @__PURE__ */ React.createElement("option", { value: "" }, "no models discovered \u2014 type below"),
+    modelOptions.map((m) => /* @__PURE__ */ React.createElement("option", { key: m.id, value: m.id }, m.label, m.hint ? ` \xB7 ${m.hint}` : ""))
+  ), customProvider && modelOptions.length === 0 && /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      className: "modal-field mt-4",
+      style: { marginTop: 6, fontFamily: "ui-monospace, monospace", fontSize: 12 },
+      placeholder: "model id (e.g. llama3.2:latest)",
+      value: customModel,
+      onChange: (e) => setCustomModel(e.target.value)
+    }
+  )), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Tool profile"), /* @__PURE__ */ React.createElement("select", { className: "t-select", value: customProfile, onChange: (e) => setCustomProfile(e.target.value) }, profileList.length === 0 && /* @__PURE__ */ React.createElement("option", { value: "research" }, "research"), profileList.map((p) => /* @__PURE__ */ React.createElement("option", { key: p.name || p, value: p.name || p }, p.name || p)))), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "System prompt"), /* @__PURE__ */ React.createElement(
+    "textarea",
+    {
+      className: "modal-field",
+      rows: 3,
+      value: customSystemPrompt,
+      onChange: (e) => setCustomSystemPrompt(e.target.value),
+      style: { fontFamily: "ui-monospace, monospace", fontSize: 12, resize: "vertical" }
+    }
+  )), /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Manifest preview"), /* @__PURE__ */ React.createElement("pre", { className: "codebox", style: { maxHeight: 160, overflow: "auto" } }, generateManifest())), err && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { marginTop: 12, borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, err))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: onClose }, "Cancel"), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      className: "btn primary",
+      disabled: busy || mode === "template" && !selectedTemplate || mode === "custom" && !customReady,
+      onClick: spawn
+    },
+    busy ? "Spawning\u2026" : "Spawn"
+  ))));
 }
 function AgentDrawer({ agent, onClose }) {
   const [tab, setTab] = useState("info");
@@ -3641,7 +3758,7 @@ function SettingsPage() {
   const users = usersResp && usersResp.users || [];
   const apiListen = config && (config.api_listen || config.api && config.api.listen) || "\u2014";
   const proxy = config && (config.proxy_url || config.proxy && config.proxy.url) || null;
-  const version = health && health.version || "0.7.77";
+  const version = health && health.version || "0.7.78";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "\u2014";
   const agentCount = health && health.agent_count != null ? health.agent_count : "\u2014";
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Settings"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Config at ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "~/.rustyhand/config.toml"), " \xB7 50+ fields with serde defaults \xB7 live from ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/config"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement(
