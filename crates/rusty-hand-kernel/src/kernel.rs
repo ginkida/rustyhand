@@ -5498,6 +5498,28 @@ impl KernelHandle for RustyHandKernel {
         // Delegate to the normal spawn path (use trait method via KernelHandle::)
         KernelHandle::spawn_agent(self, manifest_toml, parent_id).await
     }
+
+    fn config_home(&self) -> Option<std::path::PathBuf> {
+        Some(self.config.home_dir.clone())
+    }
+
+    async fn reload_config_json(&self) -> Result<serde_json::Value, String> {
+        let plan = RustyHandKernel::reload_config(self)?;
+        let status = if plan.restart_required {
+            "applied_partial"
+        } else if plan.has_changes() {
+            "applied"
+        } else {
+            "no_changes"
+        };
+        Ok(serde_json::json!({
+            "status": status,
+            "restart_required": plan.restart_required,
+            "restart_reasons": plan.restart_reasons,
+            "hot_actions_applied": plan.hot_actions.iter().map(|a| format!("{a:?}")).collect::<Vec<_>>(),
+            "noop_changes": plan.noop_changes,
+        }))
+    }
 }
 
 // --- RHP Wire Protocol integration ---

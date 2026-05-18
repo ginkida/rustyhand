@@ -1282,9 +1282,10 @@ impl McpServerConfig {
     /// Safe tools that don't let a remote caller exfiltrate data or modify
     /// the host filesystem. These are always allowed when `enabled = true`.
     ///
-    /// Deliberately excluded: shell_exec, file_write, apply_patch,
-    /// skill_install, agent_spawn, agent_kill, browser_*, image_generate,
-    /// media_transcribe (can leak audio content), self_update.
+    /// Deliberately excluded (must be opted in via `extra_allowed_tools`):
+    /// shell_exec, file_write, apply_patch, skill_install, agent_spawn,
+    /// agent_kill, browser_*, image_generate, media_transcribe (can leak
+    /// audio content), self_update, config_set, config_replace, cron_*.
     pub fn safe_default_tools() -> &'static [&'static str] {
         &[
             // Read-only filesystem
@@ -1303,6 +1304,7 @@ impl McpServerConfig {
             // Self-observation
             "self_history",
             "self_metrics",
+            "self_evaluate",
             // Documents
             "doc_ingest",
             "doc_search",
@@ -1316,10 +1318,19 @@ impl McpServerConfig {
             "task_complete",
             "task_list",
             "event_publish",
-            // Scheduling
+            // Scheduling — read/create own (cron_cancel needs opt-in)
             "schedule_create",
             "schedule_list",
             "schedule_delete",
+            "cron_list",
+            // Read-only config inspection (secrets masked as <redacted>)
+            "config_get",
+            // Read-only media analysis
+            "image_analyze",
+            "media_describe",
+            "location_get",
+            // External agent discovery (read-only)
+            "a2a_discover",
         ]
     }
 
@@ -2484,6 +2495,10 @@ mod tests {
             "agent_kill",
             "browser_execute_script",
             "self_update",
+            // Config mutation must be opt-in: only config_get is in
+            // safe defaults. Writers require extra_allowed_tools.
+            "config_set",
+            "config_replace",
         ] {
             assert!(
                 !cfg.is_tool_allowed(privileged),
@@ -2504,6 +2519,8 @@ mod tests {
             "web_fetch",
             "self_history",
             "task_list",
+            // Read-only config inspection is safe (secrets masked).
+            "config_get",
         ] {
             assert!(
                 cfg.is_tool_allowed(safe),

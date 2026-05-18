@@ -33,7 +33,7 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.76";
+  const version = (health && health.version) || "0.7.77";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -50,7 +50,13 @@ function OverviewPage({ go }) {
         </div>
         <div className="page-actions">
           <button className="btn ghost" onClick={refresh}><I.refresh/> Refresh</button>
-          <button className="btn primary"><I.plus/> New agent</button>
+          <button className="btn primary"
+                  onClick={() => {
+                    go("agents");
+                    setTimeout(() => {
+                      window.dispatchEvent(new CustomEvent("rh:hotkey:new", { detail: { page: "agents" } }));
+                    }, 60);
+                  }}><I.plus/> New agent</button>
         </div>
       </div>
 
@@ -5924,13 +5930,14 @@ function SettingsPage() {
   const [onboarding] = useApi("/api/onboarding");
   const [usersResp] = usePolling("/api/auth/users", 30000);
   const [editing, setEditing] = useState(null);
+  const [showRawEditor, setShowRawEditor] = useState(false);
 
   const providers = (providersResp && providersResp.providers) || [];
   const users = (usersResp && usersResp.users) || [];
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.76";
+  const version = (health && health.version) || "0.7.77";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 
@@ -5953,6 +5960,11 @@ function SettingsPage() {
                     } catch (e) { toastErr(`export failed: ${e.message || e}`); }
                   }}>
             <I.download/> Export config.toml
+          </button>
+          <button className="btn primary"
+                  title="Edit ~/.rustyhand/config.toml directly. Secrets shown as <redacted> are kept unchanged unless you replace them."
+                  onClick={() => setShowRawEditor(true)}>
+            <I.edit/> Edit raw config
           </button>
         </div>
       </div>
@@ -6073,6 +6085,167 @@ function SettingsPage() {
       </div>
 
       {editing && <ProviderKeyModal provider={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); refreshProviders(); }}/>}
+      {showRawEditor && <ConfigEditorModal onClose={() => setShowRawEditor(false)}/>}
+    </div>
+  );
+}
+
+// ConfigEditorModal — full TOML editor for ~/.rustyhand/config.toml. Loads
+// the current contents via /api/config/export (with secrets masked as
+// <redacted>) into a monospace textarea, lets the operator edit, and POSTs
+// the result to /api/config/replace. On save the server: validates TOML
+// syntax, substitutes any <redacted> placeholders back from the previous
+// on-disk values (so secrets survive round-trips when the user didn't
+// touch them), writes a .bak backup, replaces the file, and triggers
+// reload_config(). The reload plan is shown so the operator knows whether
+// a daemon restart is required.
+function ConfigEditorModal({ onClose }) {
+  useEscapeKey(onClose);
+  const [text, setText] = useState("");
+  const [original, setOriginal] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const [result, setResult] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const raw = await rhFetch("/api/config/export");
+        if (!alive) return;
+        setText(raw);
+        setOriginal(raw);
+      } catch (e) {
+        if (alive) setErr(`load failed: ${e.message || e}`);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const dirty = text !== original;
+
+  const save = async () => {
+    setBusy(true); setErr(null); setResult(null);
+    try {
+      const r = await rhFetch("/api/config/replace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ toml: text }),
+      });
+      setResult(r);
+      setOriginal(text);
+      if (r.status === "applied" || r.status === "no_changes") {
+        toastOk(r.status === "applied" ? "Config applied" : "Saved (no effective changes)");
+      } else if (r.status === "applied_partial") {
+        toastOk("Saved — some changes require daemon restart");
+      } else if (r.status === "saved_reload_failed") {
+        toastErr(`Saved but reload failed: ${r.reload_error || "see logs"}`);
+      }
+    } catch (e) {
+      setErr(String(e.message || e));
+      toastErr(`save failed: ${e.message || e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revert = () => {
+    if (!dirty) return;
+    setText(original);
+    setResult(null);
+    setErr(null);
+  };
+
+  const reload = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const raw = await rhFetch("/api/config/export");
+      setText(raw);
+      setOriginal(raw);
+      setResult(null);
+      toastOk("Reloaded from disk");
+    } catch (e) {
+      setErr(`reload failed: ${e.message || e}`);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{maxWidth: "min(1100px, 96vw)", width: "1100px"}}>
+        <div className="modal-head">
+          <b className="mono">Edit <span style={{color:"var(--fg-3)"}}>~/.rustyhand/config.toml</span></b>
+          <button className="icon-btn" onClick={onClose}><I.close/></button>
+        </div>
+        <div className="modal-body">
+          <div className="dim mono mb-8" style={{fontSize:11}}>
+            Secrets shown as <span className="mono">&lt;redacted&gt;</span> are kept untouched on save.
+            Replace them with new values to rotate, or leave as-is to preserve.
+            A <span className="mono">.bak</span> copy is written before each replace.
+          </div>
+          {loading && <div className="muted mono" style={{padding:"40px 0", fontSize:12, textAlign:"center"}}>loading config…</div>}
+          {!loading && (
+            <textarea
+              className="modal-field mono"
+              value={text}
+              onChange={e => setText(e.target.value)}
+              spellCheck={false}
+              wrap="off"
+              style={{
+                width: "100%",
+                minHeight: "60vh",
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                fontSize: 12.5,
+                lineHeight: 1.55,
+                tabSize: 2,
+                whiteSpace: "pre",
+                overflow: "auto",
+                resize: "vertical",
+              }}
+            />
+          )}
+          {result && (
+            <div className="banner mt-12" style={{borderColor: result.status === "saved_reload_failed" ? "oklch(0.66 0.18 25 / .35)" : "oklch(0.74 0.135 150 / .35)"}}>
+              <span className={"dot " + (result.status === "saved_reload_failed" ? "err" : "live")}/>
+              <span className="banner-title">{result.status.toUpperCase()}</span>
+              <span className="banner-body mono" style={{fontSize:11}}>
+                wrote {result.bytes_written} bytes
+                {result.backup_path && <> · backup: <span className="mono dim">{result.backup_path}</span></>}
+                {result.restart_required && <> · <b>daemon restart required</b></>}
+                {Array.isArray(result.restart_reasons) && result.restart_reasons.length > 0 && (
+                  <div className="dim" style={{fontSize:11, marginTop:4}}>reasons: {result.restart_reasons.join(", ")}</div>
+                )}
+                {Array.isArray(result.hot_actions_applied) && result.hot_actions_applied.length > 0 && (
+                  <div className="dim" style={{fontSize:11, marginTop:4}}>hot-applied: {result.hot_actions_applied.join(", ")}</div>
+                )}
+                {result.reload_error && (
+                  <div style={{fontSize:11, marginTop:4, color:"var(--crimson)"}}>reload error: {result.reload_error}</div>
+                )}
+              </span>
+            </div>
+          )}
+          {err && (
+            <div className="banner mt-12" style={{borderColor:"oklch(0.66 0.18 25 / .35)"}}>
+              <span className="dot err"/><span className="banner-title">ERROR</span>
+              <span className="banner-body mono" style={{fontSize:11}}>{err}</span>
+            </div>
+          )}
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={reload} disabled={busy || loading} style={{marginRight:"auto"}}>
+            <I.refresh/> Reload from disk
+          </button>
+          <span className="dim mono" style={{fontSize:11, marginRight:8}}>
+            {dirty ? "● unsaved" : "saved"} · {text.length.toLocaleString()} chars
+          </span>
+          <button className="btn" onClick={revert} disabled={!dirty || busy}>Revert</button>
+          <button className="btn primary" onClick={save} disabled={busy || loading || !dirty}>
+            {busy ? "Saving…" : "Save & reload"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

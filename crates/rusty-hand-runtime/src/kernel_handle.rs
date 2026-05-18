@@ -217,4 +217,19 @@ pub trait KernelHandle: Send + Sync {
         let _ = parent_caps;
         self.spawn_agent(manifest_toml, parent_id).await
     }
+
+    /// Path to the kernel's home directory (e.g. `~/.rustyhand/`).
+    /// Used by config_* tools to locate `config.toml`. Returns None when
+    /// the kernel handle is a stub (tests, mock drivers).
+    fn config_home(&self) -> Option<std::path::PathBuf> {
+        None
+    }
+
+    /// Reload config from disk and apply hot-reloadable changes.
+    /// Returns a JSON summary of the reload plan (status, restart_required,
+    /// reasons, hot_actions). Default returns an error; the kernel overrides
+    /// this with a real implementation.
+    async fn reload_config_json(&self) -> Result<serde_json::Value, String> {
+        Err("Config reload not available".to_string())
+    }
 }

@@ -355,6 +355,7 @@ async fn dashboard_wires_write_paths() {
         // Modals
         ("SpawnAgentModal", "Spawn agent flow"),
         ("ProviderKeyModal", "Provider key editor"),
+        ("ConfigEditorModal", "Full config.toml editor"),
         ("CronJobModal", "Cron job create form"),
         ("TriggerModal", "Trigger create form"),
         ("WorkflowCreateModal", "Workflow create form"),
@@ -445,6 +446,7 @@ async fn dashboard_wires_write_paths() {
         ("auditLevelOf", "Audit level classifier"),
         ("rh.panel.auditLevel", "Audit level filter persistence"),
         ("/api/config/export", "Config TOML export endpoint"),
+        ("/api/config/replace", "Full config.toml replace endpoint"),
         // Iter 69-71: triggers bulk + bindings bulk + Health page
         ("bulkTrigSetEnabled", "Triggers bulk arm/disarm"),
         ("bulkRemove", "Bindings bulk remove"),

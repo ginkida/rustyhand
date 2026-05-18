@@ -51,7 +51,8 @@ const I = {
   link: () => /* @__PURE__ */ React.createElement(Icon, null, /* @__PURE__ */ React.createElement("path", { d: "M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1" }), /* @__PURE__ */ React.createElement("path", { d: "M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" })),
   arrowR: () => /* @__PURE__ */ React.createElement(Icon, null, /* @__PURE__ */ React.createElement("path", { d: "M5 12h14M13 6l6 6-6 6" })),
   cpu: () => /* @__PURE__ */ React.createElement(Icon, null, /* @__PURE__ */ React.createElement("rect", { x: "6", y: "6", width: "12", height: "12", rx: "2" }), /* @__PURE__ */ React.createElement("rect", { x: "10", y: "10", width: "4", height: "4" }), /* @__PURE__ */ React.createElement("path", { d: "M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3" })),
-  trash: () => /* @__PURE__ */ React.createElement(Icon, null, /* @__PURE__ */ React.createElement("path", { d: "M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14M10 11v6M14 11v6" }))
+  trash: () => /* @__PURE__ */ React.createElement(Icon, null, /* @__PURE__ */ React.createElement("path", { d: "M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14M10 11v6M14 11v6" })),
+  edit: () => /* @__PURE__ */ React.createElement(Icon, null, /* @__PURE__ */ React.createElement("path", { d: "M12 20h9" }), /* @__PURE__ */ React.createElement("path", { d: "M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" }))
 };
 const ChannelIcon = ({ kind }) => {
   const k = (kind || "").toLowerCase();

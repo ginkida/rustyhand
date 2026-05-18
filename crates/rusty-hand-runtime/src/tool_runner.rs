@@ -484,6 +484,15 @@ pub async fn execute_tool(
         // Canvas / A2UI tool
         "canvas_present" => tool_canvas_present(input, workspace_root).await,
 
+        // Config management tools — read/write ~/.rustyhand/config.toml.
+        // `config_get` is safe to expose via MCP by default (secrets masked).
+        // `config_set` and `config_replace` modify on-disk config and are
+        // privileged: only callable if the agent has the capability AND, for
+        // MCP exposure, the operator added them to extra_allowed_tools.
+        "config_get" => tool_config_get(kernel).await,
+        "config_set" => tool_config_set(input, kernel).await,
+        "config_replace" => tool_config_replace(input, kernel).await,
+
         other => {
             // Fallback 1: MCP tools (mcp_{server}_{tool} prefix)
             if mcp::is_mcp_tool(other) {
@@ -636,11 +645,11 @@ pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
         // --- Shell tool ---
         ToolDefinition {
             name: "shell_exec".to_string(),
-            description: "Execute a shell command and return its output.".to_string(),
+            description: "Execute a shell command and return its output. Network access is enabled by default: curl, wget, ping, dig, ssh, git, package installers and any HTTP/HTTPS request all work. Do NOT refuse network operations — call this tool and report the actual result.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "command": { "type": "string", "description": "The command to execute" },
+                    "command": { "type": "string", "description": "The command to execute (network commands like curl/wget/ping are permitted)" },
                     "timeout_seconds": { "type": "integer", "description": "Timeout in seconds (default: 30)" }
                 },
                 "required": ["command"]
@@ -1330,6 +1339,41 @@ pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
                     "title": { "type": "string", "description": "Optional title for the canvas panel" }
                 },
                 "required": ["html"]
+            }),
+        },
+        // --- Config management tools ---
+        // config_get is read-only (secrets masked) and safe for MCP defaults.
+        // config_set / config_replace mutate the on-disk config and require
+        // explicit allowlisting in mcp_server.extra_allowed_tools.
+        ToolDefinition {
+            name: "config_get".to_string(),
+            description: "Read the kernel's config.toml (path defaults to ~/.rustyhand/config.toml). Secrets (api_key, password, token, *_key, *_secret, etc.) are masked as <redacted>. Use for inspecting current settings before calling config_set or config_replace.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+        },
+        ToolDefinition {
+            name: "config_set".to_string(),
+            description: "Set a single config field by dotted path (e.g. \"log_level\", \"default_model.provider\", \"memory.decay_rate\"). Supports up to 3 levels of nesting. Value is JSON (string/number/bool). After write, the kernel runs a hot reload; the response includes whether a daemon restart is required.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Dotted config path, max 3 levels (e.g. 'default_model.provider')" },
+                    "value": { "description": "New value (string, number, or boolean)" }
+                },
+                "required": ["path", "value"]
+            }),
+        },
+        ToolDefinition {
+            name: "config_replace".to_string(),
+            description: "Replace the entire ~/.rustyhand/config.toml with the provided TOML string. The TOML is validated syntactically before write. A .bak copy is written first. Any string value left as <redacted> is restored from the previous on-disk secret, so secrets survive round-trips when you only edited non-secret fields. Triggers reload_config(); the response reports whether a daemon restart is required.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "toml": { "type": "string", "description": "Full TOML config content. Must be syntactically valid TOML." }
+                },
+                "required": ["toml"]
             }),
         },
     ]
@@ -3636,6 +3680,257 @@ async fn tool_canvas_present(
     serde_json::to_string_pretty(&response).map_err(|e| format!("Serialize error: {e}"))
 }
 
+// ---------------------------------------------------------------------------
+// Config management tools
+// ---------------------------------------------------------------------------
+
+/// `config_get` — read ~/.rustyhand/config.toml with secrets masked.
+/// Returns the TOML as a string so the LLM can inspect it before mutating.
+async fn tool_config_get(kernel: Option<&Arc<dyn KernelHandle>>) -> Result<String, String> {
+    let home = kernel
+        .and_then(|k| k.config_home())
+        .ok_or_else(|| "config_get: kernel handle is unavailable in this context".to_string())?;
+    let path = home.join("config.toml");
+    if !path.exists() {
+        return Err(format!(
+            "config_get: {} does not exist yet — start the daemon once or use config_set to create it",
+            path.display()
+        ));
+    }
+    let raw = std::fs::read_to_string(&path)
+        .map_err(|e| format!("config_get: read {} failed: {e}", path.display()))?;
+    Ok(mask_secrets_in_toml(&raw))
+}
+
+/// `config_set` — write a single dotted-path field. Mirrors the
+/// `POST /api/config/set` HTTP endpoint so MCP clients have parity.
+async fn tool_config_set(
+    input: &serde_json::Value,
+    kernel: Option<&Arc<dyn KernelHandle>>,
+) -> Result<String, String> {
+    let path = input["path"]
+        .as_str()
+        .ok_or("config_set: missing 'path' (dotted config field name)")?
+        .to_string();
+    let value = input
+        .get("value")
+        .cloned()
+        .ok_or("config_set: missing 'value'")?;
+    let kh = kernel.ok_or("config_set: kernel handle unavailable")?;
+    let home = kh
+        .config_home()
+        .ok_or("config_set: kernel does not expose home_dir")?;
+    let config_path = home.join("config.toml");
+    let mut table: toml::value::Table = if config_path.exists() {
+        let s = std::fs::read_to_string(&config_path)
+            .map_err(|e| format!("config_set: read failed: {e}"))?;
+        toml::from_str(&s).unwrap_or_default()
+    } else {
+        toml::value::Table::new()
+    };
+    let parts: Vec<&str> = path.split('.').collect();
+    if parts.is_empty() || parts.len() > 3 {
+        return Err("config_set: path must have 1–3 dotted segments".to_string());
+    }
+    let toml_val = json_to_toml_value(&value);
+    match parts.len() {
+        1 => {
+            table.insert(parts[0].to_string(), toml_val);
+        }
+        2 => {
+            let section = table
+                .entry(parts[0].to_string())
+                .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
+            if let toml::Value::Table(t) = section {
+                t.insert(parts[1].to_string(), toml_val);
+            } else {
+                return Err(format!("config_set: '{}' is not a section", parts[0]));
+            }
+        }
+        3 => {
+            let section = table
+                .entry(parts[0].to_string())
+                .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
+            if let toml::Value::Table(t) = section {
+                let sub = t
+                    .entry(parts[1].to_string())
+                    .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
+                if let toml::Value::Table(t2) = sub {
+                    t2.insert(parts[2].to_string(), toml_val);
+                } else {
+                    return Err(format!(
+                        "config_set: '{}.{}' is not a section",
+                        parts[0], parts[1]
+                    ));
+                }
+            } else {
+                return Err(format!("config_set: '{}' is not a section", parts[0]));
+            }
+        }
+        _ => unreachable!(),
+    }
+    let serialized =
+        toml::to_string_pretty(&table).map_err(|e| format!("config_set: serialize failed: {e}"))?;
+    if let Some(parent) = config_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let backup = config_path.with_extension("toml.bak");
+    if config_path.exists() {
+        let _ = std::fs::copy(&config_path, &backup);
+    }
+    std::fs::write(&config_path, &serialized)
+        .map_err(|e| format!("config_set: write failed: {e}"))?;
+    let reload = kh.reload_config_json().await.unwrap_or_else(
+        |e| serde_json::json!({ "status": "saved_reload_failed", "reload_error": e }),
+    );
+    serde_json::to_string_pretty(&serde_json::json!({
+        "path": path,
+        "value": value,
+        "config_path": config_path.display().to_string(),
+        "backup_path": backup.display().to_string(),
+        "bytes_written": serialized.len(),
+        "reload": reload,
+    }))
+    .map_err(|e| format!("config_set: response serialize failed: {e}"))
+}
+
+/// `config_replace` — replace the entire config.toml. Mirrors
+/// `POST /api/config/replace` and restores `<redacted>` placeholders.
+async fn tool_config_replace(
+    input: &serde_json::Value,
+    kernel: Option<&Arc<dyn KernelHandle>>,
+) -> Result<String, String> {
+    let new_toml = input["toml"]
+        .as_str()
+        .ok_or("config_replace: missing 'toml' (full TOML string)")?;
+    let mut new_table: toml::value::Table =
+        toml::from_str(new_toml).map_err(|e| format!("config_replace: TOML parse error: {e}"))?;
+    let kh = kernel.ok_or("config_replace: kernel handle unavailable")?;
+    let home = kh
+        .config_home()
+        .ok_or("config_replace: kernel does not expose home_dir")?;
+    let config_path = home.join("config.toml");
+    let current_table: toml::value::Table = if config_path.exists() {
+        let s = std::fs::read_to_string(&config_path)
+            .map_err(|e| format!("config_replace: read current failed: {e}"))?;
+        toml::from_str(&s).unwrap_or_default()
+    } else {
+        toml::value::Table::new()
+    };
+    restore_redacted_in_table(&mut new_table, &current_table);
+    let serialized = toml::to_string_pretty(&new_table)
+        .map_err(|e| format!("config_replace: serialize failed: {e}"))?;
+    if let Some(parent) = config_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let backup = config_path.with_extension("toml.bak");
+    if config_path.exists() {
+        let _ = std::fs::copy(&config_path, &backup);
+    }
+    std::fs::write(&config_path, &serialized)
+        .map_err(|e| format!("config_replace: write failed: {e}"))?;
+    let reload = kh.reload_config_json().await.unwrap_or_else(
+        |e| serde_json::json!({ "status": "saved_reload_failed", "reload_error": e }),
+    );
+    serde_json::to_string_pretty(&serde_json::json!({
+        "config_path": config_path.display().to_string(),
+        "backup_path": backup.display().to_string(),
+        "bytes_written": serialized.len(),
+        "reload": reload,
+    }))
+    .map_err(|e| format!("config_replace: response serialize failed: {e}"))
+}
+
+/// Best-effort secret masker for arbitrary TOML strings. Mirrors the
+/// HTTP `mask_config_secrets` helper so MCP `config_get` matches the
+/// `GET /api/config/export` view byte-for-byte.
+fn mask_secrets_in_toml(toml_text: &str) -> String {
+    let mut out = String::with_capacity(toml_text.len());
+    for line in toml_text.lines() {
+        let trimmed = line.trim_start();
+        let key = trimmed
+            .find('=')
+            .map(|i| trimmed[..i].trim().to_lowercase());
+        let is_secret = match key {
+            Some(k) => is_secret_field_name(&k),
+            None => false,
+        };
+        if is_secret {
+            if let Some(eq) = line.find('=') {
+                let (lhs, _) = line.split_at(eq + 1);
+                out.push_str(lhs);
+                out.push_str(" \"<redacted>\"");
+                out.push('\n');
+                continue;
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+fn is_secret_field_name(k: &str) -> bool {
+    k == "api_key"
+        || k == "password"
+        || k == "token"
+        || k == "secret"
+        || k == "bearer_token"
+        || k.ends_with("_key")
+        || k.ends_with("_token")
+        || k.ends_with("_password")
+        || k.ends_with("_secret")
+}
+
+/// Walk `new_table` and substitute `<redacted>` placeholders with the
+/// matching value from `current_table` for known secret field names.
+fn restore_redacted_in_table(
+    new_table: &mut toml::value::Table,
+    current_table: &toml::value::Table,
+) {
+    for (key, value) in new_table.iter_mut() {
+        match value {
+            toml::Value::String(s)
+                if s == "<redacted>" && is_secret_field_name(&key.to_lowercase()) =>
+            {
+                if let Some(toml::Value::String(orig)) = current_table.get(key) {
+                    *s = orig.clone();
+                }
+            }
+            toml::Value::Table(nested) => {
+                if let Some(toml::Value::Table(curr_nested)) = current_table.get(key) {
+                    restore_redacted_in_table(nested, curr_nested);
+                } else {
+                    let empty = toml::value::Table::new();
+                    restore_redacted_in_table(nested, &empty);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Convert a serde_json::Value to a toml::Value for config writes.
+fn json_to_toml_value(value: &serde_json::Value) -> toml::Value {
+    match value {
+        serde_json::Value::String(s) => toml::Value::String(s.clone()),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                toml::Value::Integer(i)
+            } else if let Some(f) = n.as_f64() {
+                toml::Value::Float(f)
+            } else {
+                toml::Value::String(n.to_string())
+            }
+        }
+        serde_json::Value::Bool(b) => toml::Value::Boolean(*b),
+        serde_json::Value::Array(arr) => {
+            toml::Value::Array(arr.iter().map(json_to_toml_value).collect())
+        }
+        _ => toml::Value::String(value.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4597,5 +4892,137 @@ mod tests {
                 "Should break at paragraph boundary"
             );
         }
+    }
+
+    // ─── config_* tools ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_config_get_without_kernel_errors() {
+        let result = execute_tool(
+            "test-id",
+            "config_get",
+            &serde_json::json!({}),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("kernel"));
+    }
+
+    #[tokio::test]
+    async fn test_config_replace_rejects_invalid_toml() {
+        let result = execute_tool(
+            "test-id",
+            "config_replace",
+            &serde_json::json!({"toml": "this is = not = valid = toml"}),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn test_mask_secrets_in_toml_masks_known_keys() {
+        let input = r#"
+api_key = "sk-secret-deadbeef"
+log_level = "info"
+[default_model]
+api_key_env = "OPENAI_API_KEY"
+bearer_token = "xoxb-1234"
+password = "hunter2"
+"#;
+        let masked = mask_secrets_in_toml(input);
+        assert!(
+            !masked.contains("sk-secret-deadbeef"),
+            "api_key value must be masked"
+        );
+        assert!(
+            !masked.contains("xoxb-1234"),
+            "bearer_token value must be masked"
+        );
+        assert!(!masked.contains("hunter2"), "password must be masked");
+        assert!(
+            masked.contains("OPENAI_API_KEY"),
+            "api_key_env (a *_env name, not a secret) MAY pass through but is treated as secret if key ends with _key — accept either"
+        );
+        assert!(
+            masked.contains("log_level = \"info\""),
+            "non-secret field must round-trip"
+        );
+        assert!(masked.contains("<redacted>"));
+    }
+
+    #[test]
+    fn test_restore_redacted_in_table_substitutes_known_secrets() {
+        let mut new_table: toml::value::Table =
+            toml::from_str("api_key = \"<redacted>\"\nlog_level = \"debug\"").unwrap();
+        let current_table: toml::value::Table =
+            toml::from_str("api_key = \"sk-real\"\nlog_level = \"info\"").unwrap();
+        restore_redacted_in_table(&mut new_table, &current_table);
+        assert_eq!(
+            new_table.get("api_key").and_then(|v| v.as_str()),
+            Some("sk-real"),
+            "redacted api_key must be restored from current"
+        );
+        assert_eq!(
+            new_table.get("log_level").and_then(|v| v.as_str()),
+            Some("debug"),
+            "non-redacted edits must be preserved"
+        );
+    }
+
+    #[test]
+    fn test_restore_redacted_in_nested_tables() {
+        let mut new_table: toml::value::Table =
+            toml::from_str("[telegram]\nbot_token = \"<redacted>\"\nchat_id = \"new-chat\"")
+                .unwrap();
+        let current_table: toml::value::Table =
+            toml::from_str("[telegram]\nbot_token = \"real-token\"\nchat_id = \"old-chat\"")
+                .unwrap();
+        restore_redacted_in_table(&mut new_table, &current_table);
+        let tg = new_table
+            .get("telegram")
+            .and_then(|v| v.as_table())
+            .unwrap();
+        assert_eq!(
+            tg.get("bot_token").and_then(|v| v.as_str()),
+            Some("real-token")
+        );
+        assert_eq!(tg.get("chat_id").and_then(|v| v.as_str()), Some("new-chat"));
+    }
+
+    #[test]
+    fn test_builtin_tools_include_config_tools() {
+        let defs = builtin_tool_definitions();
+        let names: std::collections::HashSet<&str> = defs.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains("config_get"));
+        assert!(names.contains("config_set"));
+        assert!(names.contains("config_replace"));
     }
 }

@@ -23,9 +23,22 @@ function OverviewPage({ go }) {
     refreshApprovals();
   };
   const approvalRows = approvalsResp && approvalsResp.approvals || D.approvals;
-  const version = health && health.version || "0.7.76";
+  const version = health && health.version || "0.7.77";
   const uptime = health && health.uptime_seconds ? formatUptime(health.uptime_seconds) : null;
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(Banner, { go, onboarding }), /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Overview"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "System pulse \xB7 kernel ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v", version), uptime && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 uptime ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, uptime)), " ", "\xB7 schema ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v8"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null), " Refresh"), /* @__PURE__ */ React.createElement("button", { className: "btn primary" }, /* @__PURE__ */ React.createElement(I.plus, null), " New agent"))), /* @__PURE__ */ React.createElement("div", { className: "tiles" }, /* @__PURE__ */ React.createElement(Tile, { label: "Agents running", value: `${live}`, foot: `of ${totalAgents} total`, spark: sparkOf(agents.map((_, i) => live + (i % 3 - 1)), 12) }), /* @__PURE__ */ React.createElement(Tile, { label: "Cost \xB7 today", value: `$${(cost24 || 0).toFixed(2)}`, foot: usage ? "from /api/usage/daily" : "loading\u2026", spark: days.slice(-12).map((d) => d.cost_usd || 0) }), /* @__PURE__ */ React.createElement(Tile, { label: "Audit entries", value: audit && audit.total != null ? audit.total.toLocaleString() : "\u2014", foot: audit && audit.tip_hash ? `tip ${String(audit.tip_hash).slice(0, 8)}` : "loading\u2026", spark: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] }), /* @__PURE__ */ React.createElement(Tile, { label: "Errors \xB7 agents", value: `${errors}`, foot: errors ? `${errors} crashed agent(s)` : "all green", spark: [0, 0, 1, 0, 0, 0, 0, 0, errors, 0, 0, 0], deltaCls: "up", warn: errors > 0 })), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 col" }, /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Live activity"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: refreshAudit }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost" }, /* @__PURE__ */ React.createElement(I.download, null), " Export"))), /* @__PURE__ */ React.createElement(ActivityFeed, { entries: audit && audit.entries })), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Approvals \xB7 waiting"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("approvals") }, "Open queue"))), approvalRows.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, "No approvals waiting.") : /* @__PURE__ */ React.createElement(ApprovalsTable, { rows: approvalRows.slice(0, 3), compact: true, onChange: refreshApprovals }))), /* @__PURE__ */ React.createElement("div", { className: "col-4 col" }, onboarding && onboarding.demo_mode && /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Demo seed"), /* @__PURE__ */ React.createElement("span", { className: "badge demo" }, /* @__PURE__ */ React.createElement("span", { className: "dot demo" }), "active")), /* @__PURE__ */ React.createElement("div", { className: "col gap-8" }, /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.agents, null), title: "rusty", sub: "welcome agent \xB7 chat-ready", onClick: () => go("chat") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.workflows, null), title: "demo-pipeline", sub: "2-step sample workflow \xB7 click to run", onClick: () => go("workflows") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.event, null), title: "sample trigger", sub: "agent-spawn on webhook", onClick: () => go("automation") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.cron, null), title: "demo-daily-ping", sub: "cron 0 9 * * * \xB7 disabled", onClick: () => go("automation") }))), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Providers"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("settings") }, "Manage")), /* @__PURE__ */ React.createElement(ProvidersList, { providers: providersResp && providersResp.providers })), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Audit chain"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("audit") }, "View")), /* @__PURE__ */ React.createElement("div", { className: "col gap-4" }, /* @__PURE__ */ React.createElement(AuditSummary, { audit }))))));
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(Banner, { go, onboarding }), /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Overview"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "System pulse \xB7 kernel ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v", version), uptime && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 uptime ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, uptime)), " ", "\xB7 schema ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v8"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null), " Refresh"), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      className: "btn primary",
+      onClick: () => {
+        go("agents");
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent("rh:hotkey:new", { detail: { page: "agents" } }));
+        }, 60);
+      }
+    },
+    /* @__PURE__ */ React.createElement(I.plus, null),
+    " New agent"
+  ))), /* @__PURE__ */ React.createElement("div", { className: "tiles" }, /* @__PURE__ */ React.createElement(Tile, { label: "Agents running", value: `${live}`, foot: `of ${totalAgents} total`, spark: sparkOf(agents.map((_, i) => live + (i % 3 - 1)), 12) }), /* @__PURE__ */ React.createElement(Tile, { label: "Cost \xB7 today", value: `$${(cost24 || 0).toFixed(2)}`, foot: usage ? "from /api/usage/daily" : "loading\u2026", spark: days.slice(-12).map((d) => d.cost_usd || 0) }), /* @__PURE__ */ React.createElement(Tile, { label: "Audit entries", value: audit && audit.total != null ? audit.total.toLocaleString() : "\u2014", foot: audit && audit.tip_hash ? `tip ${String(audit.tip_hash).slice(0, 8)}` : "loading\u2026", spark: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] }), /* @__PURE__ */ React.createElement(Tile, { label: "Errors \xB7 agents", value: `${errors}`, foot: errors ? `${errors} crashed agent(s)` : "all green", spark: [0, 0, 1, 0, 0, 0, 0, 0, errors, 0, 0, 0], deltaCls: "up", warn: errors > 0 })), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 col" }, /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Live activity"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: refreshAudit }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost" }, /* @__PURE__ */ React.createElement(I.download, null), " Export"))), /* @__PURE__ */ React.createElement(ActivityFeed, { entries: audit && audit.entries })), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Approvals \xB7 waiting"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("approvals") }, "Open queue"))), approvalRows.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, "No approvals waiting.") : /* @__PURE__ */ React.createElement(ApprovalsTable, { rows: approvalRows.slice(0, 3), compact: true, onChange: refreshApprovals }))), /* @__PURE__ */ React.createElement("div", { className: "col-4 col" }, onboarding && onboarding.demo_mode && /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Demo seed"), /* @__PURE__ */ React.createElement("span", { className: "badge demo" }, /* @__PURE__ */ React.createElement("span", { className: "dot demo" }), "active")), /* @__PURE__ */ React.createElement("div", { className: "col gap-8" }, /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.agents, null), title: "rusty", sub: "welcome agent \xB7 chat-ready", onClick: () => go("chat") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.workflows, null), title: "demo-pipeline", sub: "2-step sample workflow \xB7 click to run", onClick: () => go("workflows") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.event, null), title: "sample trigger", sub: "agent-spawn on webhook", onClick: () => go("automation") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.cron, null), title: "demo-daily-ping", sub: "cron 0 9 * * * \xB7 disabled", onClick: () => go("automation") }))), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Providers"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("settings") }, "Manage")), /* @__PURE__ */ React.createElement(ProvidersList, { providers: providersResp && providersResp.providers })), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Audit chain"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("audit") }, "View")), /* @__PURE__ */ React.createElement("div", { className: "col gap-4" }, /* @__PURE__ */ React.createElement(AuditSummary, { audit }))))));
 }
 function formatUptime(s) {
   if (s == null) return null;
@@ -3623,11 +3636,12 @@ function SettingsPage() {
   const [onboarding] = useApi("/api/onboarding");
   const [usersResp] = usePolling("/api/auth/users", 3e4);
   const [editing, setEditing] = useState(null);
+  const [showRawEditor, setShowRawEditor] = useState(false);
   const providers = providersResp && providersResp.providers || [];
   const users = usersResp && usersResp.users || [];
   const apiListen = config && (config.api_listen || config.api && config.api.listen) || "\u2014";
   const proxy = config && (config.proxy_url || config.proxy && config.proxy.url) || null;
-  const version = health && health.version || "0.7.76";
+  const version = health && health.version || "0.7.77";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "\u2014";
   const agentCount = health && health.agent_count != null ? health.agent_count : "\u2014";
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Settings"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Config at ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "~/.rustyhand/config.toml"), " \xB7 50+ fields with serde defaults \xB7 live from ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/config"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement(
@@ -3648,6 +3662,15 @@ function SettingsPage() {
     },
     /* @__PURE__ */ React.createElement(I.download, null),
     " Export config.toml"
+  ), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      className: "btn primary",
+      title: "Edit ~/.rustyhand/config.toml directly. Secrets shown as <redacted> are kept unchanged unless you replace them.",
+      onClick: () => setShowRawEditor(true)
+    },
+    /* @__PURE__ */ React.createElement(I.edit, null),
+    " Edit raw config"
   ))), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "LLM providers"), /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 11 } }, providers.length, " loaded \xB7 auto-probe at boot")), /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Provider"), /* @__PURE__ */ React.createElement("th", null, "Env var"), /* @__PURE__ */ React.createElement("th", null, "State"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Models"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, !providersResp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 5, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), providers.map((p) => {
     const auth = (p.auth_status || "").toLowerCase();
     let badge;
@@ -3685,7 +3708,103 @@ function SettingsPage() {
   ))), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Build"), /* @__PURE__ */ React.createElement("div", { className: "kv" }, /* @__PURE__ */ React.createElement("dt", null, "version"), /* @__PURE__ */ React.createElement("dd", { className: "mono" }, version), /* @__PURE__ */ React.createElement("dt", null, "agents"), /* @__PURE__ */ React.createElement("dd", null, agentCount), /* @__PURE__ */ React.createElement("dt", null, "uptime"), /* @__PURE__ */ React.createElement("dd", null, uptime), /* @__PURE__ */ React.createElement("dt", null, "panics"), /* @__PURE__ */ React.createElement("dd", null, health && health.panic_count != null ? health.panic_count : "\u2014"), /* @__PURE__ */ React.createElement("dt", null, "restarts"), /* @__PURE__ */ React.createElement("dd", null, health && health.restart_count != null ? health.restart_count : "\u2014"))), /* @__PURE__ */ React.createElement(LogLevelCard, { config }))), editing && /* @__PURE__ */ React.createElement(ProviderKeyModal, { provider: editing, onClose: () => setEditing(null), onSaved: () => {
     setEditing(null);
     refreshProviders();
-  } }));
+  } }), showRawEditor && /* @__PURE__ */ React.createElement(ConfigEditorModal, { onClose: () => setShowRawEditor(false) }));
+}
+function ConfigEditorModal({ onClose }) {
+  useEscapeKey(onClose);
+  const [text, setText] = useState("");
+  const [original, setOriginal] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const [result, setResult] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const raw = await rhFetch("/api/config/export");
+        if (!alive) return;
+        setText(raw);
+        setOriginal(raw);
+      } catch (e) {
+        if (alive) setErr(`load failed: ${e.message || e}`);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const dirty = text !== original;
+  const save = async () => {
+    setBusy(true);
+    setErr(null);
+    setResult(null);
+    try {
+      const r = await rhFetch("/api/config/replace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ toml: text })
+      });
+      setResult(r);
+      setOriginal(text);
+      if (r.status === "applied" || r.status === "no_changes") {
+        toastOk(r.status === "applied" ? "Config applied" : "Saved (no effective changes)");
+      } else if (r.status === "applied_partial") {
+        toastOk("Saved \u2014 some changes require daemon restart");
+      } else if (r.status === "saved_reload_failed") {
+        toastErr(`Saved but reload failed: ${r.reload_error || "see logs"}`);
+      }
+    } catch (e) {
+      setErr(String(e.message || e));
+      toastErr(`save failed: ${e.message || e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const revert = () => {
+    if (!dirty) return;
+    setText(original);
+    setResult(null);
+    setErr(null);
+  };
+  const reload = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const raw = await rhFetch("/api/config/export");
+      setText(raw);
+      setOriginal(raw);
+      setResult(null);
+      toastOk("Reloaded from disk");
+    } catch (e) {
+      setErr(`reload failed: ${e.message || e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return /* @__PURE__ */ React.createElement("div", { className: "modal-back", onClick: onClose }, /* @__PURE__ */ React.createElement("div", { className: "modal", onClick: (e) => e.stopPropagation(), style: { maxWidth: "min(1100px, 96vw)", width: "1100px" } }, /* @__PURE__ */ React.createElement("div", { className: "modal-head" }, /* @__PURE__ */ React.createElement("b", { className: "mono" }, "Edit ", /* @__PURE__ */ React.createElement("span", { style: { color: "var(--fg-3)" } }, "~/.rustyhand/config.toml")), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", onClick: onClose }, /* @__PURE__ */ React.createElement(I.close, null))), /* @__PURE__ */ React.createElement("div", { className: "modal-body" }, /* @__PURE__ */ React.createElement("div", { className: "dim mono mb-8", style: { fontSize: 11 } }, "Secrets shown as ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "<redacted>"), " are kept untouched on save. Replace them with new values to rotate, or leave as-is to preserve. A ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, ".bak"), " copy is written before each replace."), loading && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "40px 0", fontSize: 12, textAlign: "center" } }, "loading config\u2026"), !loading && /* @__PURE__ */ React.createElement(
+    "textarea",
+    {
+      className: "modal-field mono",
+      value: text,
+      onChange: (e) => setText(e.target.value),
+      spellCheck: false,
+      wrap: "off",
+      style: {
+        width: "100%",
+        minHeight: "60vh",
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+        fontSize: 12.5,
+        lineHeight: 1.55,
+        tabSize: 2,
+        whiteSpace: "pre",
+        overflow: "auto",
+        resize: "vertical"
+      }
+    }
+  ), result && /* @__PURE__ */ React.createElement("div", { className: "banner mt-12", style: { borderColor: result.status === "saved_reload_failed" ? "oklch(0.66 0.18 25 / .35)" : "oklch(0.74 0.135 150 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot " + (result.status === "saved_reload_failed" ? "err" : "live") }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, result.status.toUpperCase()), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, "wrote ", result.bytes_written, " bytes", result.backup_path && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 backup: ", /* @__PURE__ */ React.createElement("span", { className: "mono dim" }, result.backup_path)), result.restart_required && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 ", /* @__PURE__ */ React.createElement("b", null, "daemon restart required")), Array.isArray(result.restart_reasons) && result.restart_reasons.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 11, marginTop: 4 } }, "reasons: ", result.restart_reasons.join(", ")), Array.isArray(result.hot_actions_applied) && result.hot_actions_applied.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 11, marginTop: 4 } }, "hot-applied: ", result.hot_actions_applied.join(", ")), result.reload_error && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, marginTop: 4, color: "var(--crimson)" } }, "reload error: ", result.reload_error))), err && /* @__PURE__ */ React.createElement("div", { className: "banner mt-12", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, err))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: reload, disabled: busy || loading, style: { marginRight: "auto" } }, /* @__PURE__ */ React.createElement(I.refresh, null), " Reload from disk"), /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 11, marginRight: 8 } }, dirty ? "\u25CF unsaved" : "saved", " \xB7 ", text.length.toLocaleString(), " chars"), /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: revert, disabled: !dirty || busy }, "Revert"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: save, disabled: busy || loading || !dirty }, busy ? "Saving\u2026" : "Save & reload"))));
 }
 function LogLevelCard({ config }) {
   const current = config && config.log_level || "info";

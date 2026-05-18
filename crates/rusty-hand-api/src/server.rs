@@ -439,6 +439,10 @@ pub async fn build_router(
             axum::routing::get(routes::config_schema),
         )
         .route("/api/config/set", axum::routing::post(routes::config_set))
+        .route(
+            "/api/config/replace",
+            axum::routing::post(routes::config_replace),
+        )
         // Approval endpoints
         .route(
             "/api/approvals",

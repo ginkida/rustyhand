@@ -8065,6 +8065,177 @@ pub async fn config_set(
     )
 }
 
+/// POST /api/config/replace — Replace the entire ~/.rustyhand/config.toml
+/// from a single editor payload. Accepts JSON `{ "toml": "<full toml string>" }`.
+///
+/// Designed to back the Settings → "Edit raw config.toml" modal. The TOML is
+/// validated syntactically (parse to `toml::Value`) before being written.
+/// Secret round-tripping: the export endpoint masks fields like `api_key`,
+/// `password`, `token`, `bearer_token`, `*_key`, `*_token`, `*_secret`,
+/// `*_password` as `<redacted>`. If the editor submits those values
+/// unchanged, we substitute the live on-disk values back in so secrets are
+/// preserved when the user only edited unrelated fields.
+pub async fn config_replace(
+    State(state): State<Arc<AppState>>,
+    actor: Option<Extension<crate::middleware::AuthenticatedUser>>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let actor = actor
+        .map(|Extension(user)| user.name)
+        .unwrap_or_else(|| "system".to_string());
+    let new_toml = match body.get("toml").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "status": "error",
+                    "error": "missing 'toml' field (expected a TOML string)"
+                })),
+            );
+        }
+    };
+
+    let mut new_table: toml::value::Table = match toml::from_str(&new_toml) {
+        Ok(t) => t,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "status": "error",
+                    "error": format!("TOML parse error: {e}"),
+                })),
+            );
+        }
+    };
+
+    let config_path = state.kernel.config.home_dir.join("config.toml");
+    let current_table: toml::value::Table = if config_path.exists() {
+        match std::fs::read_to_string(&config_path) {
+            Ok(content) => toml::from_str(&content).unwrap_or_default(),
+            Err(_) => toml::value::Table::new(),
+        }
+    } else {
+        toml::value::Table::new()
+    };
+
+    restore_redacted_secrets(&mut new_table, &current_table);
+
+    let toml_string = match toml::to_string_pretty(&new_table) {
+        Ok(s) => s,
+        Err(e) => return safe_error(StatusCode::INTERNAL_SERVER_ERROR, "Config serialize", &e),
+    };
+
+    if let Some(parent) = config_path.parent() {
+        if !parent.exists() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                return safe_error(StatusCode::INTERNAL_SERVER_ERROR, "Config dir create", &e);
+            }
+        }
+    }
+
+    let backup_path = config_path.with_extension("toml.bak");
+    if config_path.exists() {
+        let _ = std::fs::copy(&config_path, &backup_path);
+    }
+
+    if let Err(e) = std::fs::write(&config_path, &toml_string) {
+        return safe_error(StatusCode::INTERNAL_SERVER_ERROR, "Config save", &e);
+    }
+
+    let reload_outcome = state.kernel.reload_config();
+    let (status, restart_required, restart_reasons, hot_actions, noop_changes, reload_error) =
+        match reload_outcome {
+            Ok(plan) => {
+                let s = if plan.restart_required {
+                    "applied_partial"
+                } else if plan.has_changes() {
+                    "applied"
+                } else {
+                    "no_changes"
+                };
+                (
+                    s,
+                    plan.restart_required,
+                    plan.restart_reasons,
+                    plan.hot_actions
+                        .iter()
+                        .map(|a| format!("{a:?}"))
+                        .collect::<Vec<_>>(),
+                    plan.noop_changes,
+                    None,
+                )
+            }
+            Err(e) => ("saved_reload_failed", true, vec![], vec![], vec![], Some(e)),
+        };
+
+    state.kernel.audit_log.record(
+        actor,
+        rusty_hand_runtime::audit::AuditAction::ConfigChange,
+        format!(
+            "config replaced ({} bytes) via API: {status}",
+            toml_string.len()
+        ),
+        "completed",
+    );
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": status,
+            "restart_required": restart_required,
+            "restart_reasons": restart_reasons,
+            "hot_actions_applied": hot_actions,
+            "noop_changes": noop_changes,
+            "reload_error": reload_error,
+            "backup_path": backup_path.display().to_string(),
+            "bytes_written": toml_string.len(),
+        })),
+    )
+}
+
+/// Walk `new_table` and substitute `<redacted>` string values with the
+/// corresponding values from `current_table`, matching the same key paths
+/// that `mask_config_secrets` masks. Idempotent: non-string or non-redacted
+/// values pass through. Missing paths leave the placeholder in place so the
+/// caller can decide what to do.
+fn restore_redacted_secrets(
+    new_table: &mut toml::value::Table,
+    current_table: &toml::value::Table,
+) {
+    for (key, value) in new_table.iter_mut() {
+        match value {
+            toml::Value::String(s) if s == "<redacted>" && is_secret_key_name(key) => {
+                if let Some(toml::Value::String(orig)) = current_table.get(key) {
+                    *s = orig.clone();
+                }
+            }
+            toml::Value::Table(nested) => {
+                if let Some(toml::Value::Table(current_nested)) = current_table.get(key) {
+                    restore_redacted_secrets(nested, current_nested);
+                } else {
+                    let empty = toml::value::Table::new();
+                    restore_redacted_secrets(nested, &empty);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn is_secret_key_name(k: &str) -> bool {
+    let k = k.to_lowercase();
+    k == "api_key"
+        || k == "password"
+        || k == "token"
+        || k == "secret"
+        || k == "bearer_token"
+        || k.ends_with("_key")
+        || k.ends_with("_token")
+        || k.ends_with("_password")
+        || k.ends_with("_secret")
+}
+
 /// Convert a serde_json::Value to a toml::Value.
 fn json_to_toml_value(value: &serde_json::Value) -> toml::Value {
     match value {

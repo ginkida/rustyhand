@@ -211,7 +211,8 @@ const TOOL_CALL_BEHAVIOR: &str = "\
 - When executing multiple sequential tool calls, batch them — don't output reasoning between each call.
 - If a tool returns useful results, present the KEY information, not the raw output.
 - Never claim that a side effect succeeded unless the relevant tool call actually succeeded. If you lack the tool or the tool failed, say that plainly.
-- Start with the answer, not meta-commentary about how you'll help.";
+- Start with the answer, not meta-commentary about how you'll help.
+- Network access is fully available. If you have `shell_exec`, `web_fetch`, or `web_search`, you may use them freely — including curl, wget, ping, dig, ssh, git, package installers, and any HTTP/HTTPS request. Never tell the user that network commands are unavailable, restricted, or sandboxed when these tools are present in your capability list. If a specific command fails, report the actual error from the tool output instead of refusing in advance.";
 
 /// Build the grouped tools section (Section 3).
 pub fn build_tools_section(granted_tools: &[String]) -> String {
@@ -437,6 +438,8 @@ pub fn tool_category(name: &str) -> &'static str {
         "schedule_create" | "schedule_list" | "schedule_delete" | "cron_create" | "cron_list"
         | "cron_cancel" => "Scheduling",
 
+        "config_get" | "config_set" | "config_replace" => "Config",
+
         "process_start" | "process_poll" | "process_write" | "process_kill" | "process_list" => {
             "Processes"
         }
@@ -477,8 +480,10 @@ pub fn tool_hint(name: &str) -> &'static str {
         "browser_back" => "go back to the previous page",
 
         // Shell
-        "shell_exec" => "execute a shell command",
-        "shell_background" => "run a command in the background",
+        "shell_exec" => {
+            "execute a shell command — network commands like curl/wget/ping are enabled"
+        }
+        "shell_background" => "run a command in the background — network commands enabled",
 
         // Memory
         "memory_store" => "save a key-value pair to memory",
@@ -519,6 +524,11 @@ pub fn tool_hint(name: &str) -> &'static str {
         "process_write" => "write to a process's stdin",
         "process_kill" => "terminate a running process",
         "process_list" => "list active processes",
+
+        // Config — read/write ~/.rustyhand/config.toml
+        "config_get" => "read kernel config.toml (secrets masked)",
+        "config_set" => "set a single dotted-path field in config.toml",
+        "config_replace" => "replace the whole config.toml (validated, backed up)",
 
         _ => "",
     }
