@@ -358,7 +358,7 @@ pub async fn import_agents(
             .unwrap_or("anthropic");
         let model = agent_json["model"]["model"]
             .as_str()
-            .unwrap_or("claude-sonnet-4-20250514");
+            .unwrap_or("claude-sonnet-4-6");
         let system_prompt = agent_json["model"]["system_prompt"].as_str().unwrap_or("");
         let group = agent_json["group"].as_str().unwrap_or("");
         let description = agent_json["description"].as_str().unwrap_or("");
@@ -4083,10 +4083,13 @@ fn mask_config_secrets(toml: &str) -> String {
 pub async fn get_config(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     // Return a redacted view of the kernel config
     let config = &state.kernel.config;
+    use rusty_hand_types::config::McpServerConfig;
+    let safe_defaults: Vec<&str> = McpServerConfig::safe_default_tools().to_vec();
     Json(serde_json::json!({
         "home_dir": config.home_dir.to_string_lossy(),
         "data_dir": config.data_dir.to_string_lossy(),
         "api_key": if config.api_key.is_empty() { "not set" } else { "***" },
+        "log_level": config.log_level,
         "default_model": {
             "provider": config.default_model.provider,
             "model": config.default_model.model,
@@ -4094,6 +4097,18 @@ pub async fn get_config(State(state): State<Arc<AppState>>) -> impl IntoResponse
         },
         "memory": {
             "decay_rate": config.memory.decay_rate,
+        },
+        // MCP server allowlist — surfaced so the Settings page can render
+        // an enable/disable + extra_allowed_tools UI without having to
+        // parse config.toml client-side. `safe_default_tools` is the
+        // baseline always-allowed list (config_get, web_search, etc.);
+        // `extra_allowed_tools` are operator-opted-in privileged tools
+        // (config_set, cron_create, shell_exec, etc.).
+        "mcp_server": {
+            "enabled": config.mcp_server.enabled,
+            "allow_all_tools": config.mcp_server.allow_all_tools,
+            "extra_allowed_tools": config.mcp_server.extra_allowed_tools,
+            "safe_default_tools": safe_defaults,
         },
     }))
 }
@@ -8236,7 +8251,10 @@ fn is_secret_key_name(k: &str) -> bool {
         || k.ends_with("_secret")
 }
 
-/// Convert a serde_json::Value to a toml::Value.
+/// Convert a serde_json::Value to a toml::Value. Handles primitives,
+/// arrays, and objects recursively so `POST /api/config/set` can write
+/// list-valued fields like `mcp_server.extra_allowed_tools` and nested
+/// tables. Null becomes an empty string (TOML has no null).
 fn json_to_toml_value(value: &serde_json::Value) -> toml::Value {
     match value {
         serde_json::Value::String(s) => toml::Value::String(s.clone()),
@@ -8250,7 +8268,17 @@ fn json_to_toml_value(value: &serde_json::Value) -> toml::Value {
             }
         }
         serde_json::Value::Bool(b) => toml::Value::Boolean(*b),
-        _ => toml::Value::String(value.to_string()),
+        serde_json::Value::Array(arr) => {
+            toml::Value::Array(arr.iter().map(json_to_toml_value).collect())
+        }
+        serde_json::Value::Object(map) => {
+            let mut t = toml::value::Table::new();
+            for (k, v) in map {
+                t.insert(k.clone(), json_to_toml_value(v));
+            }
+            toml::Value::Table(t)
+        }
+        serde_json::Value::Null => toml::Value::String(String::new()),
     }
 }
 

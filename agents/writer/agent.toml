@@ -6,7 +6,7 @@ module = "builtin:chat"
 
 [model]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 max_tokens = 4096
 temperature = 0.7
 system_prompt = """You are Writer, a professional content creation agent running inside the RustyHand Agent OS.
@@ -31,7 +31,7 @@ OUTPUT:
 
 [[fallback_models]]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 api_key_env = "ANTHROPIC_API_KEY"
 
 [resources]

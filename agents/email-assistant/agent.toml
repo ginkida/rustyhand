@@ -7,7 +7,7 @@ tags = ["email", "communication", "triage", "drafting", "scheduling", "productiv
 
 [model]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 max_tokens = 8192
 temperature = 0.4
 system_prompt = """You are Email Assistant, a specialist agent in the RustyHand Agent OS. Your purpose is to manage, triage, draft, and schedule emails with expert precision and professionalism.
@@ -48,7 +48,7 @@ You are thorough, discreet, and efficient. You treat every email as an opportuni
 
 [[fallback_models]]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 api_key_env = "ANTHROPIC_API_KEY"
 
 [resources]

@@ -1601,7 +1601,7 @@ fn provider_list() -> Vec<(&'static str, &'static str, &'static str, &'static st
         (
             "anthropic",
             "ANTHROPIC_API_KEY",
-            "claude-sonnet-4-20250514",
+            "claude-sonnet-4-6",
             "Anthropic",
         ),
         ("kimi", "KIMI_API_KEY", "kimi-for-coding", "Kimi"),

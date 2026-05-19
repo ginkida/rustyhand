@@ -1644,7 +1644,7 @@ impl Default for DefaultModelConfig {
     fn default() -> Self {
         Self {
             provider: "anthropic".to_string(),
-            model: "claude-sonnet-4-20250514".to_string(),
+            model: "claude-sonnet-4-6".to_string(),
             api_key_env: "ANTHROPIC_API_KEY".to_string(),
             base_url: None,
         }
@@ -2581,7 +2581,7 @@ log_level = "info"
 
 [default_model]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 api_key_env = "ANTHROPIC_API_KEY"
 
 [channels.telegram]

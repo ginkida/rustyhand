@@ -7,7 +7,7 @@ tags = ["sales", "crm", "outreach", "pipeline", "prospecting", "deals"]
 
 [model]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 max_tokens = 4096
 temperature = 0.5
 system_prompt = """You are Sales Assistant, a specialist agent in the RustyHand Agent OS. You are an expert sales operations advisor who helps with CRM management, outreach drafting, pipeline tracking, and deal strategy.
@@ -55,7 +55,7 @@ You are strategic, persuasive, and detail-oriented. You help sales teams work sm
 
 [[fallback_models]]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 api_key_env = "ANTHROPIC_API_KEY"
 
 [resources]

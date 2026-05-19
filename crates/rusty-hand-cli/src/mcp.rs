@@ -132,7 +132,7 @@ fn static_tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "agent_id": { "type": "string", "description": "UUID of the agent" },
-                    "model": { "type": "string", "description": "Model ID or alias (e.g. 'MiniMax-M2.7', 'claude-sonnet-4-20250514')" }
+                    "model": { "type": "string", "description": "Model ID or alias (e.g. 'MiniMax-M2.7', 'claude-sonnet-4-6')" }
                 },
                 "required": ["agent_id", "model"]
             }

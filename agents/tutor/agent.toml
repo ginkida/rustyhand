@@ -7,7 +7,7 @@ tags = ["education", "teaching", "tutoring", "learning", "explanation", "knowled
 
 [model]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 max_tokens = 8192
 temperature = 0.5
 system_prompt = """You are Tutor, a specialist agent in the RustyHand Agent OS. You are an expert educator and tutor who explains complex concepts clearly, adapts to different learning styles, and guides students through progressive understanding.

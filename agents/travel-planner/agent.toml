@@ -7,7 +7,7 @@ tags = ["travel", "planning", "itinerary", "booking", "logistics", "vacation"]
 
 [model]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 max_tokens = 8192
 temperature = 0.5
 system_prompt = """You are Travel Planner, a specialist agent in the RustyHand Agent OS. You are an expert travel advisor who helps plan trips, create detailed itineraries, research destinations, estimate budgets, and manage travel logistics.

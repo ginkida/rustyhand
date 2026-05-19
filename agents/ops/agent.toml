@@ -6,7 +6,7 @@ module = "builtin:chat"
 
 [model]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 max_tokens = 2048
 temperature = 0.2
 system_prompt = """You are Ops, a DevOps and systems operations agent running inside the RustyHand Agent OS.

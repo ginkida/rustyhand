@@ -164,3 +164,33 @@ fn detector_reads_destructure_correctly() {
     assert!(d.contains("useEffect"));
     assert!(d.contains("useRef"));
 }
+
+#[test]
+fn spawn_modal_accepts_catalog_auth_statuses() {
+    let src = fs::read_to_string(panel_src_dir().join("pages.jsx")).expect("read pages.jsx");
+    assert!(
+        src.contains("auth === \"configured\""),
+        "SpawnAgentModal must treat /api/providers auth_status='configured' as usable"
+    );
+    assert!(
+        src.contains("auth === \"not_required\""),
+        "SpawnAgentModal must treat local/no-key providers as usable"
+    );
+}
+
+#[test]
+fn onboarding_uses_catalog_models_and_real_tools() {
+    let src = fs::read_to_string(panel_src_dir().join("app.jsx")).expect("read app.jsx");
+    assert!(
+        src.contains("case \"kimi\": return \"kimi-for-coding\""),
+        "onboarding must create Kimi agents with the catalog's canonical model id"
+    );
+    assert!(
+        src.contains("case \"deepseek\": return \"deepseek-v4-flash\""),
+        "onboarding must use the current DeepSeek default model"
+    );
+    assert!(
+        src.contains("tools = [\"web_search\", \"web_fetch\", \"memory_recall\"]"),
+        "onboarding must write real tool names, not a profile label like research"
+    );
+}

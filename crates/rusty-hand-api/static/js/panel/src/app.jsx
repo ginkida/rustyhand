@@ -486,6 +486,34 @@ function LoginScreen({ onLogin }) {
 // inline forms so the wizard fits the modal's narrative flow (one
 // "Next" button per step instead of separate modals).
 const __ONBOARDED_KEY = "rh.panel.onboarded";
+function providerConfigured(p) {
+  const auth = (p && p.auth_status || "").toLowerCase();
+  return auth === "ok" || auth === "configured" || auth === "not_required";
+}
+
+function defaultModelForProvider(provider) {
+  switch ((provider || "").toLowerCase()) {
+    case "anthropic": return "claude-sonnet-4-6";
+    case "kimi": return "kimi-for-coding";
+    case "deepseek": return "deepseek-v4-flash";
+    case "minimax": return "MiniMax-M2.7";
+    case "zhipu": return "glm-4-plus";
+    case "openrouter": return "openrouter/auto";
+    case "ollama": return "llama3.2";
+    case "mock": return "mock-model";
+    default: return "mock-model";
+  }
+}
+
+function tomlBasicString(s) {
+  return (s || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\r/g, "\\r")
+    .replace(/\n/g, "\\n")
+    .replace(/\t/g, "\\t");
+}
+
 function shouldShowOnboarding(onb, agentsResp) {
   // Defer until both probes resolved so we don't flash the wizard.
   if (!onb || !agentsResp) return false;
@@ -504,11 +532,15 @@ function OnboardingWizard({ onClose }) {
   const providers = (providersResp && providersResp.providers) || [];
   // Default to the first provider that requires a key but doesn't have
   // one — that's the most likely setup gap. Falls back to anthropic.
-  const defaultProvider = providers.find(p => p.key_required !== false && (p.auth_status || "").toLowerCase() !== "ok");
+  const defaultProvider = providers.find(p => p.key_required !== false && !providerConfigured(p));
   const [providerName, setProviderName] = useState(defaultProvider ? defaultProvider.id : "anthropic");
   React.useEffect(() => {
-    if (!providerName && providers.length) setProviderName(providers[0].id);
-  }, [providers.length]);
+    if (providers.length === 0) return;
+    const stillExists = providers.some((p) => p.id === providerName);
+    if (stillExists && providerName !== "anthropic") return;
+    if (defaultProvider) setProviderName(defaultProvider.id);
+    else if (!stillExists) setProviderName(providers[0].id);
+  }, [providers.length, defaultProvider && defaultProvider.id, providerName]);
 
   const [apiKey, setApiKey] = useState("");
   const [savingKey, setSavingKey] = useState(false);
@@ -546,25 +578,23 @@ function OnboardingWizard({ onClose }) {
     setSpawning(true); setSpawnErr(null);
     try {
       const provider = providers.find(p => p.id === providerName) || providers[0] || { id: "anthropic" };
-      const defaultModel = providerName === "anthropic" ? "claude-sonnet-4"
-        : providerName === "openai" ? "gpt-4o-mini"
-        : providerName === "deepseek" ? "deepseek-chat"
-        : "claude-sonnet-4";
-      const manifest_toml = `name = "${agentName.trim()}"
+      const providerId = provider.id || providerName || "mock";
+      const defaultModel = defaultModelForProvider(providerId);
+      const manifest_toml = `name = "${tomlBasicString(agentName.trim())}"
 version = "0.1.0"
 description = "Spawned from RustyHand onboarding wizard"
 author = "operator"
 module = "builtin:chat"
 
 [model]
-provider = "${provider.id}"
-model = "${defaultModel}"
+provider = "${tomlBasicString(providerId)}"
+model = "${tomlBasicString(defaultModel)}"
 system_prompt = "You are a helpful agent."
 temperature = 0.4
 max_tokens = 2048
 
 [capabilities]
-tools = ["research"]
+tools = ["web_search", "web_fetch", "memory_recall"]
 `;
       await rhFetch("/api/agents", {
         method: "POST",
@@ -617,8 +647,8 @@ tools = ["research"]
           {step === 1 && (
             <div className="col gap-12">
               <div style={{fontSize:13}}>
-                Pick an LLM provider and paste the API key. The key is stored encrypted in
-                <span className="mono"> ~/.rustyhand/config.toml</span> and zeroized after each use.
+                Pick an LLM provider and paste the API key. The key is stored in
+                <span className="mono"> ~/.rustyhand/secrets.env</span> and zeroized after each use.
               </div>
               <label className="t-row col">
                 <span className="t-lbl">Provider</span>
@@ -626,7 +656,7 @@ tools = ["research"]
                   {providers.filter(p => p.key_required !== false).map(p => (
                     <option key={p.id} value={p.id}>
                       {p.display_name || p.id}
-                      {(p.auth_status || "").toLowerCase() === "ok" ? "  — configured" : ""}
+                      {providerConfigured(p) ? "  — configured" : ""}
                     </option>
                   ))}
                 </select>
@@ -664,7 +694,7 @@ tools = ["research"]
               <pre className="codebox" style={{maxHeight:160}}>
 {`name = "${agentName || "my-agent"}"
 provider = "${providerName}"
-tools = ["research"]   # web_search, web_fetch, etc.
+tools = ["web_search", "web_fetch", "memory_recall"]
 temperature = 0.4
 max_tokens = 2048`}
               </pre>

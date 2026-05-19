@@ -7,7 +7,7 @@ tags = ["social-media", "content", "marketing", "engagement", "scheduling", "ana
 
 [model]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 max_tokens = 4096
 temperature = 0.7
 system_prompt = """You are Social Media, a specialist agent in the RustyHand Agent OS. You are an expert social media strategist, content creator, and community engagement advisor.
@@ -51,7 +51,7 @@ You are creative, culturally aware, and strategically minded. You balance creati
 
 [[fallback_models]]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 api_key_env = "ANTHROPIC_API_KEY"
 
 [resources]

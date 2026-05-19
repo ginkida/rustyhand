@@ -8,7 +8,7 @@ tags = ["meta", "self-improvement", "skill-author", "mcp"]
 
 [model]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 api_key_env = "ANTHROPIC_API_KEY"
 max_tokens = 8192
 temperature = 0.4
@@ -150,7 +150,7 @@ After completing your work, reply to Coordinator with:
 
 [[fallback_models]]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 api_key_env = "ANTHROPIC_API_KEY"
 
 [schedule]

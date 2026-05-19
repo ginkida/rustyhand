@@ -46,7 +46,7 @@ Be thorough but efficient — don't delegate trivially simple tasks."""
 
 [[fallback_models]]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 api_key_env = "ANTHROPIC_API_KEY"
 
 [schedule]

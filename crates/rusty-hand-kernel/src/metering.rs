@@ -147,14 +147,14 @@ impl MeteringEngine {
     ///
     /// | Model Family          | Input $/M | Output $/M |
     /// |-----------------------|-----------|------------|
-    /// | claude-haiku          |     0.25  |      1.25  |
+    /// | claude-haiku          |     1.00  |      5.00  |
     /// | claude-sonnet         |     3.00  |     15.00  |
-    /// | claude-opus           |    15.00  |     75.00  |
-    /// | kimi-* (Kimi Code)    |     0.60  |      2.50  |
-    /// | deepseek-v4-flash     |     0.27  |      1.10  |
-    /// | deepseek-v4-pro       |     0.55  |      2.19  |
-    /// | deepseek-chat (v3)    |     0.27  |      1.10  |  (deprecated 2026-07-24)
-    /// | deepseek-reasoner/r1  |     0.55  |      2.19  |  (deprecated 2026-07-24)
+    /// | claude-opus           |     5.00  |     25.00  |
+    /// | kimi-* (Kimi Code)    |     0.95  |      4.00  |
+    /// | deepseek-v4-flash     |     0.14  |      0.28  |
+    /// | deepseek-v4-pro       |     1.74  |      3.48  |
+    /// | deepseek-chat         |     0.14  |      0.28  |  (V4 Flash alias; deprecated 2026-07-24)
+    /// | deepseek-reasoner/r1  |     0.14  |      0.28  |  (V4 Flash thinking alias; deprecated 2026-07-24)
     /// | MiniMax-M2            |     0.50  |      2.00  |
     /// | MiniMax-M1            |     0.30  |      1.10  |
     /// | glm-4-flash           |     0.10  |      0.10  |
@@ -219,10 +219,10 @@ pub struct BudgetStatus {
 fn estimate_cost_rates(model: &str) -> (f64, f64) {
     // ── Anthropic ──────────────────────────────────────────────
     if model.contains("haiku") {
-        return (0.25, 1.25);
+        return (1.0, 5.0);
     }
     if model.contains("opus") {
-        return (15.0, 75.0);
+        return (5.0, 25.0);
     }
     if model.contains("sonnet") {
         return (3.0, 15.0);
@@ -236,7 +236,7 @@ fn estimate_cost_rates(model: &str) -> (f64, f64) {
         || model == "kimi"
         || model == "k2"
     {
-        return (0.60, 2.50);
+        return (0.95, 4.00);
     }
 
     // ── DeepSeek ───────────────────────────────────────────────
@@ -244,16 +244,16 @@ fn estimate_cost_rates(model: &str) -> (f64, f64) {
     // Specific patterns before generic; `deepseek-v4-pro` must precede
     // the generic `deepseek` fallback or it would mis-price at flash rates.
     if model.contains("deepseek-v4-pro") {
-        return (0.55, 2.19);
+        return (1.74, 3.48);
     }
     if model.contains("deepseek-v4-flash") {
-        return (0.27, 1.10);
+        return (0.14, 0.28);
     }
     if model.contains("deepseek-reasoner") || model.contains("deepseek-r1") {
-        return (0.55, 2.19);
+        return (0.14, 0.28);
     }
     if model.contains("deepseek") {
-        return (0.27, 1.10);
+        return (0.14, 0.28);
     }
 
     // ── MiniMax ────────────────────────────────────────────────
@@ -384,13 +384,13 @@ mod tests {
     #[test]
     fn test_estimate_cost_haiku() {
         let cost = MeteringEngine::estimate_cost("claude-haiku-4-5-20251001", 1_000_000, 1_000_000);
-        assert!((cost - 1.50).abs() < 0.01); // $0.25 + $1.25
+        assert!((cost - 6.0).abs() < 0.01); // $1.00 + $5.00
     }
 
     #[test]
     fn test_estimate_cost_kimi_unified() {
         // Kimi Code has one backend model; all aliases must bill identically.
-        let expected = 3.10; // $0.60 + $2.50 per million in + out
+        let expected = 4.95; // $0.95 + $4.00 per million in + out
         for model in [
             "kimi-for-coding",
             "kimi-k2-thinking",
@@ -416,38 +416,38 @@ mod tests {
 
     #[test]
     fn test_estimate_cost_sonnet() {
-        let cost = MeteringEngine::estimate_cost("claude-sonnet-4-20250514", 1_000_000, 1_000_000);
+        let cost = MeteringEngine::estimate_cost("claude-sonnet-4-6", 1_000_000, 1_000_000);
         assert!((cost - 18.0).abs() < 0.01); // $3.00 + $15.00
     }
 
     #[test]
     fn test_estimate_cost_opus() {
-        let cost = MeteringEngine::estimate_cost("claude-opus-4-20250514", 1_000_000, 1_000_000);
-        assert!((cost - 90.0).abs() < 0.01); // $15.00 + $75.00
+        let cost = MeteringEngine::estimate_cost("claude-opus-4-7", 1_000_000, 1_000_000);
+        assert!((cost - 30.0).abs() < 0.01); // $5.00 + $25.00
     }
 
     #[test]
     fn test_estimate_cost_deepseek_chat() {
         let cost = MeteringEngine::estimate_cost("deepseek-chat", 1_000_000, 1_000_000);
-        assert!((cost - 1.37).abs() < 0.01); // $0.27 + $1.10
+        assert!((cost - 0.42).abs() < 0.01); // $0.14 + $0.28
     }
 
     #[test]
     fn test_estimate_cost_deepseek_reasoner() {
         let cost = MeteringEngine::estimate_cost("deepseek-reasoner", 1_000_000, 1_000_000);
-        assert!((cost - 2.74).abs() < 0.01); // $0.55 + $2.19
+        assert!((cost - 0.42).abs() < 0.01); // $0.14 + $0.28
     }
 
     #[test]
     fn test_estimate_cost_deepseek_v4_flash() {
         let cost = MeteringEngine::estimate_cost("deepseek-v4-flash", 1_000_000, 1_000_000);
-        assert!((cost - 1.37).abs() < 0.01); // $0.27 + $1.10
+        assert!((cost - 0.42).abs() < 0.01); // $0.14 + $0.28
     }
 
     #[test]
     fn test_estimate_cost_deepseek_v4_pro() {
         let cost = MeteringEngine::estimate_cost("deepseek-v4-pro", 1_000_000, 1_000_000);
-        assert!((cost - 2.74).abs() < 0.01); // $0.55 + $2.19
+        assert!((cost - 5.22).abs() < 0.01); // $1.74 + $3.48
     }
 
     #[test]
@@ -488,7 +488,8 @@ mod tests {
 
     #[test]
     fn test_estimate_cost_openrouter_anthropic_passthru() {
-        let cost = MeteringEngine::estimate_cost("anthropic/claude-sonnet-4", 1_000_000, 1_000_000);
+        let cost =
+            MeteringEngine::estimate_cost("anthropic/claude-sonnet-4.6", 1_000_000, 1_000_000);
         assert!((cost - 18.0).abs() < 0.01); // OpenRouter rounds to upstream sonnet rates
     }
 
@@ -516,7 +517,7 @@ mod tests {
         // Sonnet: $3/M input, $15/M output
         let cost = MeteringEngine::estimate_cost_with_catalog(
             &catalog,
-            "claude-sonnet-4-20250514",
+            "claude-sonnet-4-6",
             1_000_000,
             1_000_000,
         );

@@ -100,7 +100,7 @@ async fn drain_text(mut rx: tokio::sync::mpsc::Receiver<StreamEvent>) -> String 
 /// Canonical SSE format from api.anthropic.com — every field has a
 /// space after the colon. This is the "happy path" wire format.
 const ANTHROPIC_WITH_SPACE: &str = "event: message_start\n\
-data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_a\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-20250514\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":8,\"output_tokens\":0}}}\n\n\
+data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_a\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-6\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":8,\"output_tokens\":0}}}\n\n\
 event: content_block_start\n\
 data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
 event: content_block_delta\n\
@@ -150,7 +150,7 @@ async fn anthropic_driver_with_space_canonical_format() {
 
     let (tx, rx) = tokio::sync::mpsc::channel(64);
     let resp = drv
-        .stream(make_request("claude-sonnet-4-20250514"), tx)
+        .stream(make_request("claude-sonnet-4-6"), tx)
         .await
         .expect("canonical with-space SSE must parse");
 

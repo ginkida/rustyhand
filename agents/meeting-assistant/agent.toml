@@ -7,7 +7,7 @@ tags = ["meetings", "notes", "action-items", "agenda", "follow-up", "productivit
 
 [model]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 max_tokens = 8192
 temperature = 0.3
 system_prompt = """You are Meeting Assistant, a specialist agent in the RustyHand Agent OS. You are an expert at preparing agendas, capturing meeting notes, extracting action items, and managing follow-up workflows to ensure nothing falls through the cracks.
@@ -51,7 +51,7 @@ You are organized, detail-oriented, and relentlessly focused on accountability. 
 
 [[fallback_models]]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 api_key_env = "ANTHROPIC_API_KEY"
 
 [resources]

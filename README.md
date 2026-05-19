@@ -345,7 +345,7 @@ api_listen = "127.0.0.1:4200"          # HTTP bind address
 
 [default_model]
 provider = "anthropic"                 # anthropic, kimi, deepseek, zhipu, minimax, openrouter, ollama
-model = "claude-sonnet-4-20250514"     # Model identifier
+model = "claude-sonnet-4-6"     # Model identifier
 api_key_env = "ANTHROPIC_API_KEY"      # Env var holding the API key
 # base_url = "https://api.anthropic.com"  # Optional: override endpoint
 
@@ -620,7 +620,7 @@ module = "builtin:chat"
 
 [model]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 max_tokens = 4096
 temperature = 0.6
 system_prompt = """Your system prompt here..."""
@@ -706,7 +706,7 @@ RustyHand v0.7.0 ships with a deliberately lean set of 7 providers, driven by 2 
 
 Default auto-detect order: Anthropic → Kimi → DeepSeek → Zhipu → MiniMax → OpenRouter. Set whichever key you have; RustyHand picks the first one found.
 
-Prefer Kimi? Set `KIMI_API_KEY` and auto-detect will route to `kimi-for-coding` on the Kimi Code endpoint (`api.kimi.com/coding`). Change anytime via `rustyhand config set default_model.provider <name>`.
+Prefer Kimi? Set `KIMI_API_KEY` and auto-detect will route to the stable `kimi-for-coding` model ID on the Kimi Code endpoint (`api.kimi.com/coding`); Moonshot maps that ID to the current Kimi Code backend. Change anytime via `rustyhand config set default_model.provider <name>`.
 
 > v0.6.x shipped 27 providers (OpenAI, Gemini, Groq, xAI, Copilot, Mistral, Together, Fireworks, Perplexity, Cohere, AI21, Cerebras, SambaNova, HuggingFace, Replicate, vLLM, LM Studio, Moonshot, Qwen, Qianfan, Bedrock). They were removed in v0.7.0 — use `openrouter` to reach any of those models through one gateway.
 
@@ -952,7 +952,7 @@ Set `RUSTYHAND_FORCE_ENV_CONFIG=1` to always regenerate config from env vars (ov
 | Env var | Default | Description |
 |---------|---------|-------------|
 | `RUSTYHAND_PROVIDER` | `anthropic` | LLM provider: `anthropic`, `kimi`, `deepseek`, `zhipu`, `minimax`, `openrouter`, `ollama` |
-| `RUSTYHAND_MODEL` | `claude-sonnet-4-20250514` | Model identifier |
+| `RUSTYHAND_MODEL` | `claude-sonnet-4-6` | Model identifier |
 | `RUSTYHAND_MODEL_KEY_ENV` | `ANTHROPIC_API_KEY` | Which env var holds the LLM API key |
 | `RUSTYHAND_MODEL_BASE_URL` | *(auto)* | Override provider API endpoint |
 | `RUSTYHAND_FALLBACK_PROVIDER` | *(none)* | Fallback provider if primary fails |
@@ -1013,7 +1013,7 @@ docker run -d --name rustyhand \
   -p 4200:4200 \
   -e RUSTYHAND_API_KEY=my-secret-token \
   -e RUSTYHAND_PROVIDER=anthropic \
-  -e RUSTYHAND_MODEL=claude-sonnet-4-20250514 \
+  -e RUSTYHAND_MODEL=claude-sonnet-4-6 \
   -e RUSTYHAND_MODEL_KEY_ENV=ANTHROPIC_API_KEY \
   -e ANTHROPIC_API_KEY=sk-ant-... \
   -e RUSTYHAND_BUDGET_DAILY=5.0 \

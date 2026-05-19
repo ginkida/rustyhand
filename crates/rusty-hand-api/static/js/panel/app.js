@@ -336,6 +336,35 @@ function LoginScreen({ onLogin }) {
   return /* @__PURE__ */ React.createElement("div", { className: "auth-splash" }, /* @__PURE__ */ React.createElement("form", { className: "auth-card", onSubmit: submit }, /* @__PURE__ */ React.createElement("div", { className: "auth-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", { className: "auth-title" }, "RustyHand \xB7 Control Panel"), /* @__PURE__ */ React.createElement("div", { className: "auth-sub" }, "Enter your API key to continue. Configure it in ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "~/.rustyhand/config.toml"), " under ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "api_key"), " or via per-user RBAC."), /* @__PURE__ */ React.createElement("input", { className: "modal-field", type: "password", autoFocus: true, placeholder: "rh_\u2026", value: key, onChange: (e) => setKey(e.target.value) }), err && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, err)), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "btn primary", disabled: busy || !key.trim(), style: { width: "100%" } }, busy ? "Verifying\u2026" : "Sign in"), /* @__PURE__ */ React.createElement("div", { className: "dim mono auth-foot" }, "Running on localhost? Auth is auto-granted \u2014 this screen shouldn't appear.")));
 }
 const __ONBOARDED_KEY = "rh.panel.onboarded";
+function providerConfigured(p) {
+  const auth = (p && p.auth_status || "").toLowerCase();
+  return auth === "ok" || auth === "configured" || auth === "not_required";
+}
+function defaultModelForProvider(provider) {
+  switch ((provider || "").toLowerCase()) {
+    case "anthropic":
+      return "claude-sonnet-4-6";
+    case "kimi":
+      return "kimi-for-coding";
+    case "deepseek":
+      return "deepseek-v4-flash";
+    case "minimax":
+      return "MiniMax-M2.7";
+    case "zhipu":
+      return "glm-4-plus";
+    case "openrouter":
+      return "openrouter/auto";
+    case "ollama":
+      return "llama3.2";
+    case "mock":
+      return "mock-model";
+    default:
+      return "mock-model";
+  }
+}
+function tomlBasicString(s) {
+  return (s || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r/g, "\\r").replace(/\n/g, "\\n").replace(/\t/g, "\\t");
+}
 function shouldShowOnboarding(onb, agentsResp) {
   if (!onb || !agentsResp) return false;
   try {
@@ -350,11 +379,15 @@ function OnboardingWizard({ onClose }) {
   const [step, setStep] = useState(0);
   const [providersResp] = useApi("/api/providers");
   const providers = providersResp && providersResp.providers || [];
-  const defaultProvider = providers.find((p) => p.key_required !== false && (p.auth_status || "").toLowerCase() !== "ok");
+  const defaultProvider = providers.find((p) => p.key_required !== false && !providerConfigured(p));
   const [providerName, setProviderName] = useState(defaultProvider ? defaultProvider.id : "anthropic");
   React.useEffect(() => {
-    if (!providerName && providers.length) setProviderName(providers[0].id);
-  }, [providers.length]);
+    if (providers.length === 0) return;
+    const stillExists = providers.some((p) => p.id === providerName);
+    if (stillExists && providerName !== "anthropic") return;
+    if (defaultProvider) setProviderName(defaultProvider.id);
+    else if (!stillExists) setProviderName(providers[0].id);
+  }, [providers.length, defaultProvider && defaultProvider.id, providerName]);
   const [apiKey, setApiKey2] = useState("");
   const [savingKey, setSavingKey] = useState(false);
   const [keyErr, setKeyErr] = useState(null);
@@ -403,22 +436,23 @@ function OnboardingWizard({ onClose }) {
     setSpawnErr(null);
     try {
       const provider = providers.find((p) => p.id === providerName) || providers[0] || { id: "anthropic" };
-      const defaultModel = providerName === "anthropic" ? "claude-sonnet-4" : providerName === "openai" ? "gpt-4o-mini" : providerName === "deepseek" ? "deepseek-chat" : "claude-sonnet-4";
-      const manifest_toml = `name = "${agentName.trim()}"
+      const providerId = provider.id || providerName || "mock";
+      const defaultModel = defaultModelForProvider(providerId);
+      const manifest_toml = `name = "${tomlBasicString(agentName.trim())}"
 version = "0.1.0"
 description = "Spawned from RustyHand onboarding wizard"
 author = "operator"
 module = "builtin:chat"
 
 [model]
-provider = "${provider.id}"
-model = "${defaultModel}"
+provider = "${tomlBasicString(providerId)}"
+model = "${tomlBasicString(defaultModel)}"
 system_prompt = "You are a helpful agent."
 temperature = 0.4
 max_tokens = 2048
 
 [capabilities]
-tools = ["research"]
+tools = ["web_search", "web_fetch", "memory_recall"]
 `;
       await rhFetch("/api/agents", {
         method: "POST",
@@ -434,7 +468,7 @@ tools = ["research"]
     }
   };
   const skipSpawn = () => dismiss();
-  return /* @__PURE__ */ React.createElement("div", { className: "modal-back", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "modal wide onboarding", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "modal-head" }, /* @__PURE__ */ React.createElement("div", { className: "row gap-12" }, /* @__PURE__ */ React.createElement("div", { className: "auth-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("b", { className: "mono", style: { fontSize: 14 } }, "Welcome to RustyHand"), /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11, marginTop: 2 } }, "Step ", step + 1, " of 3"))), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", onClick: dismiss, title: "Skip and don't show again" }, /* @__PURE__ */ React.createElement(I.close, null))), /* @__PURE__ */ React.createElement("div", { className: "modal-body" }, step === 0 && /* @__PURE__ */ React.createElement("div", { className: "col gap-12" }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, lineHeight: 1.55 } }, "RustyHand is a self-hostable agent operating system. This panel runs against the kernel listening at ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, window.location.host), ". In the next two steps we'll set up a real LLM provider and spawn your first agent \u2014 about 30 seconds."), /* @__PURE__ */ React.createElement("div", { className: "card", style: { padding: 12 } }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "What you get"), /* @__PURE__ */ React.createElement("ul", { className: "md-ul", style: { margin: 0, paddingLeft: 18 } }, /* @__PURE__ */ React.createElement("li", null, "Multi-agent orchestration with a single kernel \u2014 workflows, triggers, cron jobs, channels (Telegram/Discord/Slack)."), /* @__PURE__ */ React.createElement("li", null, "Persistent memory with knowledge graph + vector embeddings."), /* @__PURE__ */ React.createElement("li", null, "16-layer security: capability gates, WASM sandbox, Merkle-chained audit, Ed25519-signed manifests."), /* @__PURE__ */ React.createElement("li", null, "26 supported LLM providers, auto-detected at boot."))), /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 12 } }, "You're currently in ", /* @__PURE__ */ React.createElement("b", { style: { color: "var(--rust)" } }, "Demo mode"), " \u2014 the mock driver echoes input back so the UI is interactive without any LLM cost. Add a real API key to use Claude / GPT / etc.")), step === 1 && /* @__PURE__ */ React.createElement("div", { className: "col gap-12" }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13 } }, "Pick an LLM provider and paste the API key. The key is stored encrypted in", /* @__PURE__ */ React.createElement("span", { className: "mono" }, " ~/.rustyhand/config.toml"), " and zeroized after each use."), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Provider"), /* @__PURE__ */ React.createElement("select", { className: "t-select", value: providerName, onChange: (e) => setProviderName(e.target.value) }, providers.filter((p) => p.key_required !== false).map((p) => /* @__PURE__ */ React.createElement("option", { key: p.id, value: p.id }, p.display_name || p.id, (p.auth_status || "").toLowerCase() === "ok" ? "  \u2014 configured" : "")))), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "API key"), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "modal-back", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "modal wide onboarding", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "modal-head" }, /* @__PURE__ */ React.createElement("div", { className: "row gap-12" }, /* @__PURE__ */ React.createElement("div", { className: "auth-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("b", { className: "mono", style: { fontSize: 14 } }, "Welcome to RustyHand"), /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11, marginTop: 2 } }, "Step ", step + 1, " of 3"))), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", onClick: dismiss, title: "Skip and don't show again" }, /* @__PURE__ */ React.createElement(I.close, null))), /* @__PURE__ */ React.createElement("div", { className: "modal-body" }, step === 0 && /* @__PURE__ */ React.createElement("div", { className: "col gap-12" }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, lineHeight: 1.55 } }, "RustyHand is a self-hostable agent operating system. This panel runs against the kernel listening at ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, window.location.host), ". In the next two steps we'll set up a real LLM provider and spawn your first agent \u2014 about 30 seconds."), /* @__PURE__ */ React.createElement("div", { className: "card", style: { padding: 12 } }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "What you get"), /* @__PURE__ */ React.createElement("ul", { className: "md-ul", style: { margin: 0, paddingLeft: 18 } }, /* @__PURE__ */ React.createElement("li", null, "Multi-agent orchestration with a single kernel \u2014 workflows, triggers, cron jobs, channels (Telegram/Discord/Slack)."), /* @__PURE__ */ React.createElement("li", null, "Persistent memory with knowledge graph + vector embeddings."), /* @__PURE__ */ React.createElement("li", null, "16-layer security: capability gates, WASM sandbox, Merkle-chained audit, Ed25519-signed manifests."), /* @__PURE__ */ React.createElement("li", null, "26 supported LLM providers, auto-detected at boot."))), /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 12 } }, "You're currently in ", /* @__PURE__ */ React.createElement("b", { style: { color: "var(--rust)" } }, "Demo mode"), " \u2014 the mock driver echoes input back so the UI is interactive without any LLM cost. Add a real API key to use Claude / GPT / etc.")), step === 1 && /* @__PURE__ */ React.createElement("div", { className: "col gap-12" }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13 } }, "Pick an LLM provider and paste the API key. The key is stored in", /* @__PURE__ */ React.createElement("span", { className: "mono" }, " ~/.rustyhand/secrets.env"), " and zeroized after each use."), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Provider"), /* @__PURE__ */ React.createElement("select", { className: "t-select", value: providerName, onChange: (e) => setProviderName(e.target.value) }, providers.filter((p) => p.key_required !== false).map((p) => /* @__PURE__ */ React.createElement("option", { key: p.id, value: p.id }, p.display_name || p.id, providerConfigured(p) ? "  \u2014 configured" : "")))), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "API key"), /* @__PURE__ */ React.createElement(
     "input",
     {
       className: "modal-field",
@@ -449,7 +483,7 @@ tools = ["research"]
     }
   )), keyErr && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, keyErr)), keySaved && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.74 0.135 150 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot live" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "SAVED"), /* @__PURE__ */ React.createElement("span", { className: "banner-body", style: { fontSize: 11.5 } }, providerName, " key stored. Continuing\u2026")), /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 11.5 } }, "Don't have a key? ", /* @__PURE__ */ React.createElement("a", { href: "https://console.anthropic.com/settings/keys", target: "_blank", rel: "noreferrer" }, "Get one from Anthropic"), " \xB7 skip this step to stay in demo mode.")), step === 2 && /* @__PURE__ */ React.createElement("div", { className: "col gap-12" }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13 } }, "Spawn an agent that uses the provider you just configured. You can rename it, change the system prompt, swap models \u2014 everything is editable in the agent's drawer after spawn."), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Agent name"), /* @__PURE__ */ React.createElement("input", { className: "modal-field", value: agentName, onChange: (e) => setAgentName(e.target.value), autoFocus: true })), /* @__PURE__ */ React.createElement("pre", { className: "codebox", style: { maxHeight: 160 } }, `name = "${agentName || "my-agent"}"
 provider = "${providerName}"
-tools = ["research"]   # web_search, web_fetch, etc.
+tools = ["web_search", "web_fetch", "memory_recall"]
 temperature = 0.4
 max_tokens = 2048`), spawnErr && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, spawnErr)))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: dismiss, style: { marginRight: "auto" } }, "Skip setup"), step > 0 && /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => setStep(step - 1) }, "Back"), step === 0 && /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setStep(1) }, "Get started"), step === 1 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: skipKey }, "Stay in demo mode"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: saveKey, disabled: savingKey || !apiKey.trim() }, savingKey ? "Saving\u2026" : "Save key")), step === 2 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: skipSpawn }, "Skip"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: spawn, disabled: spawning || !agentName.trim() }, spawning ? "Spawning\u2026" : "Spawn agent")))));
 }

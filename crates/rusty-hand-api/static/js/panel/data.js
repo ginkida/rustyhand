@@ -2,16 +2,16 @@
 
 window.RH_DATA = (() => {
   const agents = [
-    { id: "rusty",          name: "rusty",            emoji: "🦀", group: "system",     state: "idle",    model: "claude-sonnet-4",   provider: "mock",      messages: 3,    cost: 0.00,  last: "Welcome! Try the demo pipeline.",   updated: "now",       hue: 22  },
-    { id: "recruiter-01",   name: "recruiter-01",     emoji: "🎯", group: "sales",      state: "running", model: "claude-sonnet-4",   provider: "anthropic", messages: 412,  cost: 4.21,  last: "Found 12 candidates matching senior-rust filter…", updated: "2m",  hue: 200 },
-    { id: "social-media",   name: "social-media",     emoji: "📣", group: "marketing",  state: "running", model: "gpt-4o-mini",       provider: "openai",    messages: 1284, cost: 0.84,  last: "Drafted 4 posts for Wednesday queue.",          updated: "11m", hue: 295 },
-    { id: "security-audit", name: "security-auditor", emoji: "🔒", group: "ops",        state: "waiting", model: "claude-opus-4",     provider: "anthropic", messages: 88,   cost: 12.10, last: "Awaiting approval to rotate prod API key.",     updated: "4h",  hue: 12  },
-    { id: "log-analyzer",   name: "log-analyzer",     emoji: "📈", group: "ops",        state: "running", model: "deepseek-chat",     provider: "deepseek",  messages: 24010,cost: 0.31,  last: "Indexed 1.2M lines from prod-api-3.",            updated: "30s", hue: 150 },
-    { id: "weekly-digest",  name: "weekly-digest",    emoji: "📰", group: "ops",        state: "scheduled",model: "claude-sonnet-4",   provider: "anthropic", messages: 8,    cost: 0.42,  last: "Next run: Mon 09:00 UTC.",                       updated: "1d",  hue: 88  },
-    { id: "tutor-rust",     name: "tutor-rust",       emoji: "🎓", group: "personal",   state: "idle",    model: "claude-haiku-4",    provider: "anthropic", messages: 96,   cost: 0.05,  last: "Quizzed me on Pin<&mut T>. Got 7/10.",          updated: "3h",  hue: 50  },
-    { id: "home-auto",      name: "home-automation",  emoji: "🏠", group: "personal",   state: "running", model: "ollama:llama3.1",   provider: "ollama",    messages: 5621, cost: 0.00,  last: "Lights dimmed at sunset.",                       updated: "1m",  hue: 250 },
-    { id: "diagnostic",     name: "diagnostic",       emoji: "🩻", group: "system",     state: "error",   model: "claude-sonnet-4",   provider: "anthropic", messages: 3,    cost: 0.00,  last: "Circuit breaker OPEN — auth profile cooldown 412s", updated: "12m", hue: 12 },
-    { id: "coordinator",    name: "coordinator",      emoji: "🧭", group: "system",     state: "idle",    model: "claude-sonnet-4",   provider: "anthropic", messages: 14,   cost: 0.18,  last: "Delegated 3 tasks to capability-builder.",       updated: "20m", hue: 22  },
+    { id: "rusty",          name: "rusty",            emoji: "🦀", group: "system",     state: "idle",    model: "mock-model",              provider: "mock",      messages: 3,    cost: 0.00,  last: "Welcome! Try the demo pipeline.",   updated: "now",       hue: 22  },
+    { id: "recruiter-01",   name: "recruiter-01",     emoji: "🎯", group: "sales",      state: "running", model: "claude-sonnet-4-6", provider: "anthropic", messages: 412,  cost: 4.21,  last: "Found 12 candidates matching senior-rust filter…", updated: "2m",  hue: 200 },
+    { id: "social-media",   name: "social-media",     emoji: "📣", group: "marketing",  state: "running", model: "kimi-for-coding",        provider: "kimi",      messages: 1284, cost: 0.84,  last: "Drafted 4 posts for Wednesday queue.",          updated: "11m", hue: 295 },
+    { id: "security-audit", name: "security-auditor", emoji: "🔒", group: "ops",        state: "waiting", model: "claude-opus-4-7", provider: "anthropic", messages: 88,   cost: 12.10, last: "Awaiting approval to rotate prod API key.",     updated: "4h",  hue: 12  },
+    { id: "log-analyzer",   name: "log-analyzer",     emoji: "📈", group: "ops",        state: "running", model: "deepseek-v4-flash",      provider: "deepseek",  messages: 24010,cost: 0.31,  last: "Indexed 1.2M lines from prod-api-3.",            updated: "30s", hue: 150 },
+    { id: "weekly-digest",  name: "weekly-digest",    emoji: "📰", group: "ops",        state: "scheduled",model: "claude-sonnet-4-6", provider: "anthropic", messages: 8,    cost: 0.42,  last: "Next run: Mon 09:00 UTC.",                       updated: "1d",  hue: 88  },
+    { id: "tutor-rust",     name: "tutor-rust",       emoji: "🎓", group: "personal",   state: "idle",    model: "claude-haiku-4-5-20251001", provider: "anthropic", messages: 96,   cost: 0.05,  last: "Quizzed me on Pin<&mut T>. Got 7/10.",          updated: "3h",  hue: 50  },
+    { id: "home-auto",      name: "home-automation",  emoji: "🏠", group: "personal",   state: "running", model: "llama3.2",              provider: "ollama",    messages: 5621, cost: 0.00,  last: "Lights dimmed at sunset.",                       updated: "1m",  hue: 250 },
+    { id: "diagnostic",     name: "diagnostic",       emoji: "🩻", group: "system",     state: "error",   model: "claude-sonnet-4-6", provider: "anthropic", messages: 3,    cost: 0.00,  last: "Circuit breaker OPEN — auth profile cooldown 412s", updated: "12m", hue: 12 },
+    { id: "coordinator",    name: "coordinator",      emoji: "🧭", group: "system",     state: "idle",    model: "claude-sonnet-4-6", provider: "anthropic", messages: 14,   cost: 0.18,  last: "Delegated 3 tasks to capability-builder.",       updated: "20m", hue: 22  },
   ];
 
   const workflows = [
@@ -57,16 +57,16 @@ window.RH_DATA = (() => {
   ];
 
   const modelSpend = [
-    { model: "claude-sonnet-4",  spend: 6.84, share: 0.46 },
-    { model: "claude-opus-4",    spend: 3.91, share: 0.26 },
-    { model: "gpt-4o-mini",      spend: 1.42, share: 0.10 },
-    { model: "deepseek-chat",    spend: 0.31, share: 0.02 },
-    { model: "claude-haiku-4",   spend: 0.74, share: 0.05 },
-    { model: "ollama:llama3.1",  spend: 0.00, share: 0.11 },
+    { model: "claude-sonnet-4-6", spend: 6.84, share: 0.46 },
+    { model: "claude-opus-4-7",   spend: 3.91, share: 0.26 },
+    { model: "kimi-for-coding",          spend: 1.42, share: 0.10 },
+    { model: "deepseek-v4-flash",        spend: 0.31, share: 0.02 },
+    { model: "claude-haiku-4-5-20251001", spend: 0.74, share: 0.05 },
+    { model: "llama3.2",                 spend: 0.00, share: 0.11 },
   ];
 
   const audit = [
-    { time: "12:41:08", hash: "9a3f2b7e", parent: "f1ac…", actor: "operator@local", action: "agent.spawn",            payload: "id=recruiter-01 model=claude-sonnet-4" },
+    { time: "12:41:08", hash: "9a3f2b7e", parent: "f1ac…", actor: "operator@local", action: "agent.spawn",            payload: "id=recruiter-01 model=claude-sonnet-4-6" },
     { time: "12:40:54", hash: "f1ac8d12", parent: "c84e…", actor: "system",         action: "trigger.fired",          payload: "id=webhook-leads count=1281" },
     { time: "12:40:21", hash: "c84e6611", parent: "5b09…", actor: "recruiter-01",   action: "tool.web_search",        payload: "query=\"senior rust engineer remote\"" },
     { time: "12:39:55", hash: "5b095fa1", parent: "21d3…", actor: "log-analyzer",   action: "memory.ingest",          payload: "doc=prod-api-3.log chunks=4019" },

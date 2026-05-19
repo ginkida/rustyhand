@@ -8,7 +8,7 @@ tags = ["meta", "router", "delegation", "telegram"]
 
 [model]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 api_key_env = "ANTHROPIC_API_KEY"
 max_tokens = 4096
 temperature = 0.2
@@ -85,7 +85,7 @@ Your output to the user should sound human, not like a JSON blob.
 
 [[fallback_models]]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 api_key_env = "ANTHROPIC_API_KEY"
 
 [schedule]

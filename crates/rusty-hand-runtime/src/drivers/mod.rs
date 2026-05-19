@@ -261,7 +261,7 @@ pub fn detect_available_provider() -> Option<(&'static str, &'static str, &'stat
 /// `create_driver` doesn't know how to instantiate (the v0.7.0 → v0.7.15
 /// "Unknown provider 'gemini'" bug class).
 const PROBE_ORDER: &[(&str, &str, &str)] = &[
-    ("anthropic", "ANTHROPIC_API_KEY", "claude-sonnet-4-20250514"),
+    ("anthropic", "ANTHROPIC_API_KEY", "claude-sonnet-4-6"),
     ("kimi", "KIMI_API_KEY", "kimi-for-coding"),
     ("deepseek", "DEEPSEEK_API_KEY", "deepseek-v4-flash"),
     ("zhipu", "ZHIPU_API_KEY", "glm-4-plus"),
@@ -269,7 +269,7 @@ const PROBE_ORDER: &[(&str, &str, &str)] = &[
     (
         "openrouter",
         "OPENROUTER_API_KEY",
-        "anthropic/claude-sonnet-4",
+        "anthropic/claude-sonnet-4.6",
     ),
 ];
 

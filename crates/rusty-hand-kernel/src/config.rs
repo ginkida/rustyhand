@@ -71,7 +71,8 @@ pub fn load_config(path: Option<&Path>) -> KernelConfig {
                     }
 
                     match root_value.try_into::<KernelConfig>() {
-                        Ok(config) => {
+                        Ok(mut config) => {
+                            apply_env_overrides(&mut config);
                             info!(path = %config_path.display(), "Loaded configuration");
                             return config;
                         }
@@ -107,7 +108,36 @@ pub fn load_config(path: Option<&Path>) -> KernelConfig {
         );
     }
 
-    KernelConfig::default()
+    let mut config = KernelConfig::default();
+    apply_env_overrides(&mut config);
+    config
+}
+
+fn env_truthy(name: &str) -> bool {
+    std::env::var(name)
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn apply_env_overrides(config: &mut KernelConfig) {
+    if env_truthy("RUSTYHAND_INTERACTIVE_APPROVAL") || env_truthy("RUSTY_HAND_INTERACTIVE_APPROVAL")
+    {
+        config.approval.auto_approve_autonomous = false;
+        return;
+    }
+
+    if env_truthy("RUSTYHAND_AUTO_APPROVE")
+        || env_truthy("RUSTY_HAND_AUTO_APPROVE")
+        || env_truthy("RUSTYHAND_AUTONOMOUS")
+        || env_truthy("RUSTY_HAND_AUTONOMOUS")
+    {
+        config.approval.auto_approve_autonomous = true;
+    }
 }
 
 /// Resolve config includes by deep-merging included files into the root value.

@@ -272,12 +272,17 @@ fn builtin_providers() -> Vec<ProviderInfo> {
 fn builtin_aliases() -> HashMap<String, String> {
     let pairs = [
         // Anthropic
-        ("sonnet", "claude-sonnet-4-20250514"),
-        ("claude-sonnet", "claude-sonnet-4-20250514"),
+        ("sonnet", "claude-sonnet-4-6"),
+        ("claude-sonnet", "claude-sonnet-4-6"),
+        ("claude-sonnet-4-6", "claude-sonnet-4-6"),
+        ("claude-sonnet-4-20250514", "claude-sonnet-4-6"),
         ("haiku", "claude-haiku-4-5-20251001"),
         ("claude-haiku", "claude-haiku-4-5-20251001"),
-        ("opus", "claude-opus-4-20250514"),
-        ("claude-opus", "claude-opus-4-20250514"),
+        ("claude-haiku-4-5", "claude-haiku-4-5-20251001"),
+        ("opus", "claude-opus-4-7"),
+        ("claude-opus", "claude-opus-4-7"),
+        ("claude-opus-4-7", "claude-opus-4-7"),
+        ("claude-opus-4-20250514", "claude-opus-4-7"),
         // Kimi (all names resolve to the single canonical model Kimi Code exposes).
         ("kimi", "kimi-for-coding"),
         ("k2", "kimi-for-coding"),
@@ -309,35 +314,45 @@ fn builtin_aliases() -> HashMap<String, String> {
 fn builtin_models() -> Vec<ModelCatalogEntry> {
     vec![
         // ══════════════════════════════════════════════════════════════
-        // Anthropic (3)
+        // Anthropic (current Claude 4.x line)
         // ══════════════════════════════════════════════════════════════
         ModelCatalogEntry {
-            id: "claude-opus-4-20250514".into(),
-            display_name: "Claude Opus 4".into(),
+            id: "claude-opus-4-7".into(),
+            display_name: "Claude Opus 4.7".into(),
             provider: "anthropic".into(),
             tier: ModelTier::Frontier,
-            context_window: 200_000,
-            max_output_tokens: 32_000,
-            input_cost_per_m: 15.0,
-            output_cost_per_m: 75.0,
+            context_window: 1_000_000,
+            max_output_tokens: 128_000,
+            input_cost_per_m: 5.0,
+            output_cost_per_m: 25.0,
             supports_tools: true,
             supports_vision: true,
             supports_streaming: true,
-            aliases: vec!["opus".into(), "claude-opus".into()],
+            aliases: vec![
+                "opus".into(),
+                "claude-opus".into(),
+                "claude-opus-4-7".into(),
+                "claude-opus-4-20250514".into(),
+            ],
         },
         ModelCatalogEntry {
-            id: "claude-sonnet-4-20250514".into(),
-            display_name: "Claude Sonnet 4".into(),
+            id: "claude-sonnet-4-6".into(),
+            display_name: "Claude Sonnet 4.6".into(),
             provider: "anthropic".into(),
             tier: ModelTier::Smart,
-            context_window: 200_000,
+            context_window: 1_000_000,
             max_output_tokens: 64_000,
             input_cost_per_m: 3.0,
             output_cost_per_m: 15.0,
             supports_tools: true,
             supports_vision: true,
             supports_streaming: true,
-            aliases: vec!["sonnet".into(), "claude-sonnet".into()],
+            aliases: vec![
+                "sonnet".into(),
+                "claude-sonnet".into(),
+                "claude-sonnet-4-6".into(),
+                "claude-sonnet-4-20250514".into(),
+            ],
         },
         ModelCatalogEntry {
             id: "claude-haiku-4-5-20251001".into(),
@@ -345,26 +360,30 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
             provider: "anthropic".into(),
             tier: ModelTier::Fast,
             context_window: 200_000,
-            max_output_tokens: 8_192,
-            input_cost_per_m: 0.25,
-            output_cost_per_m: 1.25,
+            max_output_tokens: 64_000,
+            input_cost_per_m: 1.0,
+            output_cost_per_m: 5.0,
             supports_tools: true,
             supports_vision: true,
             supports_streaming: true,
-            aliases: vec!["haiku".into(), "claude-haiku".into()],
+            aliases: vec![
+                "haiku".into(),
+                "claude-haiku".into(),
+                "claude-haiku-4-5".into(),
+            ],
         },
         // ══════════════════════════════════════════════════════════════
         // Kimi Code (1 unified model — see comment in drivers/mod.rs)
         // ══════════════════════════════════════════════════════════════
         ModelCatalogEntry {
             id: "kimi-for-coding".into(),
-            display_name: "Kimi K2 (Moonshot)".into(),
+            display_name: "Kimi Code (powered by K2.6)".into(),
             provider: "kimi".into(),
             tier: ModelTier::Frontier,
             context_window: 262_144,
             max_output_tokens: 32_768,
-            input_cost_per_m: 0.60,
-            output_cost_per_m: 2.50,
+            input_cost_per_m: 0.95,
+            output_cost_per_m: 4.00,
             supports_tools: true,
             supports_vision: true,
             supports_streaming: true,
@@ -389,10 +408,10 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
             display_name: "DeepSeek V4 Flash (reasoning)".into(),
             provider: "deepseek".into(),
             tier: ModelTier::Smart,
-            context_window: 128_000,
-            max_output_tokens: 32_768,
-            input_cost_per_m: 0.27,
-            output_cost_per_m: 1.10,
+            context_window: 1_000_000,
+            max_output_tokens: 384_000,
+            input_cost_per_m: 0.14,
+            output_cost_per_m: 0.28,
             supports_tools: true,
             supports_vision: false,
             supports_streaming: true,
@@ -407,10 +426,10 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
             display_name: "DeepSeek V4 Pro (reasoning)".into(),
             provider: "deepseek".into(),
             tier: ModelTier::Frontier,
-            context_window: 128_000,
-            max_output_tokens: 32_768,
-            input_cost_per_m: 0.55,
-            output_cost_per_m: 2.19,
+            context_window: 1_000_000,
+            max_output_tokens: 384_000,
+            input_cost_per_m: 1.74,
+            output_cost_per_m: 3.48,
             supports_tools: true,
             supports_vision: false,
             supports_streaming: true,
@@ -418,13 +437,14 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
         },
         ModelCatalogEntry {
             id: "deepseek-chat".into(),
-            display_name: "DeepSeek V3 (deprecated 2026-07-24)".into(),
+            display_name: "DeepSeek Chat (V4 Flash compatibility alias, deprecated 2026-07-24)"
+                .into(),
             provider: "deepseek".into(),
             tier: ModelTier::Smart,
-            context_window: 64_000,
-            max_output_tokens: 8_192,
-            input_cost_per_m: 0.27,
-            output_cost_per_m: 1.10,
+            context_window: 1_000_000,
+            max_output_tokens: 384_000,
+            input_cost_per_m: 0.14,
+            output_cost_per_m: 0.28,
             supports_tools: true,
             supports_vision: false,
             supports_streaming: true,
@@ -432,13 +452,14 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
         },
         ModelCatalogEntry {
             id: "deepseek-reasoner".into(),
-            display_name: "DeepSeek R1 (deprecated 2026-07-24)".into(),
+            display_name: "DeepSeek Reasoner (V4 Flash thinking alias, deprecated 2026-07-24)"
+                .into(),
             provider: "deepseek".into(),
-            tier: ModelTier::Frontier,
-            context_window: 64_000,
-            max_output_tokens: 8_192,
-            input_cost_per_m: 0.55,
-            output_cost_per_m: 2.19,
+            tier: ModelTier::Smart,
+            context_window: 1_000_000,
+            max_output_tokens: 384_000,
+            input_cost_per_m: 0.14,
+            output_cost_per_m: 0.28,
             supports_tools: true,
             supports_vision: false,
             supports_streaming: true,
@@ -510,12 +531,12 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
         // OpenRouter (universal gateway — a few popular entry points)
         // ══════════════════════════════════════════════════════════════
         ModelCatalogEntry {
-            id: "anthropic/claude-sonnet-4".into(),
-            display_name: "Claude Sonnet 4 via OpenRouter".into(),
+            id: "anthropic/claude-sonnet-4.6".into(),
+            display_name: "Claude Sonnet 4.6 via OpenRouter".into(),
             provider: "openrouter".into(),
             tier: ModelTier::Smart,
-            context_window: 200_000,
-            max_output_tokens: 8_192,
+            context_window: 1_000_000,
+            max_output_tokens: 64_000,
             input_cost_per_m: 3.0,
             output_cost_per_m: 15.0,
             supports_tools: true,
@@ -711,9 +732,14 @@ mod tests {
     fn test_anthropic_aliases_resolve() {
         let catalog = ModelCatalog::new();
         for (alias, expected) in [
-            ("sonnet", "claude-sonnet-4-20250514"),
+            ("sonnet", "claude-sonnet-4-6"),
+            ("claude-sonnet-4-6", "claude-sonnet-4-6"),
+            ("claude-sonnet-4-20250514", "claude-sonnet-4-6"),
             ("haiku", "claude-haiku-4-5-20251001"),
-            ("opus", "claude-opus-4-20250514"),
+            ("claude-haiku-4-5", "claude-haiku-4-5-20251001"),
+            ("opus", "claude-opus-4-7"),
+            ("claude-opus-4-7", "claude-opus-4-7"),
+            ("claude-opus-4-20250514", "claude-opus-4-7"),
         ] {
             let m = catalog.find_model(alias).unwrap();
             assert_eq!(m.id, expected);
@@ -781,30 +807,30 @@ mod tests {
         // V4 Flash is a reasoning model (not a Fast-tier simple responder),
         // so it sits in the Smart tier despite the "Flash" name.
         assert_eq!(flash.tier, ModelTier::Smart);
-        assert!((flash.input_cost_per_m - 0.27).abs() < 0.01);
-        assert!((flash.output_cost_per_m - 1.10).abs() < 0.01);
-        assert_eq!(flash.context_window, 128_000);
-        // 32K output — reasoning + answer need room; 8K truncates.
-        assert_eq!(flash.max_output_tokens, 32_768);
+        assert!((flash.input_cost_per_m - 0.14).abs() < 0.01);
+        assert!((flash.output_cost_per_m - 0.28).abs() < 0.01);
+        assert_eq!(flash.context_window, 1_000_000);
+        // V4 exposes a large combined reasoning + answer output ceiling.
+        assert_eq!(flash.max_output_tokens, 384_000);
 
         let pro = catalog.find_model("deepseek-v4-pro").unwrap();
         assert_eq!(pro.tier, ModelTier::Frontier);
-        assert!((pro.input_cost_per_m - 0.55).abs() < 0.01);
-        assert!((pro.output_cost_per_m - 2.19).abs() < 0.01);
-        assert_eq!(pro.context_window, 128_000);
-        assert_eq!(pro.max_output_tokens, 32_768);
+        assert!((pro.input_cost_per_m - 1.74).abs() < 0.01);
+        assert!((pro.output_cost_per_m - 3.48).abs() < 0.01);
+        assert_eq!(pro.context_window, 1_000_000);
+        assert_eq!(pro.max_output_tokens, 384_000);
     }
 
     #[test]
     fn test_pricing_lookup() {
         let catalog = ModelCatalog::new();
-        let (i, o) = catalog.pricing("claude-sonnet-4-20250514").unwrap();
+        let (i, o) = catalog.pricing("claude-sonnet-4-6").unwrap();
         assert!((i - 3.0).abs() < 0.01);
         assert!((o - 15.0).abs() < 0.01);
         // Kimi pricing
         let (ki, ko) = catalog.pricing("kimi-for-coding").unwrap();
-        assert!((ki - 0.60).abs() < 0.01);
-        assert!((ko - 2.50).abs() < 0.01);
+        assert!((ki - 0.95).abs() < 0.01);
+        assert!((ko - 4.00).abs() < 0.01);
     }
 
     #[test]

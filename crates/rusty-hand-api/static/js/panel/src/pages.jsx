@@ -176,7 +176,7 @@ const ProvidersList = ({ providers }) => {
   if (!providers) {
     return (
       <div className="col gap-6">
-        {["anthropic","openai","deepseek","ollama","mock"].map(n => (
+        {["anthropic","kimi","deepseek","minimax","ollama","mock"].map(n => (
           <ProviderRow key={n} name={n} state="idle" detail="loading…"/>
         ))}
       </div>
@@ -960,15 +960,15 @@ function AgentRow({ agent, selected, onSelect, openAgent, rowMenu, setRowMenu, r
 }
 
 // Provider/model derivation used by SpawnAgentModal. A provider is
-// "usable" if it's authenticated (`auth_status === "ok"`), is local +
-// reachable (ollama/vllm/lmstudio with the daemon up), or is the mock
-// fallback driver (`id === "mock"` in demo mode). Anything else is
-// hidden — picking a provider with no key/endpoint just produces a
-// runtime error on first message.
+// "usable" if it's authenticated (`configured` from /api/providers,
+// or legacy `ok`), is local/no-key, or is the mock fallback driver
+// (`id === "mock"` in demo mode). Anything else is hidden — picking a
+// provider with no key/endpoint just produces a runtime error on first
+// message.
 function isProviderUsable(p) {
   if (!p) return false;
   const auth = (p.auth_status || "").toLowerCase();
-  if (auth === "ok") return true;
+  if (auth === "ok" || auth === "configured" || auth === "not_required") return true;
   if (auth === "fallback") return true;
   if (p.is_local && p.reachable) return true;
   if ((p.id || "").toLowerCase() === "mock") return true;
@@ -1105,6 +1105,20 @@ function SpawnAgentModal({ onClose, onSpawned }) {
         .replace(/\t/g, "\\t");
     const name = tomlEscape(customName.trim() || "new-agent");
     const sp = tomlEscape(customSystemPrompt || "You are a helpful agent.");
+    // Expand the selected profile name to its actual tool list.
+    // /api/profiles returns `[{name, tools: [...]}, ...]` and the kernel
+    // does NOT auto-expand profile-names-used-as-tools — it treats every
+    // string in capabilities.tools as a literal tool name. If we write
+    // `tools = ["research"]` the spawned agent ends up with one phantom
+    // tool that matches nothing in the builtin registry and zero real
+    // capabilities. Look up the expanded list here; fall back to the
+    // profile name as a single tool so a custom user-defined profile we
+    // don't recognise still gets through.
+    const profileEntry = profileList.find((p) => (p.name || p) === customProfile);
+    const expandedTools = (profileEntry && Array.isArray(profileEntry.tools) && profileEntry.tools.length > 0)
+      ? profileEntry.tools
+      : [customProfile || "web_search"];
+    const toolsArray = expandedTools.map((t) => `"${tomlEscape(t)}"`).join(", ");
     return `name = "${name}"
 version = "0.1.0"
 description = "Spawned from RustyHand control panel"
@@ -1119,7 +1133,7 @@ temperature = 0.4
 max_tokens = 2048
 
 [capabilities]
-tools = ["${tomlEscape(customProfile || "research")}"]
+tools = [${toolsArray}]
 `;
   };
 
@@ -1146,7 +1160,8 @@ tools = ["${tomlEscape(customProfile || "research")}"]
 
   const providerBadge = (p) => {
     const auth = (p.auth_status || "").toLowerCase();
-    if (auth === "ok") return "ok";
+    if (auth === "ok" || auth === "configured") return "ok";
+    if (auth === "not_required") return "local";
     if (p.is_local && p.reachable) return "local";
     if (auth === "fallback" || (p.id || "").toLowerCase() === "mock") return "fallback";
     return auth || "?";
@@ -1262,7 +1277,18 @@ tools = ["${tomlEscape(customProfile || "research")}"]
                 )}
               </label>
               <label className="t-row col">
-                <span className="t-lbl">Tool profile</span>
+                <span className="t-lbl">
+                  Tool profile
+                  {(() => {
+                    const entry = profileList.find((p) => (p.name || p) === customProfile);
+                    const tools = entry && Array.isArray(entry.tools) ? entry.tools : [];
+                    return tools.length > 0 ? (
+                      <span className="dim" style={{marginLeft:6, fontSize:10.5}}>
+                        → {tools.length} tools: <span className="mono">{tools.slice(0, 5).join(", ")}{tools.length > 5 ? `, +${tools.length - 5}` : ""}</span>
+                      </span>
+                    ) : null;
+                  })()}
+                </span>
                 <select className="t-select" value={customProfile} onChange={e => setCustomProfile(e.target.value)}>
                   {profileList.length === 0 && <option value="research">research</option>}
                   {profileList.map(p => <option key={p.name || p} value={p.name || p}>{p.name || p}</option>)}
@@ -6280,6 +6306,7 @@ function SettingsPage() {
             </div>
           </div>
           <LogLevelCard config={config}/>
+          <McpAllowlistCard config={config}/>
         </div>
       </div>
 
@@ -6485,6 +6512,126 @@ function LogLevelCard({ config }) {
       </div>
       <div className="dim mt-8" style={{fontSize:11}}>
         Current: <span className="mono">{current}</span>
+      </div>
+    </div>
+  );
+}
+
+// McpAllowlistCard — shows the MCP server allowlist (safe defaults are
+// always on; extra_allowed_tools are operator-opted-in privileged tools
+// like config_set/cron_create/shell_exec). Lets the operator toggle
+// `mcp_server.enabled` and `allow_all_tools`, and pick which extra
+// tools to expose without hand-editing config.toml.
+//
+// Backend reads/writes go through /api/config (GET) and /api/config/set
+// (POST with dotted paths). Changes persist immediately; some
+// (enabled toggle) require a daemon restart to fully reload the MCP
+// route layer, which is surfaced in the toast.
+function McpAllowlistCard({ config }) {
+  const [allTools] = useApi("/api/tools");
+  const [busy, setBusy] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+
+  const mcp = (config && config.mcp_server) || {};
+  const enabled = mcp.enabled !== false;
+  const allowAll = !!mcp.allow_all_tools;
+  const safe = new Set(mcp.safe_default_tools || []);
+  const extra = new Set(mcp.extra_allowed_tools || []);
+  const builtins = (allTools && allTools.tools) || [];
+  // Everything that's NOT in safe defaults — these are the operator's
+  // opt-in candidates. Sort for a stable list.
+  const candidateTools = builtins
+    .map((t) => t.name)
+    .filter((n) => !safe.has(n))
+    .sort();
+
+  const setField = async (path, value, restartHint) => {
+    setBusy(true);
+    try {
+      await rhFetch("/api/config/set", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, value }),
+      });
+      toastOk(`${path} updated${restartHint ? ". Restart daemon to fully apply." : ""}`);
+    } catch (e) { toastErr(`${path}: ${e.message || e}`); }
+    finally { setBusy(false); }
+  };
+
+  const toggleExtra = (name) => {
+    const next = new Set(extra);
+    if (next.has(name)) next.delete(name); else next.add(name);
+    setField("mcp_server.extra_allowed_tools", Array.from(next).sort(), false);
+  };
+
+  return (
+    <div className="card">
+      <div className="muted mono mb-8" style={{fontSize:10.5, letterSpacing:".12em", textTransform:"uppercase"}}>
+        MCP server allowlist
+        <Tip>Controls which builtin tools the /mcp endpoint exposes to external MCP clients. Safe defaults (read-only, secrets-masked) are always allowed; toggle privileged tools below.</Tip>
+      </div>
+      <div className="row between gap-6 mb-8">
+        <div className="col gap-4">
+          <span className="mono" style={{fontSize:11.5}}>Server enabled</span>
+          <span className="dim" style={{fontSize:10.5}}>POST /mcp accepts requests (still gated by API key auth)</span>
+        </div>
+        <button className={"btn sm " + (enabled ? "" : "ghost")}
+                disabled={busy}
+                onClick={() => setField("mcp_server.enabled", !enabled, true)}>
+          {enabled ? "on" : "off"}
+        </button>
+      </div>
+      <div className="row between gap-6 mb-12" style={{borderTop:"1px solid var(--border)", paddingTop:8}}>
+        <div className="col gap-4">
+          <span className="mono" style={{fontSize:11.5, color: allowAll ? "var(--crimson)" : "inherit"}}>
+            Allow ALL tools {allowAll && "⚠"}
+          </span>
+          <span className="dim" style={{fontSize:10.5}}>
+            Bypasses the allowlist. Local dev only — never on a public server.
+          </span>
+        </div>
+        <button className={"btn sm " + (allowAll ? "danger" : "ghost")}
+                disabled={busy}
+                onClick={async () => {
+                  if (!allowAll) {
+                    const ok = await confirmDialog({
+                      title: "Allow ALL tools via MCP?",
+                      message: "This exposes every builtin tool (including shell_exec, file_write, skill_install, config_replace) to anyone who can reach /mcp with a valid API key. Only enable for trusted local dev.",
+                      danger: true,
+                      confirmLabel: "Enable",
+                    });
+                    if (!ok) return;
+                  }
+                  setField("mcp_server.allow_all_tools", !allowAll, false);
+                }}>
+          {allowAll ? "on" : "off"}
+        </button>
+      </div>
+      <div className="dim mono mb-4" style={{fontSize:10.5, letterSpacing:".10em", textTransform:"uppercase"}}>
+        Extra allowed ({extra.size} on · {candidateTools.length} candidates)
+      </div>
+      <div className="col gap-2" style={{maxHeight: showAll ? 400 : 180, overflow:"auto", border:"1px solid var(--border)", borderRadius:6, padding:6}}>
+        {!allTools && <div className="dim mono" style={{fontSize:11, padding:4}}>loading tools…</div>}
+        {candidateTools.length === 0 && allTools && (
+          <div className="dim mono" style={{fontSize:11, padding:4}}>no extra candidates — every builtin is already in safe defaults</div>
+        )}
+        {candidateTools.slice(0, showAll ? candidateTools.length : 18).map((name) => {
+          const on = extra.has(name);
+          return (
+            <label key={name} className="row gap-6" style={{padding:"3px 4px", borderRadius:4, cursor:"pointer", background: on ? "var(--surface-2)" : "transparent"}}>
+              <input type="checkbox" checked={on} disabled={busy || allowAll} onChange={() => toggleExtra(name)}/>
+              <span className="mono" style={{fontSize:11.5}}>{name}</span>
+            </label>
+          );
+        })}
+      </div>
+      {candidateTools.length > 18 && (
+        <button className="btn sm ghost mt-4" onClick={() => setShowAll((v) => !v)}>
+          {showAll ? "Show fewer" : `Show all ${candidateTools.length}`}
+        </button>
+      )}
+      <div className="dim mt-8" style={{fontSize:10.5}}>
+        Safe defaults ({safe.size}): always on, includes <span className="mono">config_get</span>, <span className="mono">web_search</span>, <span className="mono">memory_recall</span>, etc.
       </div>
     </div>
   );

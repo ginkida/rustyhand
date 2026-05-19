@@ -61,7 +61,7 @@ const Banner = ({ go, onboarding }) => {
 };
 const ProvidersList = ({ providers }) => {
   if (!providers) {
-    return /* @__PURE__ */ React.createElement("div", { className: "col gap-6" }, ["anthropic", "openai", "deepseek", "ollama", "mock"].map((n) => /* @__PURE__ */ React.createElement(ProviderRow, { key: n, name: n, state: "idle", detail: "loading\u2026" })));
+    return /* @__PURE__ */ React.createElement("div", { className: "col gap-6" }, ["anthropic", "kimi", "deepseek", "minimax", "ollama", "mock"].map((n) => /* @__PURE__ */ React.createElement(ProviderRow, { key: n, name: n, state: "idle", detail: "loading\u2026" })));
   }
   return /* @__PURE__ */ React.createElement("div", { className: "col gap-6" }, providers.slice(0, 6).map((p) => {
     const id = p.id || p.name || "\u2014";
@@ -624,7 +624,7 @@ function AgentRow({ agent, selected, onSelect, openAgent, rowMenu, setRowMenu, r
 function isProviderUsable(p) {
   if (!p) return false;
   const auth = (p.auth_status || "").toLowerCase();
-  if (auth === "ok") return true;
+  if (auth === "ok" || auth === "configured" || auth === "not_required") return true;
   if (auth === "fallback") return true;
   if (p.is_local && p.reachable) return true;
   if ((p.id || "").toLowerCase() === "mock") return true;
@@ -709,6 +709,9 @@ function SpawnAgentModal({ onClose, onSpawned }) {
     const tomlEscape = (s) => (s || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r/g, "\\r").replace(/\n/g, "\\n").replace(/\t/g, "\\t");
     const name = tomlEscape(customName.trim() || "new-agent");
     const sp = tomlEscape(customSystemPrompt || "You are a helpful agent.");
+    const profileEntry = profileList.find((p) => (p.name || p) === customProfile);
+    const expandedTools = profileEntry && Array.isArray(profileEntry.tools) && profileEntry.tools.length > 0 ? profileEntry.tools : [customProfile || "web_search"];
+    const toolsArray = expandedTools.map((t) => `"${tomlEscape(t)}"`).join(", ");
     return `name = "${name}"
 version = "0.1.0"
 description = "Spawned from RustyHand control panel"
@@ -723,7 +726,7 @@ temperature = 0.4
 max_tokens = 2048
 
 [capabilities]
-tools = ["${tomlEscape(customProfile || "research")}"]
+tools = [${toolsArray}]
 `;
   };
   const customReady = !!customProvider && !!customModel;
@@ -747,7 +750,8 @@ tools = ["${tomlEscape(customProfile || "research")}"]
   };
   const providerBadge = (p) => {
     const auth = (p.auth_status || "").toLowerCase();
-    if (auth === "ok") return "ok";
+    if (auth === "ok" || auth === "configured") return "ok";
+    if (auth === "not_required") return "local";
     if (p.is_local && p.reachable) return "local";
     if (auth === "fallback" || (p.id || "").toLowerCase() === "mock") return "fallback";
     return auth || "?";
@@ -801,7 +805,11 @@ tools = ["${tomlEscape(customProfile || "research")}"]
       value: customModel,
       onChange: (e) => setCustomModel(e.target.value)
     }
-  )), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Tool profile"), /* @__PURE__ */ React.createElement("select", { className: "t-select", value: customProfile, onChange: (e) => setCustomProfile(e.target.value) }, profileList.length === 0 && /* @__PURE__ */ React.createElement("option", { value: "research" }, "research"), profileList.map((p) => /* @__PURE__ */ React.createElement("option", { key: p.name || p, value: p.name || p }, p.name || p)))), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "System prompt"), /* @__PURE__ */ React.createElement(
+  )), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Tool profile", (() => {
+    const entry = profileList.find((p) => (p.name || p) === customProfile);
+    const tools = entry && Array.isArray(entry.tools) ? entry.tools : [];
+    return tools.length > 0 ? /* @__PURE__ */ React.createElement("span", { className: "dim", style: { marginLeft: 6, fontSize: 10.5 } }, "\u2192 ", tools.length, " tools: ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, tools.slice(0, 5).join(", "), tools.length > 5 ? `, +${tools.length - 5}` : "")) : null;
+  })()), /* @__PURE__ */ React.createElement("select", { className: "t-select", value: customProfile, onChange: (e) => setCustomProfile(e.target.value) }, profileList.length === 0 && /* @__PURE__ */ React.createElement("option", { value: "research" }, "research"), profileList.map((p) => /* @__PURE__ */ React.createElement("option", { key: p.name || p, value: p.name || p }, p.name || p)))), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "System prompt"), /* @__PURE__ */ React.createElement(
     "textarea",
     {
       className: "modal-field",
@@ -3822,7 +3830,7 @@ function SettingsPage() {
     },
     /* @__PURE__ */ React.createElement(I.refresh, null),
     " Re-seed on restart"
-  ))), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Build"), /* @__PURE__ */ React.createElement("div", { className: "kv" }, /* @__PURE__ */ React.createElement("dt", null, "version"), /* @__PURE__ */ React.createElement("dd", { className: "mono" }, version), /* @__PURE__ */ React.createElement("dt", null, "agents"), /* @__PURE__ */ React.createElement("dd", null, agentCount), /* @__PURE__ */ React.createElement("dt", null, "uptime"), /* @__PURE__ */ React.createElement("dd", null, uptime), /* @__PURE__ */ React.createElement("dt", null, "panics"), /* @__PURE__ */ React.createElement("dd", null, health && health.panic_count != null ? health.panic_count : "\u2014"), /* @__PURE__ */ React.createElement("dt", null, "restarts"), /* @__PURE__ */ React.createElement("dd", null, health && health.restart_count != null ? health.restart_count : "\u2014"))), /* @__PURE__ */ React.createElement(LogLevelCard, { config }))), editing && /* @__PURE__ */ React.createElement(ProviderKeyModal, { provider: editing, onClose: () => setEditing(null), onSaved: () => {
+  ))), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "Build"), /* @__PURE__ */ React.createElement("div", { className: "kv" }, /* @__PURE__ */ React.createElement("dt", null, "version"), /* @__PURE__ */ React.createElement("dd", { className: "mono" }, version), /* @__PURE__ */ React.createElement("dt", null, "agents"), /* @__PURE__ */ React.createElement("dd", null, agentCount), /* @__PURE__ */ React.createElement("dt", null, "uptime"), /* @__PURE__ */ React.createElement("dd", null, uptime), /* @__PURE__ */ React.createElement("dt", null, "panics"), /* @__PURE__ */ React.createElement("dd", null, health && health.panic_count != null ? health.panic_count : "\u2014"), /* @__PURE__ */ React.createElement("dt", null, "restarts"), /* @__PURE__ */ React.createElement("dd", null, health && health.restart_count != null ? health.restart_count : "\u2014"))), /* @__PURE__ */ React.createElement(LogLevelCard, { config }), /* @__PURE__ */ React.createElement(McpAllowlistCard, { config }))), editing && /* @__PURE__ */ React.createElement(ProviderKeyModal, { provider: editing, onClose: () => setEditing(null), onSaved: () => {
     setEditing(null);
     refreshProviders();
   } }), showRawEditor && /* @__PURE__ */ React.createElement(ConfigEditorModal, { onClose: () => setShowRawEditor(false) }));
@@ -3951,6 +3959,70 @@ function LogLevelCard({ config }) {
     },
     l
   ))), /* @__PURE__ */ React.createElement("div", { className: "dim mt-8", style: { fontSize: 11 } }, "Current: ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, current)));
+}
+function McpAllowlistCard({ config }) {
+  const [allTools] = useApi("/api/tools");
+  const [busy, setBusy] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const mcp = config && config.mcp_server || {};
+  const enabled = mcp.enabled !== false;
+  const allowAll = !!mcp.allow_all_tools;
+  const safe = new Set(mcp.safe_default_tools || []);
+  const extra = new Set(mcp.extra_allowed_tools || []);
+  const builtins = allTools && allTools.tools || [];
+  const candidateTools = builtins.map((t) => t.name).filter((n) => !safe.has(n)).sort();
+  const setField = async (path, value, restartHint) => {
+    setBusy(true);
+    try {
+      await rhFetch("/api/config/set", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, value })
+      });
+      toastOk(`${path} updated${restartHint ? ". Restart daemon to fully apply." : ""}`);
+    } catch (e) {
+      toastErr(`${path}: ${e.message || e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const toggleExtra = (name) => {
+    const next = new Set(extra);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    setField("mcp_server.extra_allowed_tools", Array.from(next).sort(), false);
+  };
+  return /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono mb-8", style: { fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase" } }, "MCP server allowlist", /* @__PURE__ */ React.createElement(Tip, null, "Controls which builtin tools the /mcp endpoint exposes to external MCP clients. Safe defaults (read-only, secrets-masked) are always allowed; toggle privileged tools below.")), /* @__PURE__ */ React.createElement("div", { className: "row between gap-6 mb-8" }, /* @__PURE__ */ React.createElement("div", { className: "col gap-4" }, /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 11.5 } }, "Server enabled"), /* @__PURE__ */ React.createElement("span", { className: "dim", style: { fontSize: 10.5 } }, "POST /mcp accepts requests (still gated by API key auth)")), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      className: "btn sm " + (enabled ? "" : "ghost"),
+      disabled: busy,
+      onClick: () => setField("mcp_server.enabled", !enabled, true)
+    },
+    enabled ? "on" : "off"
+  )), /* @__PURE__ */ React.createElement("div", { className: "row between gap-6 mb-12", style: { borderTop: "1px solid var(--border)", paddingTop: 8 } }, /* @__PURE__ */ React.createElement("div", { className: "col gap-4" }, /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 11.5, color: allowAll ? "var(--crimson)" : "inherit" } }, "Allow ALL tools ", allowAll && "\u26A0"), /* @__PURE__ */ React.createElement("span", { className: "dim", style: { fontSize: 10.5 } }, "Bypasses the allowlist. Local dev only \u2014 never on a public server.")), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      className: "btn sm " + (allowAll ? "danger" : "ghost"),
+      disabled: busy,
+      onClick: async () => {
+        if (!allowAll) {
+          const ok = await confirmDialog({
+            title: "Allow ALL tools via MCP?",
+            message: "This exposes every builtin tool (including shell_exec, file_write, skill_install, config_replace) to anyone who can reach /mcp with a valid API key. Only enable for trusted local dev.",
+            danger: true,
+            confirmLabel: "Enable"
+          });
+          if (!ok) return;
+        }
+        setField("mcp_server.allow_all_tools", !allowAll, false);
+      }
+    },
+    allowAll ? "on" : "off"
+  )), /* @__PURE__ */ React.createElement("div", { className: "dim mono mb-4", style: { fontSize: 10.5, letterSpacing: ".10em", textTransform: "uppercase" } }, "Extra allowed (", extra.size, " on \xB7 ", candidateTools.length, " candidates)"), /* @__PURE__ */ React.createElement("div", { className: "col gap-2", style: { maxHeight: showAll ? 400 : 180, overflow: "auto", border: "1px solid var(--border)", borderRadius: 6, padding: 6 } }, !allTools && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11, padding: 4 } }, "loading tools\u2026"), candidateTools.length === 0 && allTools && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11, padding: 4 } }, "no extra candidates \u2014 every builtin is already in safe defaults"), candidateTools.slice(0, showAll ? candidateTools.length : 18).map((name) => {
+    const on = extra.has(name);
+    return /* @__PURE__ */ React.createElement("label", { key: name, className: "row gap-6", style: { padding: "3px 4px", borderRadius: 4, cursor: "pointer", background: on ? "var(--surface-2)" : "transparent" } }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: on, disabled: busy || allowAll, onChange: () => toggleExtra(name) }), /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 11.5 } }, name));
+  })), candidateTools.length > 18 && /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost mt-4", onClick: () => setShowAll((v) => !v) }, showAll ? "Show fewer" : `Show all ${candidateTools.length}`), /* @__PURE__ */ React.createElement("div", { className: "dim mt-8", style: { fontSize: 10.5 } }, "Safe defaults (", safe.size, "): always on, includes ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "config_get"), ", ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "web_search"), ", ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "memory_recall"), ", etc."));
 }
 function ProviderKeyModal({ provider, onClose, onSaved }) {
   useEscapeKey(onClose);

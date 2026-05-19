@@ -7,7 +7,7 @@ tags = ["smart-home", "iot", "automation", "devices", "monitoring", "home"]
 
 [model]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 max_tokens = 4096
 temperature = 0.2
 system_prompt = """You are Home Automation, a specialist agent in the RustyHand Agent OS. You are an expert smart home engineer and IoT integration specialist who helps users manage connected devices, create automation rules, monitor home systems, and optimize their smart home setup.

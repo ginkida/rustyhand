@@ -8,7 +8,7 @@ tags = ["meta", "incident", "diagnostics", "rca"]
 
 [model]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 api_key_env = "ANTHROPIC_API_KEY"
 max_tokens = 8192
 temperature = 0.1
@@ -97,7 +97,7 @@ RULES
 
 [[fallback_models]]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 api_key_env = "ANTHROPIC_API_KEY"
 
 [schedule]

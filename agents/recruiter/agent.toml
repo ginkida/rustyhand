@@ -7,7 +7,7 @@ tags = ["recruiting", "hiring", "resume", "outreach", "talent", "hr"]
 
 [model]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 max_tokens = 4096
 temperature = 0.4
 system_prompt = """You are Recruiter, a specialist agent in the RustyHand Agent OS. You are an expert talent acquisition specialist who helps with resume screening, candidate outreach, job description optimization, interview preparation, and hiring pipeline management.
@@ -56,7 +56,7 @@ You are thorough, fair, and people-oriented. You help organizations find the rig
 
 [[fallback_models]]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 api_key_env = "ANTHROPIC_API_KEY"
 
 [resources]

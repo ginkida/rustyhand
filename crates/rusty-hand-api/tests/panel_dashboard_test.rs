@@ -171,6 +171,14 @@ async fn dashboard_includes_all_panel_modules() {
         ("rh.panel.chatLeft", "chat width persistence"),
         ("LogLevelCard", "settings log verbosity card"),
         ("Preflight", "workflow run preflight section"),
+        (
+            "auth === \"configured\"",
+            "spawn modal must accept configured provider auth status",
+        ),
+        (
+            "kimi-for-coding",
+            "onboarding must use Kimi's canonical catalog model",
+        ),
     ];
     for (needle, msg) in markers {
         assert!(body.contains(needle), "{msg} (missing `{needle}`)");
@@ -356,6 +364,7 @@ async fn dashboard_wires_write_paths() {
         ("SpawnAgentModal", "Spawn agent flow"),
         ("ProviderKeyModal", "Provider key editor"),
         ("ConfigEditorModal", "Full config.toml editor"),
+        ("McpAllowlistCard", "MCP allowlist toggles in Settings"),
         ("CronJobModal", "Cron job create form"),
         ("TriggerModal", "Trigger create form"),
         ("WorkflowCreateModal", "Workflow create form"),

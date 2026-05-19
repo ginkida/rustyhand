@@ -98,9 +98,9 @@ impl fmt::Display for AuthStatus {
 /// A single model entry in the catalog.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelCatalogEntry {
-    /// Canonical model identifier (e.g. "claude-sonnet-4-20250514").
+    /// Canonical model identifier (e.g. "claude-sonnet-4-6").
     pub id: String,
-    /// Human-readable display name (e.g. "Claude Sonnet 4").
+    /// Human-readable display name (e.g. "Claude Sonnet 4.6").
     pub display_name: String,
     /// Provider identifier (e.g. "anthropic").
     pub provider: String,
@@ -244,11 +244,11 @@ mod tests {
     #[test]
     fn test_model_entry_serde_roundtrip() {
         let entry = ModelCatalogEntry {
-            id: "claude-sonnet-4-20250514".to_string(),
-            display_name: "Claude Sonnet 4".to_string(),
+            id: "claude-sonnet-4-6".to_string(),
+            display_name: "Claude Sonnet 4.6".to_string(),
             provider: "anthropic".to_string(),
             tier: ModelTier::Smart,
-            context_window: 200_000,
+            context_window: 1_000_000,
             max_output_tokens: 64_000,
             input_cost_per_m: 3.0,
             output_cost_per_m: 15.0,

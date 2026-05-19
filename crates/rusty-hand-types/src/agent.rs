@@ -58,8 +58,8 @@ impl Default for ModelRoutingConfig {
     fn default() -> Self {
         Self {
             simple_model: "claude-haiku-4-5-20251001".to_string(),
-            medium_model: "claude-sonnet-4-20250514".to_string(),
-            complex_model: "claude-sonnet-4-20250514".to_string(),
+            medium_model: "claude-sonnet-4-6".to_string(),
+            complex_model: "claude-sonnet-4-6".to_string(),
             simple_threshold: 100,
             complex_threshold: 500,
         }
@@ -404,7 +404,7 @@ impl Default for ModelConfig {
     fn default() -> Self {
         Self {
             provider: "anthropic".to_string(),
-            model: "claude-sonnet-4-20250514".to_string(),
+            model: "claude-sonnet-4-6".to_string(),
             max_tokens: 4096,
             temperature: 0.7,
             system_prompt: "You are a helpful AI agent.".to_string(),
@@ -779,17 +779,14 @@ mod tests {
         let manifest = AgentManifest {
             routing: Some(ModelRoutingConfig::default()),
             autonomous: Some(AutonomousConfig::default()),
-            pinned_model: Some("claude-sonnet-4-20250514".into()),
+            pinned_model: Some("claude-sonnet-4-6".into()),
             ..Default::default()
         };
         let json = serde_json::to_string(&manifest).unwrap();
         let back: AgentManifest = serde_json::from_str(&json).unwrap();
         assert!(back.routing.is_some());
         assert!(back.autonomous.is_some());
-        assert_eq!(
-            back.pinned_model,
-            Some("claude-sonnet-4-20250514".to_string())
-        );
+        assert_eq!(back.pinned_model, Some("claude-sonnet-4-6".to_string()));
     }
 
     #[test]
