@@ -51,7 +51,15 @@ jobs:
       - name: Install cross (Linux aarch64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: cargo install cross --locked
+      # rust-cache is purely an optimization for release builds — the
+      # binary has already been uploaded by the time the post-step runs.
+      # On windows aarch64 the cache-save step routinely fails (the
+      # zstd-compressed target dir tarball stalls during upload and the
+      # action exits non-zero), turning the whole release run red even
+      # though every artifact attached successfully. Guard the step with
+      # continue-on-error so a flaky cache save doesn't poison the run.
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        continue-on-error: true
         with:
           # cache-bin: false prevents Swatinem from caching ~/.cargo/bin/
           # — without this, a single flaky macOS run where rustup-init
