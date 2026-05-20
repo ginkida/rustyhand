@@ -4779,12 +4779,20 @@ async fn cron_send_to_channel(
                 );
                 return;
             }
+            // env::var(...).ok() returns Some("") when the var is set
+            // but empty — the same v0.7.9-era silent-failure pattern
+            // pick_api_key was created to prevent. Without the
+            // is_empty filter Telegram builds the URL `https://api.
+            // telegram.org/bot/sendMessage` (no token), 401s, and
+            // every cron-delivered response is silently dropped with
+            // just a debug log.
             let token = kernel
                 .config
                 .channels
                 .telegram
                 .as_ref()
-                .and_then(|tg| std::env::var(&tg.bot_token_env).ok());
+                .and_then(|tg| std::env::var(&tg.bot_token_env).ok())
+                .filter(|s| !s.is_empty());
             if let Some(token) = token {
                 let url = format!("https://api.telegram.org/bot{token}/sendMessage");
                 for chunk in utf8_chunks(message, 4000) {
@@ -4817,12 +4825,18 @@ async fn cron_send_to_channel(
             }
         }
         "slack" => {
+            // Same Some("") guard as Telegram — Slack's bearer_auth
+            // accepts the empty token, the API replies auth_failed,
+            // and the `let _ = ...send().await` drops the error
+            // without a single log line. Filter empty up-front so the
+            // None branch could surface a "token not available" warn.
             let token = kernel
                 .config
                 .channels
                 .slack
                 .as_ref()
-                .and_then(|s| std::env::var(&s.bot_token_env).ok());
+                .and_then(|s| std::env::var(&s.bot_token_env).ok())
+                .filter(|s| !s.is_empty());
             if let Some(token) = token {
                 let url = "https://slack.com/api/chat.postMessage";
                 let payload = serde_json::json!({
@@ -4846,12 +4860,16 @@ async fn cron_send_to_channel(
                 );
                 return;
             }
+            // Same Some("") guard as Telegram/Slack — Discord's
+            // `Authorization: Bot ` header with no token returns 401
+            // and the `let _ = ...send().await` swallows the failure.
             let token = kernel
                 .config
                 .channels
                 .discord
                 .as_ref()
-                .and_then(|d| std::env::var(&d.bot_token_env).ok());
+                .and_then(|d| std::env::var(&d.bot_token_env).ok())
+                .filter(|s| !s.is_empty());
             if let Some(token) = token {
                 let url = format!("https://discord.com/api/v10/channels/{recipient}/messages");
                 let payload = serde_json::json!({ "content": message });
@@ -5867,5 +5885,49 @@ mod tests {
         assert!(old_len <= DeliveryTracker::MAX_RECEIPTS - 2);
         assert_eq!(new_len, 2);
         assert!(total <= DeliveryTracker::MAX_RECEIPTS);
+    }
+
+    /// Regression: `cron_send_to_channel` used to call
+    /// `std::env::var(env_var).ok()` for every channel — Telegram,
+    /// Slack, Discord. `env::var()` returns `Some("")` when a var is
+    /// declared but empty (a common shell mistake or partial deploy),
+    /// so an unconfigured token slipped through as a non-empty
+    /// `Option<String>`, the HTTP call fired with no bearer/header
+    /// token, the upstream returned 401, and the cron-delivered
+    /// response was silently dropped (Slack/Discord don't even check
+    /// the send result). Mirror the v0.7.9 `pick_api_key` fix here by
+    /// pinning that each channel branch chains `.filter(|s|
+    /// !s.is_empty())` on the env lookup. A pure source-shape
+    /// assertion keeps the pattern uniform.
+    #[test]
+    fn cron_channel_dispatch_filters_empty_env_tokens() {
+        let src = include_str!("kernel.rs");
+        let start = src
+            .find("async fn cron_send_to_channel(")
+            .expect("cron_send_to_channel must exist");
+        // Find the function's end by locating the next top-level
+        // `async fn`/`fn `/`struct ` after `start` so the assertions
+        // stay scoped to this function regardless of how it grows.
+        let after = &src[start + 1..];
+        let end_rel = after.find("\nstruct ").unwrap_or(after.len());
+        let window = &src[start..start + end_rel];
+        // Each channel block must end the bot_token_env lookup with
+        // the empty-string filter. Order-sensitive string keeps the
+        // test cheap and explicit.
+        let needle = ".and_then(|tg| std::env::var(&tg.bot_token_env).ok())\n                .filter(|s| !s.is_empty())";
+        assert!(
+            window.contains(needle),
+            "Telegram branch must filter empty bot_token_env values"
+        );
+        let needle = ".and_then(|s| std::env::var(&s.bot_token_env).ok())\n                .filter(|s| !s.is_empty())";
+        assert!(
+            window.contains(needle),
+            "Slack branch must filter empty bot_token_env values"
+        );
+        let needle = ".and_then(|d| std::env::var(&d.bot_token_env).ok())\n                .filter(|s| !s.is_empty())";
+        assert!(
+            window.contains(needle),
+            "Discord branch must filter empty bot_token_env values"
+        );
     }
 }
