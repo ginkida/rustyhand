@@ -55,7 +55,16 @@ fn extract_content_text(messages: &[Message]) -> String {
         }
         out.push_str(&text);
         if out.len() >= MAX_BYTES {
-            out.truncate(MAX_BYTES);
+            // `String::truncate(MAX_BYTES)` panics when byte MAX_BYTES
+            // lands inside a multi-byte UTF-8 char. Session messages
+            // commonly contain non-ASCII content (agents handle
+            // multi-language conversations), so a 64 KB cap with a
+            // Cyrillic / CJK / emoji char straddling byte 65536 would
+            // panic save_session. Route through the UTF-8-safe
+            // truncator instead — same trap class as the earlier
+            // process_manager / loop_guard / session_repair fixes.
+            let cut = rusty_hand_types::text::truncate_bytes(&out, MAX_BYTES);
+            out = cut.to_string();
             break;
         }
     }
@@ -1096,5 +1105,37 @@ mod tests {
         assert_eq!(line2["role"], "assistant");
         assert_eq!(line2["content"], "Hi there!");
         assert!(line2.get("tool_use").is_none());
+    }
+
+    /// Regression: `extract_content_text` truncated the FTS-index
+    /// string with `out.truncate(MAX_BYTES)` where MAX_BYTES = 64 KB.
+    /// `String::truncate(N)` panics when byte `N` lands inside a
+    /// multi-byte UTF-8 character. A session whose accumulated
+    /// content exceeds 64 KB and has a Cyrillic / CJK / emoji char
+    /// straddling byte 65536 would panic `extract_content_text`,
+    /// which is called inline by `save_session` — the kernel would
+    /// crash the agent_loop turn on save.
+    #[test]
+    fn extract_content_text_handles_multibyte_at_truncation_boundary() {
+        // Build a single message with >64 KB of Cyrillic content
+        // arranged so byte 65536 splits a multi-byte char. One ASCII
+        // 'a' prefix forces the following 2-byte 'Я' to start at odd
+        // byte positions, so even-numbered cut points land mid-char.
+        let prefix = "a";
+        // 35_000 × "Я" (2 bytes each) = 70_000 bytes, plus the 'a',
+        // gives a 70_001-byte string. Byte 65536 (= 1 + 65535) is the
+        // second byte of a Я.
+        let cyrillic_blob = format!("{prefix}{}", "Я".repeat(35_000));
+        assert!(cyrillic_blob.len() > 64 * 1024);
+        assert!(
+            !cyrillic_blob.is_char_boundary(64 * 1024),
+            "test setup must place byte 65536 mid-char to exercise the regression"
+        );
+        let messages = vec![Message::user(&cyrillic_blob)];
+        // Before fix: panic inside save_session via extract_content_text.
+        let out = extract_content_text(&messages);
+        // After fix: cut cleanly, length within bound.
+        assert!(out.len() <= 64 * 1024);
+        assert!(out.starts_with('a'));
     }
 }
