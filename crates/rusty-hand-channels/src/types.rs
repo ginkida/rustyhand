@@ -371,8 +371,15 @@ pub fn split_message(text: &str, max_len: usize) -> Vec<&str> {
             chunks.push(remaining);
             break;
         }
-        // Try to split at a newline near the boundary
-        let split_at = remaining[..max_len].rfind('\n').unwrap_or(max_len);
+        // `remaining[..max_len]` panics when byte `max_len` lands in
+        // the middle of a multi-byte UTF-8 character — any Cyrillic /
+        // CJK / emoji content over the limit can hit it. Same trap
+        // class as the process_manager / loop_guard / session-summary
+        // fixes. Use the shared char-boundary truncator first so the
+        // subsequent `rfind('\n')` operates on a valid sub-slice and
+        // `split_at` never receives a non-boundary index.
+        let prefix = rusty_hand_types::text::truncate_bytes(remaining, max_len);
+        let split_at = prefix.rfind('\n').unwrap_or(prefix.len());
         let (chunk, rest) = remaining.split_at(split_at);
         chunks.push(chunk);
         // Skip the newline (and optional \r) we split on
@@ -421,6 +428,41 @@ mod tests {
         let text = "line1\nline2\nline3";
         let chunks = split_message(text, 10);
         assert_eq!(chunks, vec!["line1", "line2", "line3"]);
+    }
+
+    /// Regression: `split_message` used `remaining[..max_len].rfind('\n')`
+    /// — naive byte-slice. When `max_len` landed inside a multi-byte
+    /// UTF-8 char (Cyrillic, CJK, emoji), the slice panicked, killing
+    /// whatever channel adapter (Telegram, Discord, Slack) was trying
+    /// to send a long non-ASCII reply. Reproduce by feeding a string
+    /// of Cyrillic chars where byte `max_len` straddles a 2-byte char,
+    /// and one without any newline so `rfind` returns None and the
+    /// fallback `unwrap_or(max_len)` previously yielded a non-boundary
+    /// `split_at`.
+    #[test]
+    fn split_message_handles_multibyte_at_boundary() {
+        // Build a 200-byte string with byte 100 mid-char. Single ASCII
+        // 'a' prefix → following 2-byte Cyrillic chars start at odd
+        // byte positions, so byte 100 (even) sits between the bytes
+        // of a Я.
+        let s = format!("a{}", "Я".repeat(100));
+        assert_eq!(s.len(), 201);
+        assert!(
+            !s.is_char_boundary(100),
+            "test setup must place max_len mid-char"
+        );
+        // The bug would surface as a panic here.
+        let chunks = split_message(&s, 100);
+        // After fix: at least one chunk, total bytes match input,
+        // each chunk well-formed UTF-8 (Rust's `&str` invariant —
+        // panics on construction if not, so passing this assert
+        // implies the fix is correct).
+        assert!(!chunks.is_empty());
+        let joined: String = chunks.iter().copied().collect();
+        // The joined chunks should reconstruct the original modulo
+        // any newlines we'd split on — input has no newlines so it
+        // must round-trip exactly.
+        assert_eq!(joined, s);
     }
 
     #[test]
