@@ -40,12 +40,30 @@ impl fmt::Display for UserRole {
 
 impl UserRole {
     /// Parse a role from a string.
+    ///
+    /// Accepts the four canonical names (case-insensitive, surrounding
+    /// whitespace ignored). Any other value falls back to `User` —
+    /// principle-of-least-privilege — and is logged at WARN so a typo
+    /// like `role = "Owner "` (trailing space) or `role = "operator"`
+    /// (wrong vocabulary) doesn't silently demote a user to `User`
+    /// without surfacing the misconfiguration.
     pub fn from_str_role(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
+        match s.trim().to_lowercase().as_str() {
             "owner" => UserRole::Owner,
             "admin" => UserRole::Admin,
             "viewer" => UserRole::Viewer,
-            _ => UserRole::User,
+            "user" => UserRole::User,
+            other => {
+                if !other.is_empty() {
+                    tracing::warn!(
+                        role = %s,
+                        "Unknown RBAC role '{}' in config — defaulting to `user`. \
+                         Valid roles: owner, admin, user, viewer.",
+                        s
+                    );
+                }
+                UserRole::User
+            }
         }
     }
 }
@@ -401,5 +419,25 @@ mod tests {
         assert_eq!(UserRole::from_str_role("user"), UserRole::User);
         assert_eq!(UserRole::from_str_role("OWNER"), UserRole::Owner);
         assert_eq!(UserRole::from_str_role("unknown"), UserRole::User);
+    }
+
+    /// Regression: `from_str_role` used `s.to_lowercase().as_str()` with
+    /// no trim, so `role = "Admin "` (trailing space — easy mistake in
+    /// hand-edited TOML) silently fell into the `_ => UserRole::User`
+    /// branch. An operator intending Admin access got demoted to User
+    /// without any log line. The fix trims first AND warns on unknown
+    /// values; this test pins the trim behaviour. The warn is best
+    /// exercised manually via tracing-subscriber tests; we just verify
+    /// the role outcome here so future refactors keep the trim.
+    #[test]
+    fn role_parsing_trims_surrounding_whitespace() {
+        assert_eq!(UserRole::from_str_role(" owner"), UserRole::Owner);
+        assert_eq!(UserRole::from_str_role("admin "), UserRole::Admin);
+        assert_eq!(UserRole::from_str_role("  Viewer  "), UserRole::Viewer);
+        assert_eq!(UserRole::from_str_role("\tuser\n"), UserRole::User);
+        // Empty / whitespace-only also lands on User (not Owner) —
+        // principle-of-least-privilege fallback.
+        assert_eq!(UserRole::from_str_role(""), UserRole::User);
+        assert_eq!(UserRole::from_str_role("   "), UserRole::User);
     }
 }
