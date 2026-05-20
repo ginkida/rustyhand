@@ -4843,7 +4843,15 @@ pub async fn list_models(
         .map(|v| v == "true" || v == "1")
         .unwrap_or(false);
 
-    let models: Vec<serde_json::Value> = catalog
+    // Compute the filtered set once; `total`/`available` must reflect
+    // what the client asked for, not the global catalog. Previously
+    // `total` returned `catalog.list_models().len()` regardless of any
+    // ?provider= / ?tier= / ?available= filter, so a query like
+    // /api/models?provider=kimi (1 result) replied `total: 15` and the
+    // sibling `available` counter was equally misleading. Consumers
+    // relying on `total` to size pagination UI or assert "found N
+    // matches" got nonsense.
+    let filtered: Vec<&rusty_hand_types::model_catalog::ModelCatalogEntry> = catalog
         .list_models()
         .iter()
         .filter(|m| {
@@ -4867,6 +4875,10 @@ pub async fn list_models(
             }
             true
         })
+        .collect();
+
+    let models: Vec<serde_json::Value> = filtered
+        .iter()
         .map(|m| {
             let available = catalog
                 .get_provider(&m.provider)
@@ -4889,15 +4901,31 @@ pub async fn list_models(
         })
         .collect();
 
-    let total = catalog.list_models().len();
-    let available_count = catalog.available_models().len();
+    // Count of returned models that are available (provider has a key
+    // or is local/no-key). Mirrors the per-entry `available` flag.
+    let available_in_results = filtered
+        .iter()
+        .filter(|m| {
+            catalog
+                .get_provider(&m.provider)
+                .map(|p| p.auth_status != rusty_hand_types::model_catalog::AuthStatus::Missing)
+                .unwrap_or(false)
+        })
+        .count();
 
     (
         StatusCode::OK,
         Json(serde_json::json!({
             "models": models,
-            "total": total,
-            "available": available_count,
+            // Now matches `models.len()` — number of models matching the
+            // active filter (or all models if no filter was applied).
+            "total": models.len(),
+            // Number of returned models that are usable right now.
+            "available": available_in_results,
+            // Catalog-wide totals are still useful for "X of Y" UI; keep
+            // them under explicit names so the meaning is unambiguous.
+            "total_in_catalog": catalog.list_models().len(),
+            "available_in_catalog": catalog.available_models().len(),
         })),
     )
 }

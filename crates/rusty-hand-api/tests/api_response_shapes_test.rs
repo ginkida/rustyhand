@@ -729,7 +729,7 @@ async fn workflows_yaml_import_round_trip() {
     body["workflow_id"].as_str().expect("workflow_id string");
 }
 
-/// `GET /api/models` returns `{models, total, available_count}`.
+/// `GET /api/models` returns `{models, total, available, total_in_catalog, available_in_catalog}`.
 #[tokio::test]
 async fn models_envelope_and_entry_shape() {
     let server = require_server!(start_test_server());
@@ -739,6 +739,47 @@ async fn models_envelope_and_entry_shape() {
     if let Some(first) = models.first() {
         require_keys(first, &["id", "provider", "display_name"], "/api/models[0]");
     }
+}
+
+/// Regression: `GET /api/models?provider=X` used to report
+/// `total: catalog.list_models().len()` regardless of the filter,
+/// so a single-result query came back with `total: 15`. The fix
+/// makes `total` equal `models.len()` (filter-respecting) and adds
+/// explicit `*_in_catalog` counts for the catalog-wide totals.
+#[tokio::test]
+async fn models_total_matches_filtered_count() {
+    let server = require_server!(start_test_server());
+    // Anthropic ships exactly 3 catalog entries in v0.7.79 (sonnet
+    // 4.6, opus 4.7, haiku 4.5). The exact count is asserted in
+    // crates/rusty-hand-runtime tests, so we pin a small window here
+    // instead of an exact number — if the catalog grows, this test
+    // stays green as long as the filter→total invariant holds.
+    let body = get_json(&server.base_url, "/api/models?provider=anthropic").await;
+    let models = body["models"]
+        .as_array()
+        .expect("/api/models?provider=anthropic must return an array");
+    assert!(
+        !models.is_empty(),
+        "Anthropic provider must have at least one catalog entry"
+    );
+    let total = body["total"]
+        .as_u64()
+        .expect("/api/models response must include numeric `total`");
+    assert_eq!(
+        total as usize,
+        models.len(),
+        "`total` must match the returned `models` array length for the active filter, got total={total} but models.len()={}",
+        models.len()
+    );
+    // Catalog-wide counts must still be present and >= the filtered count.
+    let total_in_catalog = body["total_in_catalog"]
+        .as_u64()
+        .expect("response must include `total_in_catalog`") as usize;
+    assert!(
+        total_in_catalog >= models.len(),
+        "`total_in_catalog` ({total_in_catalog}) must be >= filtered count ({})",
+        models.len()
+    );
 }
 
 /// `GET /api/sessions` returns the paginated envelope with `agent_name`
