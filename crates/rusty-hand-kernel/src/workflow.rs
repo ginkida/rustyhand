@@ -475,12 +475,57 @@ impl WorkflowEngine {
     }
 
     /// Replace `{{var_name}}` references in a template with stored variable values.
+    ///
+    /// Single-pass substitution: only `{{...}}` placeholders in the
+    /// ORIGINAL `template` are expanded. Substituted values are NOT
+    /// re-scanned for further placeholders.
+    ///
+    /// The previous implementation chained `str::replace` calls on
+    /// `result`, which had two failure modes:
+    ///   1. Injection: if a prior step's output (`input`) or a
+    ///      variable's value contained another variable's reference
+    ///      like `{{secret_key}}`, the subsequent pass would substitute
+    ///      it. An agent could exfiltrate a workflow-scoped variable
+    ///      into a downstream step's prompt simply by emitting the
+    ///      `{{name}}` syntax in its response.
+    ///   2. Non-determinism: `HashMap` iteration order is randomised.
+    ///      Variables whose values referenced other variables produced
+    ///      different output depending on the order keys hashed —
+    ///      reproducibility hazard.
     fn expand_variables(template: &str, input: &str, vars: &HashMap<String, String>) -> String {
-        let mut result = template.replace("{{input}}", input);
-        for (key, value) in vars {
-            result = result.replace(&format!("{{{{{key}}}}}"), value);
+        let mut out = String::with_capacity(template.len());
+        let bytes = template.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            // Look for `{{`
+            if i + 1 < bytes.len() && bytes[i] == b'{' && bytes[i + 1] == b'{' {
+                if let Some(close_rel) = template[i + 2..].find("}}") {
+                    let name_end = i + 2 + close_rel;
+                    let name = &template[i + 2..name_end];
+                    let trimmed = name.trim();
+                    if trimmed == "input" {
+                        out.push_str(input);
+                    } else if let Some(v) = vars.get(trimmed) {
+                        out.push_str(v);
+                    } else {
+                        // Unknown placeholder — leave the literal
+                        // `{{name}}` in place so downstream tooling can
+                        // surface the missing-variable error rather
+                        // than have it silently disappear.
+                        out.push_str(&template[i..name_end + 2]);
+                    }
+                    i = name_end + 2;
+                    continue;
+                }
+            }
+            // Push the next character as a UTF-8-correct slice.
+            let ch_end = (i + 1..=template.len())
+                .find(|&j| template.is_char_boundary(j))
+                .unwrap_or(template.len());
+            out.push_str(&template[i..ch_end]);
+            i = ch_end;
         }
-        result
+        out
     }
 
     /// Execute a single step with error mode handling. Returns (output, input_tokens, output_tokens).
@@ -1555,6 +1600,61 @@ mod tests {
             &vars,
         );
         assert_eq!(result, "Hello Alice, please do code review on main.rs");
+    }
+
+    /// Regression: the previous implementation chained
+    /// `str::replace` calls on a mutable `result`, so any `{{...}}`
+    /// reference inside the `input` argument (or inside a variable's
+    /// value) would be re-scanned on the subsequent variable pass.
+    /// An agent emitting `{{api_key}}` in its step output could
+    /// exfiltrate a workflow-scoped variable into the next step's
+    /// prompt — defense-in-depth gap.
+    #[tokio::test]
+    async fn expand_variables_does_not_re_substitute_input() {
+        let mut vars = HashMap::new();
+        vars.insert("api_key".to_string(), "SECRET-DO-NOT-LEAK".to_string());
+        // Prior step output that happens to contain a `{{api_key}}`
+        // reference. The single-pass implementation must NOT expand it.
+        let result = WorkflowEngine::expand_variables(
+            "Use this: {{input}}",
+            "the {{api_key}} payload",
+            &vars,
+        );
+        assert_eq!(
+            result, "Use this: the {{api_key}} payload",
+            "{{api_key}} embedded in the input value must NOT be substituted (re-substitution would leak workflow variables)"
+        );
+        assert!(
+            !result.contains("SECRET"),
+            "secret variable must not appear in the expanded output"
+        );
+    }
+
+    /// Regression: variables whose values referenced other variables
+    /// produced different output depending on `HashMap` iteration
+    /// order — different chosen ordering of `for (k, v) in vars`
+    /// led to either fully-resolved or partially-resolved templates.
+    /// Single-pass substitution makes this deterministic: variable
+    /// values are NOT re-scanned.
+    #[tokio::test]
+    async fn expand_variables_chain_is_deterministic() {
+        let mut vars = HashMap::new();
+        vars.insert("a".to_string(), "{{b}}".to_string());
+        vars.insert("b".to_string(), "final".to_string());
+        // The substituted "{{b}}" must NOT be further expanded.
+        // Output is deterministic regardless of HashMap iteration order.
+        let result = WorkflowEngine::expand_variables("got {{a}}", "ignored", &vars);
+        assert_eq!(result, "got {{b}}");
+    }
+
+    /// Unknown placeholders are left as-is so downstream surfaces
+    /// (audit log, dashboard run inspector) can show what was missing
+    /// instead of silently emitting an empty value.
+    #[tokio::test]
+    async fn expand_variables_leaves_unknown_placeholders_intact() {
+        let vars = HashMap::new();
+        let result = WorkflowEngine::expand_variables("hello {{unknown}}", "ignored", &vars);
+        assert_eq!(result, "hello {{unknown}}");
     }
 
     #[tokio::test]
