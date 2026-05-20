@@ -3712,9 +3712,29 @@ async fn tool_canvas_present(
     let filename = format!("canvas_{timestamp}_{}.html", &canvas_id[..8]);
     let filepath = output_dir.join(&filename);
 
-    // Write the full HTML document
+    // Write the full HTML document with a strict Content-Security-Policy
+    // meta tag. `sanitize_canvas_html` rejects literal `<script>` etc.,
+    // but the substring check is naive: HTML-entity-encoded payloads
+    // like `&#60;script>alert(1)&#60;/script>` pass the filter (the
+    // literal `<script` isn't present), the browser then decodes the
+    // entities at render time and executes the script. The CSP meta
+    // tag refuses inline scripts at the browser level regardless of
+    // how the agent encoded them. `base-uri 'none'` blocks the
+    // `<base href>` redirection trick; `object-src 'none'` blocks
+    // `<object>` plugins (the substring filter already rejects
+    // `<object` but defense-in-depth costs nothing). `default-src
+    // 'none'` denies fetch of anything else — the canvas is meant
+    // to be a self-contained static document.
     let full_html = format!(
-        "<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"><title>{title}</title></head>\n<body>\n{sanitized}\n</body>\n</html>"
+        "<!DOCTYPE html>\n\
+         <html>\n\
+         <head>\n\
+         <meta charset=\"utf-8\">\n\
+         <meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'self' data:; script-src 'none'; object-src 'none'; base-uri 'none';\">\n\
+         <title>{title}</title>\n\
+         </head>\n\
+         <body>\n{sanitized}\n</body>\n\
+         </html>"
     );
     tokio::fs::write(&filepath, &full_html)
         .await
@@ -5013,6 +5033,60 @@ mod tests {
         assert!(output["canvas_id"].is_string());
         assert_eq!(output["title"], "Test");
         // Cleanup
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Regression: `sanitize_canvas_html` rejects literal `<script`
+    /// but the substring check is naive — HTML-entity-encoded
+    /// payloads like `&#60;script>alert(1)&#60;/script>` slip past
+    /// (the literal characters `<script` are not present in the
+    /// pre-rendered HTML). The browser decodes the entities at
+    /// render time and executes the script. Defense-in-depth: the
+    /// generated wrapper now includes a strict
+    /// Content-Security-Policy meta tag that denies inline scripts
+    /// regardless of how they were encoded.
+    #[tokio::test]
+    async fn canvas_html_includes_strict_csp() {
+        let input = serde_json::json!({
+            "html": "<h1>OK</h1>",
+            "title": "T"
+        });
+        let tmp = std::env::temp_dir().join("rusty_hand_canvas_csp_test");
+        let _ = std::fs::create_dir_all(&tmp);
+        let _ = tool_canvas_present(&input, Some(tmp.as_path()))
+            .await
+            .unwrap();
+        // tool_canvas_present writes to `<workspace_root>/output/` —
+        // see the `output_dir = root.join("output")` line above.
+        let output_dir = tmp.join("output");
+        let entry = std::fs::read_dir(&output_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .find(|e| {
+                e.path()
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.starts_with("canvas_") && n.ends_with(".html"))
+                    .unwrap_or(false)
+            })
+            .expect("canvas html file must be written");
+        let body = std::fs::read_to_string(entry.path()).unwrap();
+        assert!(
+            body.contains("Content-Security-Policy"),
+            "canvas HTML must include a CSP meta tag"
+        );
+        assert!(
+            body.contains("script-src 'none'"),
+            "CSP must block inline scripts: {body}"
+        );
+        assert!(
+            body.contains("object-src 'none'"),
+            "CSP must block object plugins"
+        );
+        assert!(
+            body.contains("base-uri 'none'"),
+            "CSP must block <base href=> redirection"
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
