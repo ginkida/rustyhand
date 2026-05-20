@@ -2615,22 +2615,23 @@ fn parse_schedule_to_cron(input: &str) -> Result<String, String> {
         }
     }
 
-    // "daily at Xam/pm"
+    // "daily at Xam/pm" — also supports "9:30am" / "14:00" with
+    // minute precision.
     if let Some(time_str) = input.strip_prefix("daily at ") {
-        let hour = parse_time_to_hour(time_str)?;
-        return Ok(format!("0 {hour} * * *"));
+        let (hour, minute) = parse_time_to_hour_minute(time_str)?;
+        return Ok(format!("{minute} {hour} * * *"));
     }
 
     // "weekdays at Xam/pm"
     if let Some(time_str) = input.strip_prefix("weekdays at ") {
-        let hour = parse_time_to_hour(time_str)?;
-        return Ok(format!("0 {hour} * * 1-5"));
+        let (hour, minute) = parse_time_to_hour_minute(time_str)?;
+        return Ok(format!("{minute} {hour} * * 1-5"));
     }
 
     // "weekends at Xam/pm"
     if let Some(time_str) = input.strip_prefix("weekends at ") {
-        let hour = parse_time_to_hour(time_str)?;
-        return Ok(format!("0 {hour} * * 0,6"));
+        let (hour, minute) = parse_time_to_hour_minute(time_str)?;
+        return Ok(format!("{minute} {hour} * * 0,6"));
     }
 
     // "hourly" / "daily" / "weekly" / "monthly"
@@ -2647,43 +2648,68 @@ fn parse_schedule_to_cron(input: &str) -> Result<String, String> {
     ))
 }
 
-/// Parse a time string like "9am", "6pm", "14:00", "9:30am" into an hour (0-23).
-fn parse_time_to_hour(s: &str) -> Result<u32, String> {
+/// Parse a time string like "9am", "6pm", "14:00", "9:30am" into
+/// `(hour, minute)` where `hour ∈ 0..=23` and `minute ∈ 0..=59`.
+///
+/// Previously this returned just the hour and silently dropped the
+/// minute portion. The docstring claimed "9:30am" was supported but
+/// the implementation actually rejected it (`parse::<u32>("9:30")`
+/// failed) — so callers got an error AND a misleading example. Now
+/// the full `HH:MM` form is parsed and emitted in the cron output
+/// so `"daily at 9:30am"` correctly produces `"30 9 * * *"` instead
+/// of `"0 9 * * *"`.
+fn parse_time_to_hour_minute(s: &str) -> Result<(u32, u32), String> {
     let s = s.trim().to_lowercase();
 
-    // Handle "9am", "6pm", "12pm", "12am"
-    if let Some(h) = s.strip_suffix("am") {
-        let hour: u32 = h.trim().parse().map_err(|_| format!("Invalid time: {s}"))?;
-        return match hour {
-            12 => Ok(0),
-            1..=11 => Ok(hour),
-            _ => Err(format!("Invalid hour: {hour}")),
-        };
-    }
-    if let Some(h) = s.strip_suffix("pm") {
-        let hour: u32 = h.trim().parse().map_err(|_| format!("Invalid time: {s}"))?;
-        return match hour {
-            12 => Ok(12),
-            1..=11 => Ok(hour + 12),
-            _ => Err(format!("Invalid hour: {hour}")),
-        };
-    }
+    // Strip the AM/PM suffix first if present; the remaining string
+    // is then either `H` or `H:MM`.
+    let (body, am_pm) = if let Some(rest) = s.strip_suffix("am") {
+        (rest.trim(), Some(false))
+    } else if let Some(rest) = s.strip_suffix("pm") {
+        (rest.trim(), Some(true))
+    } else {
+        (s.as_str(), None)
+    };
 
-    // Handle "14:00" or "9:30"
-    if let Some((h, _m)) = s.split_once(':') {
-        let hour: u32 = h.trim().parse().map_err(|_| format!("Invalid time: {s}"))?;
-        if hour > 23 {
-            return Err(format!("Hour must be 0-23, got {hour}"));
+    // Parse `H` or `H:MM` from the body.
+    let (raw_hour, minute) = if let Some((h, m)) = body.split_once(':') {
+        let m: u32 = m
+            .trim()
+            .parse()
+            .map_err(|_| format!("Invalid minute in '{s}'"))?;
+        if m > 59 {
+            return Err(format!("Minute must be 0-59, got {m}"));
         }
-        return Ok(hour);
-    }
+        let h: u32 = h
+            .trim()
+            .parse()
+            .map_err(|_| format!("Invalid hour in '{s}'"))?;
+        (h, m)
+    } else {
+        let h: u32 = body.parse().map_err(|_| format!("Invalid time: {s}"))?;
+        (h, 0)
+    };
 
-    // Plain number
-    let hour: u32 = s.parse().map_err(|_| format!("Invalid time: {s}"))?;
-    if hour > 23 {
-        return Err(format!("Hour must be 0-23, got {hour}"));
-    }
-    Ok(hour)
+    // Apply AM/PM adjustment.
+    let hour = match am_pm {
+        Some(false) /* am */ => match raw_hour {
+            12 => 0,
+            1..=11 => raw_hour,
+            _ => return Err(format!("Invalid hour: {raw_hour}")),
+        },
+        Some(true) /* pm */ => match raw_hour {
+            12 => 12,
+            1..=11 => raw_hour + 12,
+            _ => return Err(format!("Invalid hour: {raw_hour}")),
+        },
+        None => {
+            if raw_hour > 23 {
+                return Err(format!("Hour must be 0-23, got {raw_hour}"));
+            }
+            raw_hour
+        }
+    };
+    Ok((hour, minute))
 }
 
 fn sanitize_schedule_name(description: &str) -> String {
@@ -4681,6 +4707,40 @@ mod tests {
             parse_schedule_to_cron("weekends at 10am").unwrap(),
             "0 10 * * 0,6"
         );
+    }
+
+    /// Regression: the docstring on `parse_time_to_hour` claimed
+    /// `"9:30am"` was supported, but the implementation parsed the
+    /// entire string before the AM/PM suffix as a single integer —
+    /// `parse::<u32>("9:30")` failed and the call errored out. Now
+    /// minute-precision is honored in the cron output.
+    #[test]
+    fn parse_schedule_supports_minute_precision_at_times() {
+        // 9:30am → minute=30, hour=9
+        assert_eq!(
+            parse_schedule_to_cron("daily at 9:30am").unwrap(),
+            "30 9 * * *"
+        );
+        // 6:45pm → minute=45, hour=18
+        assert_eq!(
+            parse_schedule_to_cron("weekdays at 6:45pm").unwrap(),
+            "45 18 * * 1-5"
+        );
+        // 14:00 (24h) → minute=0, hour=14
+        assert_eq!(
+            parse_schedule_to_cron("daily at 14:00").unwrap(),
+            "0 14 * * *"
+        );
+        // 23:59 (24h) — boundary
+        assert_eq!(
+            parse_schedule_to_cron("daily at 23:59").unwrap(),
+            "59 23 * * *"
+        );
+        // Invalid minute → error
+        assert!(parse_schedule_to_cron("daily at 9:60am").is_err());
+        // Invalid hour → error
+        assert!(parse_schedule_to_cron("daily at 25:00").is_err());
+        assert!(parse_schedule_to_cron("daily at 13am").is_err());
     }
 
     #[test]
