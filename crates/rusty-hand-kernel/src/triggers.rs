@@ -320,6 +320,15 @@ impl Default for TriggerEngine {
 }
 
 /// Check if an event matches a trigger pattern.
+///
+/// Empty substring/keyword/pattern fields treat the trigger as
+/// "match nothing" — the previous `str.contains("")` semantics
+/// vacuously returned true, so an operator who accidentally
+/// registered `MemoryKeyPattern { key_pattern: "" }` (e.g. by
+/// typing the bare prefix `"memory:"` in the proactive-condition
+/// parser, or by submitting an unfilled UI form) silently created
+/// a "fires on every memory update" trigger. Use `"*"` as the
+/// explicit wildcard.
 fn matches_pattern(pattern: &TriggerPattern, event: &Event, description: &str) -> bool {
     match pattern {
         TriggerPattern::All => true,
@@ -328,7 +337,13 @@ fn matches_pattern(pattern: &TriggerPattern, event: &Event, description: &str) -
         }
         TriggerPattern::AgentSpawned { name_pattern } => {
             if let EventPayload::Lifecycle(LifecycleEvent::Spawned { name, .. }) = &event.payload {
-                name.contains(name_pattern.as_str()) || name_pattern == "*"
+                if name_pattern == "*" {
+                    true
+                } else if name_pattern.is_empty() {
+                    false
+                } else {
+                    name.contains(name_pattern.as_str())
+                }
             } else {
                 false
             }
@@ -343,6 +358,9 @@ fn matches_pattern(pattern: &TriggerPattern, event: &Event, description: &str) -
         }
         TriggerPattern::SystemKeyword { keyword } => {
             if let EventPayload::System(se) = &event.payload {
+                if keyword.is_empty() {
+                    return false;
+                }
                 let se_str = format!("{:?}", se).to_lowercase();
                 se_str.contains(&keyword.to_lowercase())
             } else {
@@ -354,14 +372,25 @@ fn matches_pattern(pattern: &TriggerPattern, event: &Event, description: &str) -
         }
         TriggerPattern::MemoryKeyPattern { key_pattern } => {
             if let EventPayload::MemoryUpdate(delta) = &event.payload {
-                delta.key.contains(key_pattern.as_str()) || key_pattern == "*"
+                if key_pattern == "*" {
+                    true
+                } else if key_pattern.is_empty() {
+                    false
+                } else {
+                    delta.key.contains(key_pattern.as_str())
+                }
             } else {
                 false
             }
         }
-        TriggerPattern::ContentMatch { substring } => description
-            .to_lowercase()
-            .contains(&substring.to_lowercase()),
+        TriggerPattern::ContentMatch { substring } => {
+            if substring.is_empty() {
+                return false;
+            }
+            description
+                .to_lowercase()
+                .contains(&substring.to_lowercase())
+        }
     }
 }
 
@@ -730,5 +759,95 @@ mod tests {
             }),
         );
         assert_eq!(engine.evaluate(&event).len(), 1);
+    }
+
+    /// Regression: `str.contains("")` returns true vacuously, so the
+    /// previous implementation silently turned an empty `name_pattern`
+    /// / `keyword` / `key_pattern` / `substring` into a wildcard.
+    /// An operator who typed the bare prefix `"memory:"` in the
+    /// proactive-condition parser (background.rs:235) or who left a
+    /// trigger-form field empty in the dashboard registered a trigger
+    /// that fired on every event of the matching family. Now empty
+    /// fields explicitly match nothing — operators get an obviously-
+    /// non-firing trigger they can spot, instead of a noisy fire-on-
+    /// every-event trigger that quietly spams the audit log. Use the
+    /// explicit `"*"` for wildcards.
+    #[test]
+    fn empty_field_patterns_match_nothing() {
+        let engine = TriggerEngine::new();
+        let agent_id = AgentId::new();
+
+        // Empty AgentSpawned name_pattern — previously matched every spawn.
+        engine.register(
+            agent_id,
+            TriggerPattern::AgentSpawned {
+                name_pattern: String::new(),
+            },
+            "{{event}}".to_string(),
+            0,
+        );
+        let spawn = Event::new(
+            AgentId::new(),
+            EventTarget::Broadcast,
+            EventPayload::Lifecycle(LifecycleEvent::Spawned {
+                agent_id: AgentId::new(),
+                name: "any-agent".to_string(),
+            }),
+        );
+        assert_eq!(
+            engine.evaluate(&spawn).len(),
+            0,
+            "empty name_pattern must match nothing (use \"*\" for wildcard)"
+        );
+
+        // Empty ContentMatch — previously matched every event.
+        let agent2 = AgentId::new();
+        engine.register(
+            agent2,
+            TriggerPattern::ContentMatch {
+                substring: String::new(),
+            },
+            "{{event}}".to_string(),
+            0,
+        );
+        let any = Event::new(
+            AgentId::new(),
+            EventTarget::System,
+            EventPayload::System(SystemEvent::QuotaWarning {
+                agent_id: AgentId::new(),
+                resource: "tokens".to_string(),
+                usage_percent: 85.0,
+            }),
+        );
+        // ContentMatch + AgentSpawned with empty fields → still no extra fires.
+        assert_eq!(
+            engine.evaluate(&any).len(),
+            0,
+            "empty ContentMatch substring must match nothing"
+        );
+
+        // Explicit "*" wildcard still works.
+        let agent3 = AgentId::new();
+        engine.register(
+            agent3,
+            TriggerPattern::AgentSpawned {
+                name_pattern: "*".to_string(),
+            },
+            "{{event}}".to_string(),
+            0,
+        );
+        let spawn_again = Event::new(
+            AgentId::new(),
+            EventTarget::Broadcast,
+            EventPayload::Lifecycle(LifecycleEvent::Spawned {
+                agent_id: AgentId::new(),
+                name: "anything".to_string(),
+            }),
+        );
+        assert_eq!(
+            engine.evaluate(&spawn_again).len(),
+            1,
+            "explicit \"*\" wildcard must still match every spawn"
+        );
     }
 }
