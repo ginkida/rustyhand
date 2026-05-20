@@ -272,6 +272,14 @@ impl ProviderCooldown {
         let cooldown = calculate_cooldown(&self.config, state.error_count, is_billing);
         state.cooldown_start = Some(now);
         state.cooldown_duration = cooldown;
+        // Throttle the next probe by `probe_interval_secs` from this
+        // failure. Without this, `check()` saw `last_probe == None` or
+        // stale and would return `AllowProbe` on the very next request —
+        // every concurrent in-flight call could become a probe. The
+        // agent_loop calls `record_failure` (not `record_probe_result`)
+        // on retry exhaustion, so this is the only place that pins
+        // last_probe for the throttle to work.
+        state.last_probe = Some(now);
 
         if is_billing {
             warn!(
@@ -592,19 +600,65 @@ mod tests {
 
         cb.record_failure("deepseek", false);
 
-        // First check: should allow probe (no last_probe yet).
+        // First check IMMEDIATELY after the failure: probe must be
+        // throttled because `record_failure` now pins `last_probe = now`.
+        // Previously this returned `AllowProbe` — the agent_loop calls
+        // `record_failure` (not `record_probe_result`) when retries
+        // exhaust, so without this fix every concurrent in-flight
+        // request became a probe and the breaker did nothing under
+        // sustained traffic.
         let v1 = cb.check("deepseek");
-        assert_eq!(v1, CooldownVerdict::AllowProbe);
+        match v1 {
+            CooldownVerdict::Reject { .. } => {} // expected
+            other => panic!("expected immediate throttle after record_failure, got {other:?}"),
+        }
 
-        // Record a failed probe to set last_probe.
+        // record_probe_result(false) is the explicit caller-side
+        // confirmation that "we just tried, it failed" — same
+        // observable effect on last_probe.
         cb.record_probe_result("deepseek", false);
 
-        // Second check: probe interval hasn't elapsed, should reject.
         let v2 = cb.check("deepseek");
         match v2 {
             CooldownVerdict::Reject { .. } => {} // expected
             other => panic!("expected Reject after probe throttle, got {other:?}"),
         }
+    }
+
+    /// Regression: `agent_loop::call_with_retry` calls
+    /// `cooldown.record_failure` when retries exhaust — NOT
+    /// `record_probe_result`. The previous `record_failure`
+    /// implementation didn't touch `last_probe`, so after a single
+    /// failure every subsequent `check()` returned `AllowProbe`
+    /// (since `last_probe == None` made `probe_ok` vacuously true).
+    /// In production this meant the breaker did nothing during
+    /// cooldown — every concurrent in-flight call became "a probe".
+    /// Verify the post-fix semantics: a single record_failure puts
+    /// last_probe in the throttle window.
+    #[test]
+    fn record_failure_pins_last_probe_for_throttling() {
+        let mut config = fast_config();
+        // base_cooldown_secs > 0 so cooldown is genuinely open.
+        config.base_cooldown_secs = 60;
+        config.probe_interval_secs = 60;
+        config.probe_enabled = true;
+        let cb = ProviderCooldown::new(config);
+
+        cb.record_failure("anthropic", false);
+
+        // last_probe must be set — verify by checking the state map.
+        let last_probe = cb.states.get("anthropic").unwrap().last_probe;
+        assert!(
+            last_probe.is_some(),
+            "record_failure must pin last_probe so probe interval throttles further requests"
+        );
+
+        // And the next check must be a Reject (not AllowProbe).
+        let v = cb.check("anthropic");
+        assert!(
+            matches!(v, CooldownVerdict::Reject { .. }),
+            "next check immediately after record_failure must Reject, got {v:?}"
+        );
     }
 
     #[test]
