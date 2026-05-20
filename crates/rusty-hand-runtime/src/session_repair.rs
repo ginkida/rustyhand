@@ -514,15 +514,18 @@ pub fn strip_tool_result_details(content: &str) -> String {
     // Second pass: remove prompt injection markers
     let cleaned = strip_injection_markers(&stripped);
 
-    // Final pass: truncate if needed
+    // Final pass: truncate if needed. Use the shared UTF-8-safe
+    // truncator — tool results commonly contain non-ASCII content
+    // (web_fetch of a Cyrillic page, file_read of a CJK doc, agent
+    // replies in any language). Naive `&cleaned[..max_len]` panics
+    // when byte `max_len` lands in the middle of a multi-byte UTF-8
+    // sequence — same `&str[..N]` trap we've fixed in
+    // process_manager, loop_guard, and session-summary topics.
     if cleaned.len() <= max_len {
         cleaned
     } else {
-        format!(
-            "{}...[truncated from {} chars]",
-            &cleaned[..max_len],
-            cleaned.len()
-        )
+        let head = rusty_hand_types::text::truncate_bytes(&cleaned, max_len);
+        format!("{head}...[truncated from {} chars]", cleaned.len())
     }
 }
 
@@ -1209,5 +1212,39 @@ mod tests {
         ];
         prune_heartbeat_turns(&mut messages, 2);
         assert_eq!(messages.len(), 4);
+    }
+
+    /// Regression: `strip_tool_result_details` truncated content at
+    /// the 10K-byte limit with a naive `&cleaned[..max_len]` slice.
+    /// Tool outputs are commonly non-ASCII (web_fetch of a Cyrillic
+    /// page, file_read of a CJK doc, agent replies in any language).
+    /// If byte 10000 landed inside a multi-byte UTF-8 character, the
+    /// slice panicked. Same `&str[..N]` trap class as the earlier
+    /// process_manager / loop_guard / session-summary fixes.
+    #[test]
+    fn strip_tool_result_details_handles_multibyte_at_truncation_boundary() {
+        // Build content >10K bytes that's entirely non-ASCII so the
+        // base64-blob stripper (only matches ascii_alphanumeric +/=)
+        // leaves it alone — otherwise the long ascii filler would
+        // be replaced with a `[base64 blob ...]` placeholder and we
+        // wouldn't reach the truncation code path. Cyrillic chars
+        // are 2 bytes each in UTF-8.
+        let cyrillic = "Яб";
+        // 6000 copies × 4 bytes (2 chars × 2 bytes) = 24000 bytes.
+        // Easily over the 10_000-byte truncation threshold.
+        let s = cyrillic.repeat(6000);
+        assert!(s.len() > 10_000);
+        // The bug would surface as a panic the moment the truncator
+        // tries `&s[..10_000]` and 10_000 isn't a char boundary.
+        let out = strip_tool_result_details(&s);
+        assert!(
+            out.contains("[truncated from"),
+            "long content must be truncated, got len={} (output={out:?})",
+            out.len()
+        );
+        // Output is well-formed UTF-8 (Rust's `String` guarantees this,
+        // but if naive slicing had returned a truncated `&str` it would
+        // have panicked before reaching here).
+        assert!(!out.is_empty());
     }
 }
