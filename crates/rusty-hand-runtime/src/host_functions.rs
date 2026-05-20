@@ -312,9 +312,23 @@ fn host_net_fetch(state: &GuestState, params: &serde_json::Value) -> serde_json:
 }
 
 /// Extract host:port from a URL for capability checking.
+///
+/// Strips the optional `userinfo@` prefix in the authority component
+/// — without that, a URL like `http://attacker@169.254.169.254/`
+/// makes `is_ssrf_target` (which calls this function) see
+/// `attacker@169.254.169.254` as the hostname. The metadata
+/// blocklist then doesn't match the embedded IP, and the DNS
+/// resolution of the bogus host returns no addresses so the
+/// private-IP gate falls through. Same fix shape as `web_fetch::
+/// extract_host` (the two functions intentionally mirror each other
+/// per the comment in web_fetch.rs).
 fn extract_host_from_url(url: &str) -> String {
     if let Some(after_scheme) = url.split("://").nth(1) {
-        let host_port = after_scheme.split('/').next().unwrap_or(after_scheme);
+        let authority = after_scheme.split('/').next().unwrap_or(after_scheme);
+        let host_port = authority
+            .rsplit_once('@')
+            .map(|(_, host)| host)
+            .unwrap_or(authority);
         if host_port.contains(':') {
             host_port.to_string()
         } else if url.starts_with("https") {
@@ -664,5 +678,36 @@ mod tests {
             extract_host_from_url("http://example.com"),
             "example.com:80"
         );
+    }
+
+    /// Regression: the same userinfo-bypass that affected
+    /// `web_fetch::extract_host` was present here too. Per the
+    /// comment in web_fetch.rs, the two functions intentionally
+    /// mirror each other — `host_functions` is the path WASM
+    /// skill hosts go through (`is_ssrf_target` → `extract_host_
+    /// from_url`), so a userinfo-bypassed URL would let a malicious
+    /// skill reach AWS / GCP / Kubernetes metadata IPs and any
+    /// localhost service. Verify both directly and via is_ssrf_target.
+    #[test]
+    fn extract_host_strips_userinfo_to_prevent_ssrf_bypass() {
+        // The headline metadata-IP bypass.
+        assert_eq!(
+            extract_host_from_url("http://attacker.com@169.254.169.254/latest/"),
+            "169.254.169.254:80"
+        );
+        // user:pass form.
+        assert_eq!(
+            extract_host_from_url("https://user:pass@169.254.169.254/x"),
+            "169.254.169.254:443"
+        );
+        // localhost masking.
+        assert_eq!(
+            extract_host_from_url("http://decoy@localhost/admin"),
+            "localhost:80"
+        );
+        // Confirm is_ssrf_target now rejects each bypass shape.
+        assert!(is_ssrf_target("http://attacker.com@169.254.169.254/latest/").is_err());
+        assert!(is_ssrf_target("http://decoy@localhost/admin").is_err());
+        assert!(is_ssrf_target("http://decoy@metadata.google.internal/").is_err());
     }
 }
