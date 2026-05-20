@@ -4728,6 +4728,20 @@ async fn cron_deliver_response(
 }
 
 /// Send a cron response to a channel adapter (Telegram, Slack, etc.) via their native API.
+/// Validate a Discord channel ID (snowflake) before using it in a URL.
+///
+/// Snowflakes are 64-bit unsigned ints, stringified as ASCII digits.
+/// Real Discord IDs are 17–19 digits (15 historically). We enforce
+/// non-empty (the previous `chars().all(is_ascii_digit)` was vacuously
+/// true for empty strings) + ≥15 chars so an obvious typo like `1`
+/// doesn't reach the API and `format!(".../channels/{recipient}/...")`
+/// can't produce `.../channels//...` from an empty string.
+fn is_valid_discord_channel_id(recipient: &str) -> bool {
+    const MIN_DISCORD_ID_LEN: usize = 15;
+    recipient.len() >= MIN_DISCORD_ID_LEN
+        && recipient.chars().all(|c| c.is_ascii_digit())
+}
+
 async fn cron_send_to_channel(
     kernel: &RustyHandKernel,
     channel: &str,
@@ -4902,11 +4916,10 @@ async fn cron_send_to_channel(
             }
         }
         "discord" => {
-            // SECURITY: validate recipient is numeric channel ID to prevent path traversal
-            if !recipient.chars().all(|c| c.is_ascii_digit()) {
+            if !is_valid_discord_channel_id(recipient) {
                 tracing::warn!(
                     recipient = %recipient,
-                    "Cron: invalid Discord channel ID (must be numeric)"
+                    "Cron: invalid Discord channel ID (must be a non-empty numeric snowflake, ≥15 digits)"
                 );
                 return;
             }
@@ -5984,6 +5997,32 @@ mod tests {
     /// pinning that each channel branch chains `.filter(|s|
     /// !s.is_empty())` on the env lookup. A pure source-shape
     /// assertion keeps the pattern uniform.
+    /// Regression: the Discord recipient validation used
+    /// `recipient.chars().all(|c| c.is_ascii_digit())` only, which is
+    /// vacuously true for an empty string. Empty `recipient` slipped
+    /// past validation, the URL became
+    /// `https://discord.com/api/v10/channels//messages`, and Discord
+    /// 404'd silently. The previous fix logged the 404; this fix
+    /// blocks the call upfront. Also rejects obvious-typo IDs like
+    /// `"1"` or `"123"` — real snowflakes are 17–19 digits.
+    #[test]
+    fn discord_channel_id_validation_rejects_empty_and_short() {
+        // Empty — the original gap.
+        assert!(!is_valid_discord_channel_id(""));
+        // Too short — obvious typos.
+        assert!(!is_valid_discord_channel_id("1"));
+        assert!(!is_valid_discord_channel_id("12"));
+        assert!(!is_valid_discord_channel_id("12345"));
+        assert!(!is_valid_discord_channel_id("12345678901234")); // 14, below min
+        // Non-digit characters.
+        assert!(!is_valid_discord_channel_id("123abc456789012"));
+        assert!(!is_valid_discord_channel_id("123/etc/passwd1"));
+        assert!(!is_valid_discord_channel_id("123 456 789 012"));
+        // Valid snowflake-shaped IDs (15+ digits) pass.
+        assert!(is_valid_discord_channel_id("123456789012345"));
+        assert!(is_valid_discord_channel_id("1234567890123456789"));
+    }
+
     /// Regression: the Slack and Discord branches of
     /// `cron_send_to_channel` used `let _ = client.post(...).send()
     /// .await;` — every transport error and every API-level "ok:
