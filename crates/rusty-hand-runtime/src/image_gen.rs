@@ -11,9 +11,14 @@ pub async fn generate_image(request: &ImageGenRequest) -> Result<ImageGenResult,
     // Validate request
     request.validate()?;
 
-    // Check for API key (presence only — never read the actual value into logs)
+    // Check for API key (presence only — never read the actual value into logs).
+    // env::var().ok() yields Some("") for an empty-but-set variable;
+    // filtering ensures `OPENAI_API_KEY=""` surfaces the clean "not set"
+    // error instead of a 401 from OpenAI's API.
     let api_key = std::env::var("OPENAI_API_KEY")
-        .map_err(|_| "OPENAI_API_KEY not set. Image generation requires an OpenAI API key.")?;
+        .ok()
+        .filter(|s| !s.is_empty())
+        .ok_or("OPENAI_API_KEY not set. Image generation requires an OpenAI API key.")?;
 
     let model_str = request.model.to_string();
 

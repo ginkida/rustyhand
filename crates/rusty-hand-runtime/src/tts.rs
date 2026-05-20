@@ -4,6 +4,17 @@
 
 use rusty_hand_types::config::TtsConfig;
 
+/// `env::var(name).is_ok()` returns true for variables that are set
+/// but empty — a common shell mistake. Use this helper anywhere we
+/// only care about "is there a real value here?", to avoid the
+/// Some("") trap that bit /api/providers/:name/test and cron channel
+/// delivery (see v0.7.9 silent-failure pattern).
+fn env_nonempty(name: &str) -> bool {
+    std::env::var(name)
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)
+}
+
 /// Maximum audio response size (10MB).
 const MAX_AUDIO_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
 
@@ -27,11 +38,16 @@ impl TtsEngine {
     }
 
     /// Detect which TTS provider is available based on environment variables.
+    ///
+    /// Treats `OPENAI_API_KEY=""` / `ELEVENLABS_API_KEY=""` as not set —
+    /// `env::var().is_ok()` returns true for empty strings, which would
+    /// pick a provider whose subsequent API call would 401 with an
+    /// empty bearer token.
     fn detect_provider() -> Option<&'static str> {
-        if std::env::var("OPENAI_API_KEY").is_ok() {
+        if env_nonempty("OPENAI_API_KEY") {
             return Some("openai");
         }
-        if std::env::var("ELEVENLABS_API_KEY").is_ok() {
+        if env_nonempty("ELEVENLABS_API_KEY") {
             return Some("elevenlabs");
         }
         None
@@ -86,7 +102,12 @@ impl TtsEngine {
         voice_override: Option<&str>,
         format_override: Option<&str>,
     ) -> Result<TtsResult, String> {
-        let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| "OPENAI_API_KEY not set")?;
+        // Reject Some("") so a configured-but-empty env var produces a
+        // clean "not set" error instead of a 401 from the upstream API.
+        let api_key = std::env::var("OPENAI_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .ok_or("OPENAI_API_KEY not set")?;
 
         // Apply per-request overrides or fall back to config defaults
         let voice = voice_override.unwrap_or(&self.config.openai.voice);
@@ -160,8 +181,12 @@ impl TtsEngine {
         text: &str,
         voice_override: Option<&str>,
     ) -> Result<TtsResult, String> {
-        let api_key =
-            std::env::var("ELEVENLABS_API_KEY").map_err(|_| "ELEVENLABS_API_KEY not set")?;
+        // See OPENAI_API_KEY branch above — env::var().ok() yields
+        // Some("") for empty values, which would 401 the request.
+        let api_key = std::env::var("ELEVENLABS_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .ok_or("ELEVENLABS_API_KEY not set")?;
 
         let voice_id = voice_override.unwrap_or(&self.config.elevenlabs.voice_id);
         let url = format!("https://api.elevenlabs.io/v1/text-to-speech/{}", voice_id);
@@ -311,5 +336,43 @@ mod tests {
     #[test]
     fn test_max_audio_constant() {
         assert_eq!(MAX_AUDIO_RESPONSE_BYTES, 10 * 1024 * 1024);
+    }
+
+    /// Regression: env::var(name).is_ok() (and equivalent `.ok()`)
+    /// return true / Some("") for env vars that are declared but
+    /// empty. `detect_provider` used `is_ok()` and would pick e.g.
+    /// "openai" for OPENAI_API_KEY="", then synthesize_openai would
+    /// build a Bearer-with-no-token request that the upstream
+    /// returns 401 for — a confusing user-facing failure mode.
+    /// `env_nonempty` rejects the empty case explicitly.
+    #[test]
+    fn env_nonempty_rejects_unset_and_empty() {
+        // Pick a name guaranteed not to be set in normal test envs.
+        let unset_name = "RUSTYHAND_TTS_TEST_UNSET_ENV_XYZ_NEVER_SET";
+        // SAFETY: the var is namespaced for this test; no other test
+        // in this crate reads or writes it.
+        unsafe {
+            std::env::remove_var(unset_name);
+        }
+        assert!(!env_nonempty(unset_name), "unset must be false");
+
+        // SAFETY: same namespaced var, single-threaded test scope.
+        unsafe {
+            std::env::set_var(unset_name, "");
+        }
+        assert!(
+            !env_nonempty(unset_name),
+            "empty value must be treated as unset"
+        );
+
+        unsafe {
+            std::env::set_var(unset_name, "real-token");
+        }
+        assert!(env_nonempty(unset_name), "non-empty value must be true");
+
+        // Cleanup so subsequent tests aren't affected.
+        unsafe {
+            std::env::remove_var(unset_name);
+        }
     }
 }
