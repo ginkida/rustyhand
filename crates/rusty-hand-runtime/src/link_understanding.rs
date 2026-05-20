@@ -44,10 +44,22 @@ pub fn extract_urls(text: &str, max: usize) -> Vec<String> {
 /// Check if a URL points to a private/internal address (SSRF protection).
 fn is_private_url(url: &str) -> bool {
     // Parse host from URL
-    let authority = match url.split("://").nth(1) {
+    let raw_authority = match url.split("://").nth(1) {
         Some(rest) => rest.split('/').next().unwrap_or(""),
         None => return true,
     };
+    // Strip userinfo per RFC 3986 — `user@host`, `user:pass@host`. The
+    // previous version included the userinfo in the host check, so a
+    // URL like `http://attacker@169.254.169.254/` saw `attacker@169.
+    // 254.169.254` as the host, failed all literal hostname matches,
+    // and returned `false` (i.e. "not private — fetch is allowed").
+    // reqwest later strips the userinfo and connects to the real
+    // metadata IP. Same SSRF-bypass class as web_fetch::extract_host
+    // and host_functions::extract_host_from_url.
+    let authority = raw_authority
+        .rsplit_once('@')
+        .map(|(_, host)| host)
+        .unwrap_or(raw_authority);
 
     // Handle IPv6 bracket notation (e.g. [::1]:8080)
     let host = if authority.starts_with('[') {
@@ -241,5 +253,30 @@ mod tests {
         };
         let result = build_link_context("No URLs here", &config);
         assert!(result.is_none());
+    }
+
+    /// Regression: third copy of the userinfo SSRF bypass — same trap
+    /// as `web_fetch::extract_host` and `host_functions::extract_host_
+    /// from_url`. `is_private_url` parsed authority without stripping
+    /// userinfo, so `http://attacker@169.254.169.254/` was treated as
+    /// host `attacker@169.254.169.254`, none of the literal hostname
+    /// checks matched, and the function returned `false` ("not
+    /// private"). The link-context builder would then happily fetch
+    /// the metadata IP. Now the userinfo is stripped before any host
+    /// comparison.
+    #[test]
+    fn is_private_url_blocks_userinfo_bypass() {
+        assert!(is_private_url(
+            "http://attacker.com@169.254.169.254/latest/"
+        ));
+        assert!(is_private_url("http://user:pass@169.254.169.254/"));
+        assert!(is_private_url("http://decoy@localhost/admin"));
+        assert!(is_private_url("http://decoy@metadata.google.internal/"));
+        assert!(is_private_url("http://decoy@127.0.0.1/"));
+        assert!(is_private_url("http://decoy@192.168.0.1/"));
+        // A real public host with userinfo should still be allowed
+        // (the link extractor's URL regex doesn't usually capture
+        // userinfo, but defensively confirm we didn't over-block).
+        assert!(!is_private_url("https://user@example.com/"));
     }
 }
