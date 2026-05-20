@@ -6147,7 +6147,15 @@ pub async fn test_provider(
         }
     };
 
-    let api_key = std::env::var(&env_var).ok();
+    // env::var().ok() returns Some("") when the var is set but empty —
+    // the same Some("") trap that pick_api_key and read_token guard
+    // against. Without the is_empty filter the `api_key.is_none()`
+    // check below misses the empty case and the test endpoint
+    // surfaces a generic driver error instead of the clean 400
+    // "API key not configured" the dashboard expects.
+    let api_key = std::env::var(&env_var)
+        .ok()
+        .filter(|s| !s.is_empty());
     // Only require API key for providers that need one (skip local providers like ollama/vllm/lmstudio)
     if key_required && api_key.is_none() && !env_var.is_empty() {
         return (
