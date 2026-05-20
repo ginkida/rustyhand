@@ -880,29 +880,58 @@ impl ChannelAdapter for TelegramAdapter {
                     last_edit = std::time::Instant::now();
                 }
             } else if last_edit.elapsed() >= EDIT_INTERVAL {
-                // Edit message with accumulated text (throttled)
+                // Edit message with accumulated text (throttled).
+                // Mid-stream edit failures are recoverable — the next
+                // tick will retry with newer accumulated text — so we
+                // intentionally don't break on errors. But log at debug
+                // so spurious 429s and chat-deleted-mid-stream cases
+                // are visible to the operator without spamming warn.
                 if let Some(mid) = message_id {
                     // Truncate to Telegram's 4096 char limit
                     let display: String = full_text.chars().take(4096).collect();
-                    let _ = self.api_edit_message(chat_id, mid, &display).await;
+                    if let Err(e) = self.api_edit_message(chat_id, mid, &display).await {
+                        tracing::debug!(
+                            chat_id, mid, error = %e,
+                            "Telegram streaming: mid-stream edit failed (will retry next tick)"
+                        );
+                    }
                     last_edit = std::time::Instant::now();
                 }
             }
         }
 
-        // Final edit with complete text
+        // Final edit with complete text. Unlike the throttled mid-stream
+        // edits above, these are the *last* writes — there's no next
+        // tick to recover. Failures here mean the user's view never
+        // catches up with the final response. Warn-log so silent loss
+        // is visible.
         if let Some(mid) = message_id {
             if !full_text.is_empty() {
                 // If text exceeds 4096, send overflow as new messages
                 let chunks = crate::types::split_message(&full_text, 4096);
                 let first = &chunks[0];
                 if chunks.len() == 1 {
-                    let _ = self.api_edit_message(chat_id, mid, first).await;
+                    if let Err(e) = self.api_edit_message(chat_id, mid, first).await {
+                        warn!(
+                            chat_id, mid, error = %e,
+                            "Telegram streaming: final edit failed — user view stale"
+                        );
+                    }
                 } else {
-                    // Edit first message, send rest as new messages
-                    let _ = self.api_edit_message(chat_id, mid, first).await;
-                    for extra in &chunks[1..] {
-                        let _ = self.api_send_message(chat_id, extra).await;
+                    // Edit first message, send rest as new messages.
+                    if let Err(e) = self.api_edit_message(chat_id, mid, first).await {
+                        warn!(
+                            chat_id, mid, error = %e,
+                            "Telegram streaming: final edit (chunk 1) failed"
+                        );
+                    }
+                    for (idx, extra) in chunks[1..].iter().enumerate() {
+                        if let Err(e) = self.api_send_message(chat_id, extra).await {
+                            warn!(
+                                chat_id, chunk_idx = idx + 2, error = %e,
+                                "Telegram streaming: overflow chunk send failed — partial response lost"
+                            );
+                        }
                     }
                 }
             }
@@ -1508,6 +1537,55 @@ mod tests {
             }
         });
         assert!(parse_telegram_update(&update, &[]).is_none());
+    }
+
+    /// Regression: the streaming flow's final-edit / overflow-send
+    /// loop used `let _ = self.api_edit_message(...)` / `let _ =
+    /// self.api_send_message(...)` for the *last* writes (after the
+    /// stream ended). If any of those failed, the user's Telegram
+    /// message view was permanently stale or lost overflow chunks —
+    /// no log, no recovery, no retry. Mid-stream failures stay at
+    /// debug (recovered by the next tick), but final-write failures
+    /// now warn-log explicitly. Pin the source shape so a future
+    /// refactor doesn't reintroduce the fire-and-forget pattern.
+    #[test]
+    fn streaming_final_writes_log_on_failure() {
+        let src = include_str!("telegram.rs");
+        let prod_end = src.find("#[cfg(test)]").expect("test mod exists");
+        let prod = &src[..prod_end];
+
+        // The final-edit chunk-1 path must warn on failure.
+        assert!(
+            prod.contains("Telegram streaming: final edit failed"),
+            "single-chunk final edit must warn-log failures"
+        );
+        // The multi-chunk path must warn for each part.
+        assert!(
+            prod.contains("Telegram streaming: final edit (chunk 1) failed"),
+            "multi-chunk path: chunk 1 edit must warn-log failures"
+        );
+        assert!(
+            prod.contains("overflow chunk send failed"),
+            "multi-chunk path: overflow chunks must warn-log failures"
+        );
+        // Mid-stream edits intentionally use debug (recoverable).
+        assert!(
+            prod.contains("Telegram streaming: mid-stream edit failed"),
+            "mid-stream edit failures must be visible at debug level"
+        );
+
+        // No fire-and-forget `let _ = self.api_edit_message(...).await;`
+        // in the streaming function — final writes must be checked.
+        let needle = ["let _ = self", ".api_edit_message(", "await;"].concat();
+        assert!(
+            !prod.contains(&needle),
+            "streaming function must not call api_edit_message with fire-and-forget"
+        );
+        let needle2 = ["let _ = self", ".api_send_message(", "await;"].concat();
+        assert!(
+            !prod.contains(&needle2),
+            "streaming function must not call api_send_message with fire-and-forget"
+        );
     }
 
     /// Regression: the Markdown→plain-text fallback paths in
