@@ -1539,6 +1539,34 @@ mod tests {
         assert!(result.unwrap_err().contains("Unknown tool"));
     }
 
+    /// Regression: `dispatch_tool` is a static `match tool_name` — if
+    /// someone adds a new entry to `static_tool_definitions()` (the
+    /// declared MCP catalogue) without adding the corresponding
+    /// dispatch arm, the tool surfaces to MCP clients via
+    /// `tools/list` but every `tools/call` returns "Unknown tool: …".
+    /// `test_tools_list_includes_static_tools` only checks the
+    /// declared list against a hand-maintained expected vector — it
+    /// does NOT verify the dispatch side. This test closes the loop:
+    /// every declared name must reach a non-"Unknown tool" code path
+    /// (it can still legitimately return a `require_str` validation
+    /// error or a daemon-mode "no backend" error, but it must not be
+    /// the unknown-tool sentinel).
+    #[test]
+    fn every_declared_static_tool_has_a_dispatch_arm() {
+        let backend = test_backend();
+        let defs = static_tool_definitions();
+        for def in &defs {
+            let name = def["name"].as_str().expect("tool name");
+            let result = dispatch_tool(&backend, name, &json!({}));
+            if let Err(e) = &result {
+                assert!(
+                    !e.contains("Unknown tool"),
+                    "declared tool '{name}' has no dispatch arm — added to static_tool_definitions but missing from `match tool_name` in dispatch_tool. Error: {e}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn test_dispatch_missing_required_arg() {
         let backend = test_backend();
