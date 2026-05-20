@@ -29,6 +29,16 @@ const MAX_EVENT_TEXT_LEN: usize = 4096;
 /// Maximum length of AgentTurn message.
 const MAX_TURN_MESSAGE_LEN: usize = 16_384;
 
+/// Maximum length of WorkflowRun input.
+///
+/// Workflows can legitimately receive longer inputs than a single agent
+/// turn (a full document, a Markdown brief, etc.) — keep the ceiling
+/// well above MAX_TURN_MESSAGE_LEN so that real use cases aren't
+/// truncated, but bounded so an unbounded `WorkflowRun.input` can't be
+/// stored, persisted, and reloaded forever (validate_action used to
+/// cap nothing on this field).
+const MAX_WORKFLOW_INPUT_LEN: usize = 65_536;
+
 /// Minimum timeout for AgentTurn (seconds).
 const MIN_TIMEOUT_SECS: u64 = 10;
 
@@ -310,8 +320,8 @@ impl CronJob {
             }
             CronAction::WorkflowRun {
                 workflow_id,
+                input,
                 timeout_secs,
-                ..
             } => {
                 if workflow_id.is_empty() {
                     return Err("workflow_id must not be empty".into());
@@ -320,6 +330,19 @@ impl CronJob {
                     return Err(format!(
                         "workflow_id must be a valid UUID, got '{}'",
                         workflow_id
+                    ));
+                }
+                // AgentTurn.message and SystemEvent.text are both capped;
+                // WorkflowRun.input used to be uncapped, so a 3 MB POST
+                // body would be accepted, persisted to disk, and reloaded
+                // forever. Bound it to MAX_WORKFLOW_INPUT_LEN bytes —
+                // generous enough for a real workflow brief but small
+                // enough that we don't store arbitrary blobs in the
+                // scheduler.
+                if input.len() > MAX_WORKFLOW_INPUT_LEN {
+                    return Err(format!(
+                        "workflow input too long ({} chars, max {MAX_WORKFLOW_INPUT_LEN})",
+                        input.len()
                     ));
                 }
                 if let Some(t) = timeout_secs {
@@ -507,6 +530,43 @@ mod tests {
             timeout_secs: Some(60),
         };
         assert!(job.validate(0).is_ok());
+    }
+
+    /// Regression: `WorkflowRun.input` was the only string field in
+    /// `CronAction` with no length cap. `AgentTurn.message` is bounded
+    /// at MAX_TURN_MESSAGE_LEN (16 KB) and `SystemEvent.text` at
+    /// MAX_EVENT_TEXT_LEN (4 KB), so a 3 MB blob in
+    /// `WorkflowRun.input` would slip past validation, persist to
+    /// disk, and reload forever. Cap matches the sibling fields'
+    /// shape (validation error, no truncation) so callers know the
+    /// payload was rejected.
+    #[test]
+    fn workflow_run_input_oversized_rejected() {
+        let mut job = valid_job();
+        job.action = CronAction::WorkflowRun {
+            workflow_id: uuid::Uuid::new_v4().to_string(),
+            input: "x".repeat(MAX_WORKFLOW_INPUT_LEN + 1),
+            timeout_secs: None,
+        };
+        let err = job.validate(0).unwrap_err();
+        assert!(
+            err.contains("workflow input too long"),
+            "expected oversize error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn workflow_run_input_at_limit_ok() {
+        let mut job = valid_job();
+        job.action = CronAction::WorkflowRun {
+            workflow_id: uuid::Uuid::new_v4().to_string(),
+            input: "y".repeat(MAX_WORKFLOW_INPUT_LEN),
+            timeout_secs: None,
+        };
+        assert!(
+            job.validate(0).is_ok(),
+            "exactly-at-limit input must be accepted"
+        );
     }
 
     #[test]
