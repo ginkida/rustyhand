@@ -1384,8 +1384,27 @@ pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
 // ---------------------------------------------------------------------------
 
 /// SECURITY: Reject path traversal attempts. Forbids `..` components in file paths.
+/// Validate a user-supplied path used by file_* tools when no workspace
+/// sandbox is configured (the `workspace_root: None` branch in
+/// `resolve_file_path`, plus the `media_describe` / `media_transcribe`
+/// tools that read attachments directly).
+///
+/// The original implementation rejected only `..` components, leaving
+/// absolute paths like `/etc/passwd` to slip through — an agent whose
+/// kernel had `manifest.workspace = None` (early-boot, backfill
+/// failures, or some test paths) could then read arbitrary files. The
+/// proper sandbox helper (`workspace_sandbox::resolve_sandbox_path`)
+/// canonicalises and asserts containment; this fallback can't do that
+/// without a root, so the safest thing is to reject absolute paths
+/// outright. The `..` rejection stays for relative `../../foo` cases.
 fn validate_path(path: &str) -> Result<&str, String> {
-    for component in std::path::Path::new(path).components() {
+    let parsed = std::path::Path::new(path);
+    if parsed.is_absolute() {
+        return Err(format!(
+            "Absolute paths are denied without a workspace sandbox: '{path}' (use a path relative to the agent workspace)"
+        ));
+    }
+    for component in parsed.components() {
         if matches!(component, std::path::Component::ParentDir) {
             return Err("Path traversal denied: '..' components are forbidden".to_string());
         }
@@ -4396,10 +4415,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_list_path_traversal_blocked() {
+        // Use a relative `..` path so the `..` rejection branch fires
+        // (the absolute-path branch added later takes precedence for
+        // any path starting with `/`). Original input `/foo/../../etc`
+        // is now caught by the absolute-path check first — that case
+        // is covered by `test_file_read_absolute_path_blocked` below.
         let result = execute_tool(
             "test-id",
             "file_list",
-            &serde_json::json!({"path": "/foo/../../etc"}),
+            &serde_json::json!({"path": "foo/../../etc"}),
             None,
             None,
             None,
@@ -4418,6 +4442,43 @@ mod tests {
         .await;
         assert!(result.is_error);
         assert!(result.content.contains("traversal"));
+    }
+
+    /// Regression: `validate_path` only rejected `..` components, so
+    /// without a workspace sandbox `tool_file_read("/etc/passwd")`
+    /// fell through and read the file. Now absolute paths are
+    /// rejected explicitly when there's no workspace_root. (When a
+    /// workspace IS configured, absolute paths inside it are allowed
+    /// by `workspace_sandbox::resolve_sandbox_path` — that's tested
+    /// separately in `workspace_sandbox.rs`.)
+    #[tokio::test]
+    async fn test_file_read_absolute_path_blocked() {
+        let result = execute_tool(
+            "test-id",
+            "file_read",
+            &serde_json::json!({"path": "/etc/passwd"}),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // media_engine
+            None, // exec_policy
+            None, // tts_engine
+            None, // docker_config
+            None, // process_manager
+        )
+        .await;
+        assert!(result.is_error, "absolute path must error");
+        assert!(
+            result.content.contains("Absolute paths are denied"),
+            "error must mention absolute-path denial, got: {}",
+            result.content
+        );
     }
 
     #[tokio::test]
@@ -4528,10 +4589,13 @@ mod tests {
     #[tokio::test]
     async fn test_capability_enforcement_allowed() {
         let allowed = vec!["file_read".to_string()];
+        // Relative path so we exercise the capability gate, not the
+        // absolute-path denial added later. The file is still expected
+        // to not exist — the test asserts the failure reason.
         let result = execute_tool(
             "test-id",
             "file_read",
-            &serde_json::json!({"path": "/nonexistent/file.txt"}),
+            &serde_json::json!({"path": "nonexistent/file.txt"}),
             None,
             Some(&allowed),
             None,
