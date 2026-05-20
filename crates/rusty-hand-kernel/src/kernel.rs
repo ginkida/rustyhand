@@ -2620,7 +2620,12 @@ impl RustyHandKernel {
                 .take(5)
                 .enumerate()
                 .map(|(i, t)| {
-                    let truncated = if t.len() > 200 { &t[..200] } else { t };
+                    // Session topics often contain user-supplied text
+                    // with non-ASCII content (Cyrillic, CJK, emoji).
+                    // Naive `&t[..200]` panics if byte 200 splits a
+                    // multi-byte char. Delegate to the shared UTF-8
+                    // truncator.
+                    let truncated = rusty_hand_types::text::truncate_bytes(t, 200);
                     format!("{}. {}", i + 1, truncated)
                 })
                 .collect::<Vec<_>>()

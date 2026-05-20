@@ -520,11 +520,13 @@ impl LoopGuard {
         let params_str = serde_json::to_string(params).unwrap_or_default();
         hasher.update(params_str.as_bytes());
         hasher.update(b"|");
-        let truncated = if result.len() > 1000 {
-            &result[..1000]
-        } else {
-            result
-        };
+        // Tool outputs can contain arbitrary user / network content
+        // (web_fetch HTML, file_read of a Cyrillic doc, etc). Naive
+        // `&result[..1000]` panics when byte 1000 lands inside a
+        // multi-byte UTF-8 char. `compute_outcome_hash` runs on every
+        // tool call inside the agent loop, so a single oversized
+        // non-ASCII output crashes loop detection for that turn.
+        let truncated = rusty_hand_types::text::truncate_bytes(result, 1000);
         hasher.update(truncated.as_bytes());
         hex::encode(hasher.finalize())
     }
@@ -950,5 +952,43 @@ mod tests {
         let stats = guard.stats();
         assert_eq!(stats.total_calls, 50);
         assert_eq!(stats.unique_calls, 50);
+    }
+
+    /// Regression: `compute_outcome_hash` truncated `result` with
+    /// `&result[..1000]`, which panics when byte 1000 splits a
+    /// multi-byte UTF-8 character. Tool outputs commonly contain
+    /// non-ASCII content (web_fetch HTML, file_read of a translated
+    /// doc, agent responses in Russian/Chinese/Japanese). A single
+    /// oversized non-ASCII output would crash the agent loop's loop-
+    /// detection path with "byte index 1000 is not a char boundary".
+    ///
+    /// We can't call the private `compute_outcome_hash` from outside
+    /// the impl, but `LoopGuard::check` routes through it, so we
+    /// exercise the same code path with a synthetic 2 KB result that
+    /// has a multi-byte char straddling byte 1000.
+    #[test]
+    fn check_handles_multibyte_at_truncation_boundary() {
+        let config = LoopGuardConfig {
+            global_circuit_breaker: 200,
+            ..Default::default()
+        };
+        let mut guard = LoopGuard::new(config);
+        // Build a 2 KB result where byte 999 is the first byte of a
+        // 2-byte Cyrillic character (`Я` = 0xD0 0xAF). Naive
+        // `&result[..1000]` would split this char and panic.
+        let mut result = String::new();
+        for _ in 0..999 {
+            result.push('a');
+        }
+        // Append Cyrillic chars to push past 1000 bytes with non-ASCII.
+        result.push('Я');
+        result.push_str(&"б".repeat(500));
+        assert!(result.len() > 1000);
+        assert!(!result.is_char_boundary(1000));
+        // The bug would surface as a panic inside record_outcome()
+        // (which calls compute_outcome_hash). With the fix, the call
+        // completes and returns a verdict — None or Some(warning).
+        let _ = guard.record_outcome("tool", &serde_json::json!({"n": 1}), &result);
+        // Implicitly: no panic.
     }
 }
