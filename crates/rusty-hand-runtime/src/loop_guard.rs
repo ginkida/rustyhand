@@ -499,27 +499,41 @@ impl LoopGuard {
     }
 
     /// Compute a SHA-256 hash of the tool name and parameters.
+    ///
+    /// Fields are length-prefixed before hashing. The previous
+    /// `tool_name | "|" | params_str` concatenation had the same
+    /// field-boundary collision shape as the cache_key and audit-
+    /// chain hashes: a `|` character inside `params_str` (legal
+    /// JSON content) could re-distribute bytes between the two
+    /// "fields" and produce the same hash as a different
+    /// (tool_name, params) pair. Loop-guard collisions cause
+    /// false positives in repetition detection (the breaker fires
+    /// when it shouldn't), so impact is low — but length-prefixing
+    /// costs nothing and keeps the helper consistent with the
+    /// other hash builders.
     fn compute_hash(tool_name: &str, params: &serde_json::Value) -> String {
         let mut hasher = Sha256::new();
-        hasher.update(tool_name.as_bytes());
-        hasher.update(b"|");
-        // Serialize params deterministically (serde_json sorts object keys)
+        // Format-version byte for future migrations.
+        hasher.update([0x01_u8]);
+        write_lp(&mut hasher, tool_name.as_bytes());
+        // Serialize params deterministically (serde_json's default
+        // Object backing is BTreeMap → keys are sorted).
         let params_str = serde_json::to_string(params).unwrap_or_default();
-        hasher.update(params_str.as_bytes());
+        write_lp(&mut hasher, params_str.as_bytes());
         hex::encode(hasher.finalize())
     }
 
     /// Compute a SHA-256 hash of the tool name, parameters, AND result.
     ///
-    /// Result is truncated to 1000 chars to avoid hashing huge outputs
-    /// while still catching identical short results.
+    /// Result is truncated to 1000 bytes (UTF-8-safe) to avoid hashing
+    /// huge outputs while still catching identical short results.
+    /// Length-prefixed for the same reason as `compute_hash`.
     fn compute_outcome_hash(tool_name: &str, params: &serde_json::Value, result: &str) -> String {
         let mut hasher = Sha256::new();
-        hasher.update(tool_name.as_bytes());
-        hasher.update(b"|");
+        hasher.update([0x01_u8]);
+        write_lp(&mut hasher, tool_name.as_bytes());
         let params_str = serde_json::to_string(params).unwrap_or_default();
-        hasher.update(params_str.as_bytes());
-        hasher.update(b"|");
+        write_lp(&mut hasher, params_str.as_bytes());
         // Tool outputs can contain arbitrary user / network content
         // (web_fetch HTML, file_read of a Cyrillic doc, etc). Naive
         // `&result[..1000]` panics when byte 1000 lands inside a
@@ -527,9 +541,15 @@ impl LoopGuard {
         // tool call inside the agent loop, so a single oversized
         // non-ASCII output crashes loop detection for that turn.
         let truncated = rusty_hand_types::text::truncate_bytes(result, 1000);
-        hasher.update(truncated.as_bytes());
+        write_lp(&mut hasher, truncated.as_bytes());
         hex::encode(hasher.finalize())
     }
+}
+
+/// Length-prefix a byte slice into the hasher (u64 LE length, then payload).
+fn write_lp(hasher: &mut Sha256, bytes: &[u8]) {
+    hasher.update((bytes.len() as u64).to_le_bytes());
+    hasher.update(bytes);
 }
 
 #[cfg(test)]
