@@ -269,9 +269,25 @@ fn is_private_ip(ip: &IpAddr) -> bool {
 }
 
 /// Extract host:port from a URL.
+///
+/// Strips `userinfo@` (anything before the last `@` in the authority
+/// component) before extracting the host — reqwest's URL parser
+/// honours userinfo, so `http://attacker@169.254.169.254/` connects
+/// to the metadata IP. Pre-fix, the SSRF check saw
+/// `attacker@169.254.169.254` as the hostname, failed to match the
+/// `169.254.169.254` blocklist entry, the DNS lookup of the bogus
+/// host returned no resolvable IPs (so the private-IP gate also
+/// fell through), and the request reached the metadata endpoint.
 fn extract_host(url: &str) -> String {
     if let Some(after_scheme) = url.split("://").nth(1) {
-        let host_port = after_scheme.split('/').next().unwrap_or(after_scheme);
+        let authority = after_scheme.split('/').next().unwrap_or(after_scheme);
+        // Strip userinfo: `user:pass@host:port` → `host:port`.
+        // `rsplit_once('@')` returns the rightmost `@`, which is the
+        // boundary between userinfo and host per RFC 3986.
+        let host_port = authority
+            .rsplit_once('@')
+            .map(|(_, host)| host)
+            .unwrap_or(authority);
         if host_port.contains(':') {
             host_port.to_string()
         } else if url.starts_with("https") {
@@ -307,6 +323,32 @@ mod tests {
     fn test_ssrf_blocks_metadata() {
         assert!(check_ssrf("http://169.254.169.254/latest/meta-data/").is_err());
         assert!(check_ssrf("http://metadata.google.internal/computeMetadata/v1/").is_err());
+    }
+
+    /// Regression: URL userinfo (`user@host`, `user:pass@host`)
+    /// silently bypassed the SSRF check. `extract_host` parsed the
+    /// authority component naively, treating
+    /// `attacker.com@169.254.169.254` as the hostname. The blocklist
+    /// then failed to match the embedded `169.254.169.254`, and the
+    /// DNS lookup of the bogus host returned no resolvable IPs (so
+    /// the private-IP gate also fell through), letting the request
+    /// reach the metadata endpoint. reqwest's URL parser correctly
+    /// strips userinfo before resolving, so the actual HTTP request
+    /// went to the dangerous IP.
+    #[test]
+    fn test_ssrf_blocks_userinfo_bypass_to_metadata_ip() {
+        // The canonical AWS-metadata bypass: userinfo masks the
+        // real host.
+        assert!(check_ssrf("http://attacker.com@169.254.169.254/latest/").is_err());
+        assert!(check_ssrf("http://user:pass@169.254.169.254/").is_err());
+        // Userinfo masking localhost.
+        assert!(check_ssrf("http://decoy@localhost/admin").is_err());
+        // Userinfo masking a known cloud metadata hostname.
+        assert!(check_ssrf("http://decoy@metadata.google.internal/computeMetadata/v1/").is_err());
+        // Userinfo with a real host and metadata IP after `@` — the
+        // host check should focus on the post-`@` portion.
+        let host = extract_host("http://anything-here@169.254.169.254/x");
+        assert_eq!(host, "169.254.169.254:80");
     }
 
     #[test]
