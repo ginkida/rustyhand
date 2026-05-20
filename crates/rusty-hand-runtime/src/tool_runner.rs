@@ -2730,8 +2730,13 @@ fn sanitize_schedule_name(description: &str) -> String {
         collapsed
     };
     if name.len() > 128 {
-        name.truncate(128);
-        name = name.trim().to_string();
+        // `String::truncate(128)` panics if byte 128 isn't on a char
+        // boundary. Schedule descriptions come from agent tool input;
+        // a non-ASCII (Cyrillic/CJK/emoji) description > 128 bytes
+        // would crash the tool call. Route through the shared UTF-8
+        // truncator instead.
+        let cut = rusty_hand_types::text::truncate_bytes(&name, 128);
+        name = cut.trim().to_string();
     }
     name
 }
@@ -4707,6 +4712,32 @@ mod tests {
             parse_schedule_to_cron("weekends at 10am").unwrap(),
             "0 10 * * 0,6"
         );
+    }
+
+    /// Regression: `sanitize_schedule_name` capped names at 128 bytes
+    /// with `String::truncate(128)`, which panics when byte 128 lands
+    /// on a non-char-boundary. Schedule descriptions come straight
+    /// from agent `schedule_create` tool calls — a non-ASCII payload
+    /// (Cyrillic, CJK, emoji) longer than 128 bytes would crash the
+    /// tool call. Now routed through the UTF-8-safe truncator.
+    #[test]
+    fn sanitize_schedule_name_handles_multibyte_truncation() {
+        // Build a name >128 bytes where byte 128 sits inside a
+        // multi-byte char. Pure "Я".repeat(N) has even-byte
+        // boundaries (each Я = 2 bytes), so byte 128 would be a
+        // valid boundary. Prefix with a single ASCII 'a' so the
+        // following Я's start at odd byte positions — byte 128
+        // (even) then lands on the second byte of a Я.
+        let long_cyrillic = format!("a{}", "Я".repeat(80));
+        assert_eq!(long_cyrillic.len(), 161);
+        assert!(
+            !long_cyrillic.is_char_boundary(128),
+            "byte 128 must split a multi-byte char to exercise the regression"
+        );
+        // The bug would surface as a panic inside String::truncate(128).
+        let name = sanitize_schedule_name(&long_cyrillic);
+        assert!(name.len() <= 128);
+        assert!(name.starts_with('a'), "ASCII prefix preserved: {name:?}");
     }
 
     /// Regression: the docstring on `parse_time_to_hour` claimed
