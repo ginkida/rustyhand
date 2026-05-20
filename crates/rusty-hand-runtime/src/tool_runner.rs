@@ -1123,7 +1123,7 @@ pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
         // --- Media understanding tools ---
         ToolDefinition {
             name: "media_describe".to_string(),
-            description: "Describe an image using a vision-capable LLM. Auto-selects the best available provider (Anthropic, OpenAI, or Gemini). Returns a text description of the image content.".to_string(),
+            description: "Describe an image using a vision-capable LLM. NOT YET IMPLEMENTED in this build — the vision Messages-API path is on the roadmap; calling this tool currently returns an explicit `not implemented` error so the agent doesn't act on a fabricated description. Audio transcription via `media_transcribe` is fully implemented and works today via Groq/OpenAI Whisper.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
