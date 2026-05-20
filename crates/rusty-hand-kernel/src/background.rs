@@ -254,27 +254,34 @@ pub fn parse_condition(condition: &str) -> Option<TriggerPattern> {
 pub fn parse_cron_to_secs(cron: &str) -> u64 {
     let cron = cron.trim().to_lowercase();
 
-    // Try "every <N><unit>" format
+    // Try "every <N><unit>" format. Uses `checked_mul` so an outsized
+    // value (e.g. `"every 999999999d"`) doesn't silently wrap u64 in
+    // release mode or panic in debug; instead it falls through to the
+    // safer 300s default with a warn log. Also rejects `n == 0` —
+    // a zero-second interval would produce a tight `sleep(0)` loop
+    // that burns CPU without doing useful work.
     if let Some(rest) = cron.strip_prefix("every ") {
         let rest = rest.trim();
-        if let Some(num_str) = rest.strip_suffix('s') {
-            if let Ok(n) = num_str.trim().parse::<u64>() {
-                return n;
-            }
-        }
-        if let Some(num_str) = rest.strip_suffix('m') {
-            if let Ok(n) = num_str.trim().parse::<u64>() {
-                return n * 60;
-            }
-        }
-        if let Some(num_str) = rest.strip_suffix('h') {
-            if let Ok(n) = num_str.trim().parse::<u64>() {
-                return n * 3600;
-            }
-        }
-        if let Some(num_str) = rest.strip_suffix('d') {
-            if let Ok(n) = num_str.trim().parse::<u64>() {
-                return n * 86400;
+        let pairs: &[(char, u64)] = &[('s', 1), ('m', 60), ('h', 3600), ('d', 86400)];
+        for (suffix, mul) in pairs {
+            if let Some(num_str) = rest.strip_suffix(*suffix) {
+                let parsed = num_str.trim().parse::<u64>();
+                let Ok(n) = parsed else { continue };
+                if n == 0 {
+                    warn!(
+                        cron = %cron,
+                        "Zero-interval cron expression — defaulting to 300s to avoid a tight loop"
+                    );
+                    return 300;
+                }
+                if let Some(secs) = n.checked_mul(*mul) {
+                    return secs;
+                }
+                warn!(
+                    cron = %cron,
+                    "Cron interval overflows u64 seconds — defaulting to 300s"
+                );
+                return 300;
             }
         }
     }
@@ -315,6 +322,35 @@ mod tests {
         // Unparseable → 300
         assert_eq!(parse_cron_to_secs("*/5 * * * *"), 300);
         assert_eq!(parse_cron_to_secs("gibberish"), 300);
+    }
+
+    /// Regression: `n * 86400` overflowed u64 silently for huge
+    /// "every Nd" inputs — release builds wrapped to nonsense
+    /// seconds, debug builds panicked. Now we use `checked_mul` and
+    /// fall back to 300s on overflow.
+    #[test]
+    fn parse_cron_overflow_clamps_to_default() {
+        // u64::MAX days would overflow at the *86400 multiply.
+        let huge = format!("every {}d", u64::MAX);
+        assert_eq!(parse_cron_to_secs(&huge), 300);
+        // u64::MAX / 86400 ≈ 2.135 × 10^14 — anything above that
+        // overflows the u64 product. 10^15 is comfortably past the
+        // boundary.
+        let just_over = "every 1000000000000000d";
+        assert_eq!(parse_cron_to_secs(just_over), 300);
+    }
+
+    /// Regression: `"every 0m"` produced an interval of 0 seconds,
+    /// which a downstream `tokio::time::sleep(Duration::from_secs(0))`
+    /// loop turns into a tight CPU burner. Default to 300s on the
+    /// zero case so the operator sees a sane fallback instead of
+    /// silently burning a core.
+    #[test]
+    fn parse_cron_rejects_zero_interval() {
+        assert_eq!(parse_cron_to_secs("every 0s"), 300);
+        assert_eq!(parse_cron_to_secs("every 0m"), 300);
+        assert_eq!(parse_cron_to_secs("every 0h"), 300);
+        assert_eq!(parse_cron_to_secs("every 0d"), 300);
     }
 
     #[test]
