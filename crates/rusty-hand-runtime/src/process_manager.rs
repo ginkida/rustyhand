@@ -114,6 +114,12 @@ impl ProcessManager {
         const MAX_LINES: usize = 1000;
         const DRAIN_COUNT: usize = 100;
 
+        // Naive `&line[..MAX_LINE_BYTES]` panics if the byte at
+        // MAX_LINE_BYTES lands mid-character (any non-ASCII output —
+        // Cyrillic, CJK, emoji — can do this). The panic kills the
+        // reader task silently and the rest of the subprocess output
+        // is lost. Use the shared UTF-8-safe truncator so we always
+        // cut at a char boundary.
         if let Some(out) = stdout {
             let buf = stdout_buf.clone();
             tokio::spawn(async move {
@@ -121,11 +127,8 @@ impl ProcessManager {
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     let truncated = if line.len() > MAX_LINE_BYTES {
-                        format!(
-                            "{}... [truncated, {} bytes]",
-                            &line[..MAX_LINE_BYTES],
-                            line.len()
-                        )
+                        let head = rusty_hand_types::text::truncate_bytes(&line, MAX_LINE_BYTES);
+                        format!("{head}... [truncated, {} bytes]", line.len())
                     } else {
                         line
                     };
@@ -145,11 +148,8 @@ impl ProcessManager {
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     let truncated = if line.len() > MAX_LINE_BYTES {
-                        format!(
-                            "{}... [truncated, {} bytes]",
-                            &line[..MAX_LINE_BYTES],
-                            line.len()
-                        )
+                        let head = rusty_hand_types::text::truncate_bytes(&line, MAX_LINE_BYTES);
+                        format!("{head}... [truncated, {} bytes]", line.len())
                     } else {
                         line
                     };
@@ -355,5 +355,29 @@ mod tests {
         let pm = ProcessManager::default();
         assert_eq!(pm.max_per_agent, 5);
         assert_eq!(pm.count(), 0);
+    }
+
+    /// Regression: the per-line truncator used `&line[..MAX_LINE_BYTES]`,
+    /// which panics when MAX_LINE_BYTES falls mid-character. Any
+    /// subprocess emitting a >64KB line of non-ASCII output (Cyrillic,
+    /// CJK, emoji) crashes the reader task and the rest of its stdout/
+    /// stderr is silently dropped. We can't easily drive the real
+    /// reader task in a unit test, but we can verify the shared
+    /// truncator we now delegate to handles char-boundary cases
+    /// correctly — which is the whole reason for the fix.
+    #[test]
+    fn truncate_bytes_handles_multibyte_at_boundary() {
+        // Build a string where byte `n-1` is mid-character: lots of
+        // ASCII followed by a 2-byte Cyrillic char straddling the cut.
+        let mut s = "x".repeat(63);
+        s.push('Я'); // 2-byte UTF-8 (0xD0 0xAF) at bytes 63..65
+        s.push_str(&"y".repeat(10));
+        // Cut at byte 64 — naive slice would split `Я`.
+        let cut = rusty_hand_types::text::truncate_bytes(&s, 64);
+        // Truncator must back up to the start of `Я` (byte 63).
+        assert_eq!(cut.len(), 63);
+        assert!(cut.ends_with("x"));
+        // The full input is still well-formed UTF-8 after concat.
+        assert!(s.is_char_boundary(63));
     }
 }
