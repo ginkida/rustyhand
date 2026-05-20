@@ -506,24 +506,40 @@ impl ChannelBridgeHandle for KernelBridgeAdapter {
                 match matched.len() {
                     0 => format!("No job found matching '{prefix}'."),
                     1 => {
+                        // Delegate to the same code path the HTTP `/cron/jobs/:id/run-now`
+                        // route and the background scheduler use. The previous
+                        // implementation re-derived a chat `message` from each
+                        // CronAction variant and called `send_message` for all three —
+                        // which silently broke `WorkflowRun`: a workflow job's `input`
+                        // field was sent verbatim as a chat message to the owning
+                        // agent instead of executing the workflow. Routing through
+                        // `execute_cron_job` fixes that and stays consistent with the
+                        // outcomes the background scheduler records.
                         let j = matched[0];
-                        let message = match &j.action {
-                            rusty_hand_types::scheduler::CronAction::AgentTurn {
-                                message, ..
-                            } => message.clone(),
-                            rusty_hand_types::scheduler::CronAction::SystemEvent { text } => {
-                                text.clone()
+                        let id_short = &j.id.0.to_string()[..8];
+                        match self.kernel.execute_cron_job(j).await {
+                            Ok(rusty_hand_kernel::kernel::CronRunOutcome::AgentTurn {
+                                response,
+                                ..
+                            }) => {
+                                format!("Job [{id_short}] ran:\n{response}")
                             }
-                            rusty_hand_types::scheduler::CronAction::WorkflowRun {
-                                input, ..
-                            } => input.clone(),
-                        };
-                        match self.kernel.send_message(j.agent_id, &message).await {
-                            Ok(result) => {
-                                let id_short = &j.id.0.to_string()[..8];
-                                format!("Job [{id_short}] ran:\n{}", result.response)
+                            Ok(rusty_hand_kernel::kernel::CronRunOutcome::SystemEvent {
+                                event_type,
+                            }) => {
+                                format!("Job [{id_short}] published system event: {event_type}")
                             }
-                            Err(e) => format!("Failed to run job: {e}"),
+                            Ok(rusty_hand_kernel::kernel::CronRunOutcome::WorkflowRun {
+                                workflow_id,
+                                output,
+                            }) => {
+                                let wf_short = workflow_id.get(..8).unwrap_or(&workflow_id);
+                                format!("Job [{id_short}] ran workflow {wf_short}:\n{output}")
+                            }
+                            Err(e) => {
+                                let suffix = if e.timed_out { " (timed out)" } else { "" };
+                                format!("Failed to run job{suffix}: {}", e.message)
+                            }
                         }
                     }
                     n => format!("{n} jobs match '{prefix}'. Be more specific."),
@@ -1284,5 +1300,49 @@ mod tests {
         assert!(config.channels.telegram.is_none());
         assert!(config.channels.discord.is_none());
         assert!(config.channels.slack.is_none());
+    }
+
+    /// Regression: the channel `/schedule run` handler used to reimplement
+    /// CronAction dispatch — for every variant it pulled out some text
+    /// (`message` / `text` / `input`) and called `send_message`. That
+    /// silently broke `WorkflowRun` jobs: the workflow's `input` was sent
+    /// as a chat message to the owning agent instead of triggering
+    /// `run_workflow`. The HTTP `/cron/jobs/:id/run-now` route correctly
+    /// delegates to `execute_cron_job`; the bridge now uses the same
+    /// path, so both run-paths share a single dispatch source of truth.
+    /// We pin the source shape to keep the two implementations from
+    /// drifting apart again.
+    #[test]
+    fn schedule_run_command_delegates_to_execute_cron_job() {
+        let src = include_str!("channel_bridge.rs");
+        // Must call execute_cron_job in the schedule_command handler.
+        assert!(
+            src.contains("self.kernel.execute_cron_job(j).await"),
+            "channel /schedule run must delegate to kernel.execute_cron_job(j)"
+        );
+        // Must NOT reintroduce the old send_message fallthrough that
+        // mishandled WorkflowRun jobs. We search for the exact prior
+        // shape (extracting `input` from WorkflowRun then send_message)
+        // so unrelated send_message usages elsewhere in the file are
+        // not flagged.
+        assert!(
+            !src.contains("CronAction::WorkflowRun {\n                                input, ..\n                            } => input.clone(),"),
+            "channel /schedule run must not reintroduce the WorkflowRun→send_message fallthrough"
+        );
+        // The handler must format all three CronRunOutcome variants — if
+        // a future refactor drops one, agents using the bridge will see
+        // a wildcard branch instead of a specific status string.
+        assert!(
+            src.contains("CronRunOutcome::AgentTurn"),
+            "schedule_run handler must format AgentTurn outcome"
+        );
+        assert!(
+            src.contains("CronRunOutcome::SystemEvent"),
+            "schedule_run handler must format SystemEvent outcome"
+        );
+        assert!(
+            src.contains("CronRunOutcome::WorkflowRun"),
+            "schedule_run handler must format WorkflowRun outcome"
+        );
     }
 }
