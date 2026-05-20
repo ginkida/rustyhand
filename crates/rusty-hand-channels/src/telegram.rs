@@ -112,12 +112,32 @@ impl TelegramAdapter {
                     .await
                     .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
                 if body_text.contains("can't parse entities") {
-                    // Fallback: retry without parse_mode (malformed markdown)
+                    // Fallback: retry without parse_mode (malformed markdown).
+                    // The previous `let _ = ...send().await;` silently dropped
+                    // the fallback result — if the retry ALSO failed (network
+                    // drop, rate limit, bot kicked from chat), the user saw
+                    // no message and the logs were empty. Warn so it's
+                    // visible in production.
                     let fallback = serde_json::json!({
                         "chat_id": chat_id,
                         "text": chunk,
                     });
-                    let _ = self.client.post(&url).json(&fallback).send().await;
+                    match self.client.post(&url).json(&fallback).send().await {
+                        Ok(r) if r.status().is_success() => {}
+                        Ok(r) => {
+                            let s = r.status();
+                            let b = r
+                                .text()
+                                .await
+                                .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
+                            warn!(
+                                "Telegram sendMessage plain-text fallback failed ({s}): {b}"
+                            );
+                        }
+                        Err(e) => {
+                            warn!("Telegram sendMessage plain-text fallback transport error: {e}");
+                        }
+                    }
                 } else {
                     warn!("Telegram sendMessage failed ({status}): {body_text}");
                 }
@@ -199,13 +219,28 @@ impl TelegramAdapter {
                 .await
                 .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
             if body_text.contains("can't parse entities") {
-                // Fallback: send as plain text
+                // Fallback: send as plain text (no parse_mode). Same
+                // logging discipline as the sendMessage fallback —
+                // surface failures instead of swallowing them.
                 let fallback_body = serde_json::json!({
                     "chat_id": chat_id,
                     "message_id": message_id,
                     "text": text,
                 });
-                let _ = self.client.post(&url).json(&fallback_body).send().await;
+                match self.client.post(&url).json(&fallback_body).send().await {
+                    Ok(r) if r.status().is_success() => {}
+                    Ok(r) => {
+                        let s = r.status();
+                        let b = r
+                            .text()
+                            .await
+                            .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
+                        warn!("Telegram editMessageText plain-text fallback failed ({s}): {b}");
+                    }
+                    Err(e) => {
+                        warn!("Telegram editMessageText plain-text fallback transport error: {e}");
+                    }
+                }
             } else if !body_text.contains("message is not modified") {
                 warn!("Telegram editMessageText failed: {body_text}");
             }
@@ -1473,5 +1508,57 @@ mod tests {
             }
         });
         assert!(parse_telegram_update(&update, &[]).is_none());
+    }
+
+    /// Regression: the Markdown→plain-text fallback paths in
+    /// `sendMessage` and `editMessageText` used to call the bare
+    /// fire-and-forget form for the fallback request — if the
+    /// fallback ALSO failed (network drop after the first request,
+    /// bot kicked between calls, rate limit), the user saw no
+    /// message and the logs were empty. Both now match on the
+    /// response and warn-log non-success status / transport errors.
+    /// Source-shape audit pins the pattern so a future refactor
+    /// that drops the warn trips this test.
+    #[test]
+    fn markdown_fallback_paths_log_on_failure() {
+        let src = include_str!("telegram.rs");
+        // Scope the audit to the production code (everything before
+        // the test mod) so self-referential needles in test bodies
+        // don't trigger the assertion.
+        let prod_end = src
+            .find("#[cfg(test)]")
+            .expect("must have a test mod");
+        let prod = &src[..prod_end];
+
+        // Neither sendMessage nor editMessageText fallback should use
+        // the bare fire-and-forget form in production code. Each
+        // fallback must log on non-success status AND on transport
+        // error.
+        let bad1 = ["let _ = self", ".client.post(&url).json(&fallback)", ".send().await;"].concat();
+        let bad2 = ["let _ = self", ".client.post(&url).json(&fallback_body)", ".send().await;"].concat();
+        assert!(
+            !prod.contains(&bad1),
+            "sendMessage Markdown fallback must not use fire-and-forget"
+        );
+        assert!(
+            !prod.contains(&bad2),
+            "editMessageText Markdown fallback must not use fire-and-forget"
+        );
+        assert!(
+            prod.contains("sendMessage plain-text fallback failed"),
+            "sendMessage fallback must warn-log non-success status"
+        );
+        assert!(
+            prod.contains("sendMessage plain-text fallback transport error"),
+            "sendMessage fallback must warn-log transport errors"
+        );
+        assert!(
+            prod.contains("editMessageText plain-text fallback failed"),
+            "editMessageText fallback must warn-log non-success status"
+        );
+        assert!(
+            prod.contains("editMessageText plain-text fallback transport error"),
+            "editMessageText fallback must warn-log transport errors"
+        );
     }
 }
