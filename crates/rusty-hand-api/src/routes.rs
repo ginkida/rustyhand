@@ -4043,40 +4043,134 @@ pub async fn export_config_toml(State(state): State<Arc<AppState>>) -> axum::res
 /// won't leak through this helper. Matches keys are: `api_key`,
 /// `password`, `token`, `secret`, `bearer_token`, plus anything ending
 /// in `_key` (e.g. `openai_api_key`).
+///
+/// Handles both forms users actually write in config.toml:
+///   key = "value"
+///   parent = { key = "value", other = ... }
+///
+/// The original implementation only checked the first `=` per line and
+/// would leak the secret on inline-table lines like
+/// `default_model = { api_key = "sk-..." }` (the line's first-`=` key
+/// was `default_model`, which isn't a secret pattern, so the whole line
+/// passed through verbatim). The current implementation scans every
+/// `<ident> = "..."` pair on the line and redacts each value whose key
+/// matches.
 fn mask_config_secrets(toml: &str) -> String {
     let mut out = String::with_capacity(toml.len());
     for line in toml.lines() {
-        let trimmed = line.trim_start();
-        let key_end = trimmed
-            .find('=')
-            .map(|i| trimmed[..i].trim().to_lowercase());
-        let is_secret_key = match key_end {
-            Some(k) => {
-                k == "api_key"
-                    || k == "password"
-                    || k == "token"
-                    || k == "secret"
-                    || k == "bearer_token"
-                    || k.ends_with("_key")
-                    || k.ends_with("_token")
-                    || k.ends_with("_password")
-                    || k.ends_with("_secret")
-            }
-            None => false,
-        };
-        if is_secret_key {
-            if let Some(eq) = line.find('=') {
-                let (lhs, _) = line.split_at(eq + 1);
-                out.push_str(lhs);
-                out.push_str(" \"<redacted>\"");
-                out.push('\n');
-                continue;
-            }
-        }
-        out.push_str(line);
+        out.push_str(&mask_secrets_in_line(line));
         out.push('\n');
     }
     out
+}
+
+/// Walk a single TOML line and redact any `key = "..."` pair whose key
+/// matches a secret pattern. Preserves the line otherwise (whitespace,
+/// comments, surrounding inline-table braces).
+fn mask_secrets_in_line(line: &str) -> String {
+    let bytes = line.as_bytes();
+    let mut out = String::with_capacity(line.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        // Find the next `ident = "...something..."` pair.
+        let key_start = match find_ident_start(bytes, i) {
+            Some(k) => k,
+            None => {
+                out.push_str(&line[i..]);
+                break;
+            }
+        };
+        out.push_str(&line[i..key_start]);
+        let key_end = find_ident_end(bytes, key_start);
+        let key = &line[key_start..key_end];
+
+        // After ident, skip whitespace and check for `=`.
+        let mut j = key_end;
+        while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
+            j += 1;
+        }
+        if j >= bytes.len() || bytes[j] != b'=' {
+            // Not a key=value pair — emit the ident and continue.
+            out.push_str(key);
+            i = key_end;
+            continue;
+        }
+        // Skip `=` and any whitespace.
+        let eq = j;
+        j += 1;
+        while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
+            j += 1;
+        }
+        // Only redact when the value is a quoted string. Numbers,
+        // booleans, arrays, and inline tables are NEVER secrets in
+        // RustyHand's config schema, and trying to redact them would
+        // produce malformed TOML.
+        if j >= bytes.len() || bytes[j] != b'"' {
+            out.push_str(&line[key_start..=eq]);
+            i = eq + 1;
+            continue;
+        }
+        // Find the matching closing quote, respecting `\"` escapes.
+        let value_start = j;
+        let mut k = j + 1;
+        while k < bytes.len() {
+            if bytes[k] == b'\\' && k + 1 < bytes.len() {
+                k += 2;
+                continue;
+            }
+            if bytes[k] == b'"' {
+                break;
+            }
+            k += 1;
+        }
+        let value_end = if k < bytes.len() { k + 1 } else { k };
+
+        if is_secret_key_name(key) {
+            out.push_str(&line[key_start..value_start]);
+            out.push_str("\"<redacted>\"");
+        } else {
+            out.push_str(&line[key_start..value_end]);
+        }
+        i = value_end;
+    }
+    out
+}
+
+/// Find the start of the next bare TOML identifier (letters/digits/`_`/`-`)
+/// at or after `i`. Returns None if no identifier remains on the line.
+fn find_ident_start(bytes: &[u8], from: usize) -> Option<usize> {
+    let mut i = from;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c.is_ascii_alphanumeric() || c == b'_' || c == b'-' {
+            // But identifiers can only start where the preceding byte is
+            // whitespace, `{`, `,`, or start-of-line — otherwise we're
+            // mid-value (e.g. inside a string).
+            if i == from
+                || matches!(
+                    bytes[i - 1],
+                    b' ' | b'\t' | b'{' | b',' | b'\n'
+                )
+            {
+                return Some(i);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+fn find_ident_end(bytes: &[u8], from: usize) -> usize {
+    let mut i = from;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c.is_ascii_alphanumeric() || c == b'_' || c == b'-' {
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    i
 }
 
 /// GET /api/config — Get kernel configuration (secrets redacted).
@@ -9027,4 +9121,101 @@ fn validate_webhook_token(headers: &axum::http::HeaderMap, token_env: &str) -> b
         return false;
     }
     provided.as_bytes().ct_eq(expected.as_bytes()).into()
+}
+
+#[cfg(test)]
+mod mask_config_tests {
+    use super::*;
+
+    /// The original line-form: simple `key = "value"`. Each variant of
+    /// the secret-key pattern must be redacted.
+    #[test]
+    fn redacts_simple_key_value_secrets() {
+        let input = "api_key = \"sk-AAA\"\n\
+                     password = \"hunter2\"\n\
+                     token = \"abc\"\n\
+                     bearer_token = \"def\"\n\
+                     custom_key = \"ghi\"\n\
+                     openai_api_key = \"jkl\"\n\
+                     foo_token = \"mno\"\n\
+                     bar_password = \"pqr\"\n\
+                     baz_secret = \"stu\"";
+        let out = mask_config_secrets(input);
+        for needle in ["sk-AAA", "hunter2", "abc", "def", "ghi", "jkl", "mno", "pqr", "stu"] {
+            assert!(
+                !out.contains(needle),
+                "value `{needle}` must be redacted, full output:\n{out}"
+            );
+        }
+        assert!(out.matches("<redacted>").count() >= 9);
+    }
+
+    /// Non-secret keys must NOT be touched — verifies the helper doesn't
+    /// blindly redact every string.
+    #[test]
+    fn leaves_non_secret_keys_untouched() {
+        let input = "name = \"my-agent\"\nversion = \"0.1.0\"\nmodel = \"claude-sonnet-4-6\"";
+        let out = mask_config_secrets(input);
+        assert!(out.contains("\"my-agent\""), "name preserved");
+        assert!(out.contains("\"0.1.0\""), "version preserved");
+        assert!(out.contains("\"claude-sonnet-4-6\""), "model preserved");
+        assert!(
+            !out.contains("<redacted>"),
+            "must not redact any non-secret keys, got:\n{out}"
+        );
+    }
+
+    /// Regression: a single line that defines an inline table embeds a
+    /// secret under a benign outer key:
+    ///   default_model = { provider = "anthropic", api_key = "sk-..." }
+    /// The original line-by-line scanner only checked the first `=` on
+    /// the line — the outer key was `default_model`, not a secret
+    /// pattern, so the whole line passed through verbatim and the
+    /// `api_key` value leaked into the export. Verify it's redacted now.
+    #[test]
+    fn redacts_inline_table_secrets() {
+        let input = "default_model = { provider = \"anthropic\", api_key = \"sk-INLINE\" }";
+        let out = mask_config_secrets(input);
+        assert!(
+            !out.contains("sk-INLINE"),
+            "inline-table api_key must be redacted, got:\n{out}"
+        );
+        assert!(
+            out.contains("\"anthropic\""),
+            "non-secret sibling value must be preserved, got:\n{out}"
+        );
+        assert!(out.contains("<redacted>"), "must include redaction marker");
+    }
+
+    /// Array-of-inline-tables form — TOML allows
+    /// `fallback_models = [{ provider = "x", api_key = "y" }]` and
+    /// `toml` crate sometimes serialises this form when there's only
+    /// one entry. Verify each embedded `api_key` is redacted.
+    #[test]
+    fn redacts_array_of_inline_tables() {
+        let input = "fallback_models = [{ provider = \"kimi\", api_key = \"sk-A\" }, { provider = \"deepseek\", api_key = \"sk-B\" }]";
+        let out = mask_config_secrets(input);
+        assert!(!out.contains("sk-A"), "first api_key must be redacted");
+        assert!(!out.contains("sk-B"), "second api_key must be redacted");
+        assert!(out.contains("\"kimi\""));
+        assert!(out.contains("\"deepseek\""));
+        assert_eq!(
+            out.matches("<redacted>").count(),
+            2,
+            "both inline secrets must redact"
+        );
+    }
+
+    /// `api_key_env` is a key-NAME pointer, not the actual secret.
+    /// Leaving it visible is important (it tells the operator which env
+    /// var to set). Make sure the scanner doesn't over-redact.
+    #[test]
+    fn preserves_env_var_pointers() {
+        let input = "api_key_env = \"ANTHROPIC_API_KEY\"";
+        let out = mask_config_secrets(input);
+        assert!(
+            out.contains("\"ANTHROPIC_API_KEY\""),
+            "api_key_env (pointer to env name) must NOT be redacted"
+        );
+    }
 }
