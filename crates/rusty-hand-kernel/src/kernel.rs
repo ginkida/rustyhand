@@ -4705,6 +4705,27 @@ async fn cron_deliver_response(
         }
         CronDelivery::Webhook { url } => {
             tracing::debug!(url = %url, "Cron: delivering via webhook");
+            // SSRF guard — the cron webhook URL is operator-supplied
+            // (via /api/cron/jobs) but unvalidated at schema time
+            // (scheduler::validate_delivery only checks http:// /
+            // https:// prefix and length). Without this gate a
+            // misconfigured or hostile cron job could POST agent
+            // responses to `http://localhost:4200/api/shutdown`,
+            // `http://169.254.169.254/...` (cloud metadata), or
+            // private RFC1918 ranges. Respect the configured
+            // ssrf_allowlist so operators can opt-in to internal
+            // targets via the same config that gates `web_fetch`.
+            if let Err(e) = rusty_hand_runtime::check_ssrf_with_allowlist(
+                url,
+                kernel.web_ctx.fetch.ssrf_allowlist(),
+            ) {
+                tracing::warn!(
+                    url = %url,
+                    error = %e,
+                    "Cron webhook delivery refused: SSRF check failed"
+                );
+                return;
+            }
             let client = match reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
@@ -6021,6 +6042,40 @@ mod tests {
     /// pinning that each channel branch chains `.filter(|s|
     /// !s.is_empty())` on the env lookup. A pure source-shape
     /// assertion keeps the pattern uniform.
+    /// Regression: `cron_deliver_response::Webhook` posted to the
+    /// operator-supplied URL without an SSRF check. The
+    /// scheduler-side `validate_delivery` only enforces
+    /// `http://`/`https://` prefix and length, so a cron job with
+    /// `Webhook { url: "http://localhost:4200/api/shutdown" }` (or
+    /// `169.254.169.254` for cloud metadata, or any RFC1918 host)
+    /// would happily deliver agent responses to those targets.
+    /// Cron job creation requires Admin role, so this isn't a
+    /// privilege escalation — but it's defense-in-depth that brings
+    /// the cron webhook path in line with `web_fetch` (which has
+    /// always used `check_ssrf_with_allowlist`).
+    #[test]
+    fn cron_webhook_delivery_runs_ssrf_check() {
+        let src_raw = include_str!("kernel.rs");
+        let src: String = src_raw.replace("\r\n", "\n");
+        let src = src.as_str();
+        let start = src
+            .find("CronDelivery::Webhook { url } => {")
+            .expect("Webhook delivery branch must exist");
+        let window = &src[start..start + 3000];
+        assert!(
+            window.contains("check_ssrf_with_allowlist"),
+            "Webhook delivery must invoke check_ssrf_with_allowlist before any HTTP call"
+        );
+        assert!(
+            window.contains("ssrf_allowlist()"),
+            "Webhook delivery must respect the configured ssrf_allowlist"
+        );
+        assert!(
+            window.contains("SSRF check failed"),
+            "Webhook delivery must surface the SSRF rejection in a warn log so misconfigs are visible"
+        );
+    }
+
     /// Regression: the `CronDelivery::Webhook` branch in
     /// `cron_deliver_response` logged every HTTP status at `debug`
     /// level — a user whose webhook returned 500 saw the same log
@@ -6028,13 +6083,17 @@ mod tests {
     /// buried. Mirror the Slack/Discord status discipline: `2xx` →
     /// debug, anything else → warn with the response body.
     #[test]
+    // Window enlarged from 2500 to 3500 chars: the SSRF guard
+    // (added later) pushes the body-parsing block further down
+    // inside the Webhook branch, so the original 2500-byte slice
+    // no longer reaches the assertion targets.
     fn cron_webhook_delivery_warns_on_non_success_status() {
         let src = include_str!("kernel.rs");
         let start = src
             .find("CronDelivery::Webhook { url } => {")
             .expect("Webhook delivery branch must exist");
         // 2 KB window covers the whole branch.
-        let window = &src[start..start + 2500];
+        let window = &src[start..start + 3500];
 
         // Must distinguish 2xx via .is_success().
         assert!(
