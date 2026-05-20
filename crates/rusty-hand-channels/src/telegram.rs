@@ -130,9 +130,7 @@ impl TelegramAdapter {
                                 .text()
                                 .await
                                 .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
-                            warn!(
-                                "Telegram sendMessage plain-text fallback failed ({s}): {b}"
-                            );
+                            warn!("Telegram sendMessage plain-text fallback failed ({s}): {b}");
                         }
                         Err(e) => {
                             warn!("Telegram sendMessage plain-text fallback transport error: {e}");
@@ -1603,17 +1601,25 @@ mod tests {
         // Scope the audit to the production code (everything before
         // the test mod) so self-referential needles in test bodies
         // don't trigger the assertion.
-        let prod_end = src
-            .find("#[cfg(test)]")
-            .expect("must have a test mod");
+        let prod_end = src.find("#[cfg(test)]").expect("must have a test mod");
         let prod = &src[..prod_end];
 
         // Neither sendMessage nor editMessageText fallback should use
         // the bare fire-and-forget form in production code. Each
         // fallback must log on non-success status AND on transport
         // error.
-        let bad1 = ["let _ = self", ".client.post(&url).json(&fallback)", ".send().await;"].concat();
-        let bad2 = ["let _ = self", ".client.post(&url).json(&fallback_body)", ".send().await;"].concat();
+        let bad1 = [
+            "let _ = self",
+            ".client.post(&url).json(&fallback)",
+            ".send().await;",
+        ]
+        .concat();
+        let bad2 = [
+            "let _ = self",
+            ".client.post(&url).json(&fallback_body)",
+            ".send().await;",
+        ]
+        .concat();
         assert!(
             !prod.contains(&bad1),
             "sendMessage Markdown fallback must not use fire-and-forget"

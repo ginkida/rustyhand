@@ -4146,12 +4146,7 @@ fn find_ident_start(bytes: &[u8], from: usize) -> Option<usize> {
             // But identifiers can only start where the preceding byte is
             // whitespace, `{`, `,`, or start-of-line — otherwise we're
             // mid-value (e.g. inside a string).
-            if i == from
-                || matches!(
-                    bytes[i - 1],
-                    b' ' | b'\t' | b'{' | b',' | b'\n'
-                )
-            {
+            if i == from || matches!(bytes[i - 1], b' ' | b'\t' | b'{' | b',' | b'\n') {
                 return Some(i);
             }
         }
@@ -6247,9 +6242,7 @@ pub async fn test_provider(
     // check below misses the empty case and the test endpoint
     // surfaces a generic driver error instead of the clean 400
     // "API key not configured" the dashboard expects.
-    let api_key = std::env::var(&env_var)
-        .ok()
-        .filter(|s| !s.is_empty());
+    let api_key = std::env::var(&env_var).ok().filter(|s| !s.is_empty());
     // Only require API key for providers that need one (skip local providers like ollama/vllm/lmstudio)
     if key_required && api_key.is_none() && !env_var.is_empty() {
         return (
@@ -9141,7 +9134,9 @@ mod mask_config_tests {
                      bar_password = \"pqr\"\n\
                      baz_secret = \"stu\"";
         let out = mask_config_secrets(input);
-        for needle in ["sk-AAA", "hunter2", "abc", "def", "ghi", "jkl", "mno", "pqr", "stu"] {
+        for needle in [
+            "sk-AAA", "hunter2", "abc", "def", "ghi", "jkl", "mno", "pqr", "stu",
+        ] {
             assert!(
                 !out.contains(needle),
                 "value `{needle}` must be redacted, full output:\n{out}"

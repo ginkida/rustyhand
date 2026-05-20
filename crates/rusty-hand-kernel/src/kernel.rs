@@ -4765,8 +4765,7 @@ async fn cron_deliver_response(
 /// can't produce `.../channels//...` from an empty string.
 fn is_valid_discord_channel_id(recipient: &str) -> bool {
     const MIN_DISCORD_ID_LEN: usize = 15;
-    recipient.len() >= MIN_DISCORD_ID_LEN
-        && recipient.chars().all(|c| c.is_ascii_digit())
+    recipient.len() >= MIN_DISCORD_ID_LEN && recipient.chars().all(|c| c.is_ascii_digit())
 }
 
 async fn cron_send_to_channel(
@@ -4875,9 +4874,7 @@ async fn cron_send_to_channel(
             // reject malformed values (which we'll now surface in
             // a log line instead of swallowing).
             if recipient.trim().is_empty() {
-                tracing::warn!(
-                    "Cron: empty Slack recipient — refusing to send"
-                );
+                tracing::warn!("Cron: empty Slack recipient — refusing to send");
                 return;
             }
             // Same Some("") guard as Telegram — Slack's bearer_auth
@@ -6052,7 +6049,8 @@ mod tests {
         // Old behaviour — single `tracing::debug!(status = %resp.status())`
         // without a branch — must not be reintroduced.
         assert!(
-            !window.contains("tracing::debug!(status = %resp.status(), \"Cron webhook delivered\")"),
+            !window
+                .contains("tracing::debug!(status = %resp.status(), \"Cron webhook delivered\")"),
             "old fire-and-debug pattern must not return"
         );
     }
@@ -6074,7 +6072,7 @@ mod tests {
         assert!(!is_valid_discord_channel_id("12"));
         assert!(!is_valid_discord_channel_id("12345"));
         assert!(!is_valid_discord_channel_id("12345678901234")); // 14, below min
-        // Non-digit characters.
+                                                                 // Non-digit characters.
         assert!(!is_valid_discord_channel_id("123abc456789012"));
         assert!(!is_valid_discord_channel_id("123/etc/passwd1"));
         assert!(!is_valid_discord_channel_id("123 456 789 012"));
@@ -6095,7 +6093,12 @@ mod tests {
     /// Discord's numeric-id guard.
     #[test]
     fn cron_channel_dispatch_logs_delivery_outcomes() {
-        let src = include_str!("kernel.rs");
+        // Normalise CRLF → LF so multi-line `contains` needles match
+        // on Windows checkouts where the on-disk file ends each line
+        // with `\r\n`.
+        let src_raw = include_str!("kernel.rs");
+        let src: String = src_raw.replace("\r\n", "\n");
+        let src = src.as_str();
         let start = src
             .find("async fn cron_send_to_channel(")
             .expect("cron_send_to_channel must exist");
@@ -6131,7 +6134,12 @@ mod tests {
 
     #[test]
     fn cron_channel_dispatch_filters_empty_env_tokens() {
-        let src = include_str!("kernel.rs");
+        // Normalise CRLF → LF so the multi-line needles below match on
+        // Windows checkouts (where include_str! preserves the on-disk
+        // `\r\n` and would break `contains("...\n    ...")` searches).
+        let src_raw = include_str!("kernel.rs");
+        let src: String = src_raw.replace("\r\n", "\n");
+        let src = src.as_str();
         let start = src
             .find("async fn cron_send_to_channel(")
             .expect("cron_send_to_channel must exist");

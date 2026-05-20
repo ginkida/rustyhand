@@ -73,8 +73,7 @@ impl LlmDriver for FallbackDriver {
             // instead — agent_loop already handles upstream errors, and a
             // garbled mixed response is strictly worse than an honest
             // failure the caller can retry.
-            let (inner_tx, mut inner_rx) =
-                tokio::sync::mpsc::channel::<StreamEvent>(64);
+            let (inner_tx, mut inner_rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
             let outer_tx = tx.clone();
             let relayed = Arc::new(AtomicU64::new(0));
             let relayed_clone = relayed.clone();
@@ -247,10 +246,7 @@ mod tests {
 
     #[async_trait]
     impl LlmDriver for PartialThenFailDriver {
-        async fn complete(
-            &self,
-            _req: CompletionRequest,
-        ) -> Result<CompletionResponse, LlmError> {
+        async fn complete(&self, _req: CompletionRequest) -> Result<CompletionResponse, LlmError> {
             Err(LlmError::Api {
                 status: 0,
                 message: "complete not implemented for streaming-only test driver".into(),
@@ -280,10 +276,7 @@ mod tests {
 
     #[async_trait]
     impl LlmDriver for FullStreamDriver {
-        async fn complete(
-            &self,
-            _req: CompletionRequest,
-        ) -> Result<CompletionResponse, LlmError> {
+        async fn complete(&self, _req: CompletionRequest) -> Result<CompletionResponse, LlmError> {
             Err(LlmError::Api {
                 status: 0,
                 message: "complete not implemented for streaming-only test driver".into(),
@@ -339,11 +332,8 @@ mod tests {
         // Collect everything the receiver saw. It should only contain
         // the first driver's partial chunk — NOT both drivers' output.
         let mut received = String::new();
-        while let Ok(ev) = tokio::time::timeout(
-            std::time::Duration::from_millis(50),
-            rx.recv(),
-        )
-        .await
+        while let Ok(ev) =
+            tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await
         {
             match ev {
                 Some(StreamEvent::TextDelta { text }) => received.push_str(&text),
@@ -399,11 +389,8 @@ mod tests {
         );
 
         let mut received = String::new();
-        while let Ok(ev) = tokio::time::timeout(
-            std::time::Duration::from_millis(50),
-            rx.recv(),
-        )
-        .await
+        while let Ok(ev) =
+            tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await
         {
             match ev {
                 Some(StreamEvent::TextDelta { text }) => received.push_str(&text),

@@ -10,9 +10,7 @@ use rusty_hand_types::config::TtsConfig;
 /// Some("") trap that bit /api/providers/:name/test and cron channel
 /// delivery (see v0.7.9 silent-failure pattern).
 fn env_nonempty(name: &str) -> bool {
-    std::env::var(name)
-        .map(|v| !v.is_empty())
-        .unwrap_or(false)
+    std::env::var(name).map(|v| !v.is_empty()).unwrap_or(false)
 }
 
 /// Maximum audio response size (10MB).

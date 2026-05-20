@@ -195,7 +195,8 @@ fn provider_status_views_handle_configured_and_not_required() {
         .expect("ProviderState component must exist");
     let provider_state_slice = &src[provider_state_idx..provider_state_idx + 1500];
     assert!(
-        provider_state_slice.contains("\"configured\"") && provider_state_slice.contains("Connected"),
+        provider_state_slice.contains("\"configured\"")
+            && provider_state_slice.contains("Connected"),
         "ProviderState must label auth_status='configured' as Connected"
     );
     assert!(
