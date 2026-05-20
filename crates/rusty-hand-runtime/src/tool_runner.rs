@@ -4451,12 +4451,21 @@ mod tests {
     /// workspace IS configured, absolute paths inside it are allowed
     /// by `workspace_sandbox::resolve_sandbox_path` — that's tested
     /// separately in `workspace_sandbox.rs`.)
+    ///
+    /// `is_absolute()` is platform-aware: `/etc/passwd` is absolute on
+    /// Unix but treated as relative on Windows (no drive letter). Use
+    /// a path that's absolute on the current platform so the test
+    /// exercises the actual security boundary.
     #[tokio::test]
     async fn test_file_read_absolute_path_blocked() {
+        #[cfg(unix)]
+        let abs_path = "/etc/passwd";
+        #[cfg(windows)]
+        let abs_path = r"C:\Windows\System32\drivers\etc\hosts";
         let result = execute_tool(
             "test-id",
             "file_read",
-            &serde_json::json!({"path": "/etc/passwd"}),
+            &serde_json::json!({ "path": abs_path }),
             None,
             None,
             None,

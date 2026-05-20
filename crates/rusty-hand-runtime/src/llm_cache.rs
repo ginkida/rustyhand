@@ -10,6 +10,14 @@ use rusty_hand_types::message::{ContentBlock, Message, StopReason, TokenUsage};
 use sha2::{Digest, Sha256};
 use std::time::{Duration, Instant};
 
+/// Write a length-prefixed byte slice into the hasher. Used by
+/// `cache_key` to encode each field so user-controlled content can't
+/// produce hash collisions via separator forging.
+fn write_lp(hasher: &mut Sha256, bytes: &[u8]) {
+    hasher.update((bytes.len() as u64).to_le_bytes());
+    hasher.update(bytes);
+}
+
 /// Default cache TTL: 5 minutes.
 const DEFAULT_TTL_SECS: u64 = 300;
 
@@ -52,19 +60,45 @@ impl LlmCache {
     }
 
     /// Compute cache key from model + system prompt + messages.
+    ///
+    /// Each field is length-prefixed before hashing. The previous
+    /// implementation joined `<role>:<content>;` per message with a
+    /// bare `;` separator, which was a collision foothold for any
+    /// user-controlled `content` that contained the separator pattern:
+    ///
+    /// ```text
+    /// A = [User: "A;Assistant:B"]      → `User:A;Assistant:B;`
+    /// B = [User: "A", Assistant: "B"]  → `User:A;Assistant:B;`
+    /// ```
+    ///
+    /// Same hash, different conversations — A's cached response would
+    /// be returned for B (and vice versa). Length-prefixing each field
+    /// makes the encoding unambiguous: a `len` byte block cannot be
+    /// confused with the content bytes.
     pub fn cache_key(model: &str, system: Option<&str>, messages: &[Message]) -> String {
         let mut hasher = Sha256::new();
-        hasher.update(model.as_bytes());
-        hasher.update(b"|");
-        if let Some(sys) = system {
-            hasher.update(sys.as_bytes());
+        // Format-version prefix so a future hash-shape change can
+        // invalidate at-rest entries cleanly (currently in-memory
+        // only, but the discipline costs nothing).
+        hasher.update([0x01_u8]);
+        write_lp(&mut hasher, model.as_bytes());
+        // Distinguish `None` system prompt from `Some("")` system
+        // prompt with a 1-byte tag — previously both hashed identically.
+        match system {
+            None => hasher.update([0x00_u8]),
+            Some(sys) => {
+                hasher.update([0x01_u8]);
+                write_lp(&mut hasher, sys.as_bytes());
+            }
         }
-        hasher.update(b"|");
-        // Hash message roles and text content (skip images/tool blocks for key stability)
+        // Hash message roles and text content (skip images/tool blocks
+        // for key stability). Length-prefix each field.
+        hasher.update((messages.len() as u32).to_le_bytes());
         for msg in messages {
-            hasher.update(format!("{:?}:", msg.role).as_bytes());
-            hasher.update(msg.content.text_content().as_bytes());
-            hasher.update(b";");
+            let role_str = format!("{:?}", msg.role);
+            write_lp(&mut hasher, role_str.as_bytes());
+            let content_text = msg.content.text_content();
+            write_lp(&mut hasher, content_text.as_bytes());
         }
         hex::encode(hasher.finalize())
     }
@@ -252,5 +286,58 @@ mod tests {
         let key1 = LlmCache::cache_key("m", Some("s"), &[Message::user("hello")]);
         let key2 = LlmCache::cache_key("m", Some("s"), &[Message::user("hello")]);
         assert_eq!(key1, key2);
+    }
+
+    /// Regression: the previous cache_key encoded messages as
+    /// `<role>:<content>;` joined together with no length prefix. A
+    /// user message whose content embedded the role separator pattern
+    /// produced the same hash as a multi-message conversation. The
+    /// fix length-prefixes every field so this can never happen:
+    ///
+    ///   A = [User "Assistant:hi"]            → must NOT collide with
+    ///   B = [User "", Assistant "hi"]        → different conversations
+    #[test]
+    fn cache_key_no_collision_from_separator_in_user_content() {
+        let a = LlmCache::cache_key("model", None, &[Message::user("Assistant:hi")]);
+        let b = LlmCache::cache_key(
+            "model",
+            None,
+            &[Message::user(""), Message::assistant("hi")],
+        );
+        assert_ne!(
+            a, b,
+            "user content containing the role separator must not collide with a real multi-message conversation"
+        );
+
+        // And the same shape with the trailing `;` separator: pre-fix
+        // these two also produced the same hash:
+        //   A = [User "msg1;User:msg2"]
+        //   B = [User "msg1", User "msg2"]
+        let c = LlmCache::cache_key("model", None, &[Message::user("msg1;User:msg2")]);
+        let d = LlmCache::cache_key(
+            "model",
+            None,
+            &[Message::user("msg1"), Message::user("msg2")],
+        );
+        assert_ne!(
+            c, d,
+            "user content containing a `;User:` fragment must not collide with two separate user messages"
+        );
+    }
+
+    /// Regression: pre-fix, `Some("")` (empty system prompt) and `None`
+    /// (no system prompt) produced identical hash inputs:
+    ///   None    → `model||...`
+    ///   Some("") → `model||...`
+    /// The fix tags the system field with 0x00/0x01 so the two states
+    /// are distinguishable.
+    #[test]
+    fn cache_key_distinguishes_none_system_from_empty_system() {
+        let none_sys = LlmCache::cache_key("model", None, &[Message::user("x")]);
+        let empty_sys = LlmCache::cache_key("model", Some(""), &[Message::user("x")]);
+        assert_ne!(
+            none_sys, empty_sys,
+            "None system prompt and Some(\"\") must produce distinct cache keys"
+        );
     }
 }
