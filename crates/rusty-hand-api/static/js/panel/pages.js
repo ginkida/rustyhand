@@ -67,10 +67,9 @@ const ProvidersList = ({ providers }) => {
     const id = p.id || p.name || "\u2014";
     const auth = (p.auth_status || "").toLowerCase();
     let state = "idle";
-    if (auth === "ok" || auth === "configured" || auth === "set") state = "connected";
-    else if (auth === "local") state = "local";
+    if (auth === "ok" || auth === "configured") state = "connected";
+    else if (auth === "not_required") state = "local";
     else if (auth === "fallback" || id === "mock") state = "fallback";
-    else if (auth === "missing" && p.key_required === false) state = "local";
     const models = p.model_count != null ? `${p.model_count} model${p.model_count === 1 ? "" : "s"}` : "";
     const env = p.api_key_env && p.api_key_env !== "\u2014" ? p.api_key_env : "";
     const detail = [models, env].filter(Boolean).join(" \xB7 ") || "\u2014";
@@ -2766,7 +2765,8 @@ function ProviderState() {
     const auth = (p.auth_status || "").toLowerCase();
     let label = auth || "\u2014";
     let err = false, warn = false;
-    if (auth === "ok") label = "Connected";
+    if (auth === "ok" || auth === "configured") label = "Connected";
+    else if (auth === "not_required") label = "Local (no key)";
     else if (auth === "missing") {
       label = "No key";
       warn = p.key_required !== false;
@@ -3799,8 +3799,8 @@ function SettingsPage() {
   ))), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "LLM providers"), /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 11 } }, providers.length, " loaded \xB7 auto-probe at boot")), /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", null, "Provider"), /* @__PURE__ */ React.createElement("th", null, "Env var"), /* @__PURE__ */ React.createElement("th", null, "State"), /* @__PURE__ */ React.createElement("th", { className: "right" }, "Models"), /* @__PURE__ */ React.createElement("th", null))), /* @__PURE__ */ React.createElement("tbody", null, !providersResp && /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { colSpan: 5, className: "muted mono", style: { padding: "12px 14px", fontSize: 12, textAlign: "center" } }, "loading\u2026")), providers.map((p) => {
     const auth = (p.auth_status || "").toLowerCase();
     let badge;
-    if (auth === "ok") badge = /* @__PURE__ */ React.createElement("span", { className: "badge live" }, "set");
-    else if (auth === "missing" && p.key_required === false) badge = /* @__PURE__ */ React.createElement("span", { className: "badge sky" }, "local");
+    if (auth === "ok" || auth === "configured") badge = /* @__PURE__ */ React.createElement("span", { className: "badge live" }, "set");
+    else if (auth === "not_required") badge = /* @__PURE__ */ React.createElement("span", { className: "badge sky" }, "local");
     else if (p.id === "mock" || auth === "fallback") badge = /* @__PURE__ */ React.createElement("span", { className: "badge demo" }, "fallback");
     else if (auth === "invalid") badge = /* @__PURE__ */ React.createElement("span", { className: "badge error" }, "invalid");
     else badge = /* @__PURE__ */ React.createElement("span", { className: "badge idle" }, "not set");

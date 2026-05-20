@@ -179,6 +179,50 @@ fn spawn_modal_accepts_catalog_auth_statuses() {
 }
 
 #[test]
+fn provider_status_views_handle_configured_and_not_required() {
+    // Regression: ProvidersList (Overview), ProviderState (Health), and the
+    // Settings provider table all read `p.auth_status` from /api/providers.
+    // The backend's `AuthStatus` enum serialises as "configured" / "missing"
+    // / "not_required" — never "ok". Pre-fix these three call sites matched
+    // only "ok", so every configured provider rendered as "not set" /
+    // unknown status / raw text. We pin all three together so future edits
+    // that drift one branch trip a hard error.
+    let src = fs::read_to_string(panel_src_dir().join("pages.jsx")).expect("read pages.jsx");
+
+    // ProviderState (Health page) — Connected label
+    let provider_state_idx = src
+        .find("function ProviderState()")
+        .expect("ProviderState component must exist");
+    let provider_state_slice = &src[provider_state_idx..provider_state_idx + 1500];
+    assert!(
+        provider_state_slice.contains("\"configured\"") && provider_state_slice.contains("Connected"),
+        "ProviderState must label auth_status='configured' as Connected"
+    );
+    assert!(
+        provider_state_slice.contains("\"not_required\""),
+        "ProviderState must handle local/no-key providers (auth_status='not_required')"
+    );
+
+    // Settings provider table — `set` badge. Anchor on the badge JSX
+    // directly since "LLM providers" appears earlier in an empty-state hint.
+    let settings_idx = src
+        .find("badge live\">set")
+        .expect("Settings provider table `set` badge must exist");
+    // Walk backward to the start of the table's logic block (`auth_status`
+    // destructure happens within ~400 chars of the badge JSX).
+    let block_start = settings_idx.saturating_sub(400);
+    let settings_slice = &src[block_start..settings_idx + 400];
+    assert!(
+        settings_slice.contains("\"configured\""),
+        "Settings provider table must render the `set` badge for auth_status='configured'"
+    );
+    assert!(
+        settings_slice.contains("\"not_required\""),
+        "Settings provider table must render the `local` badge for auth_status='not_required'"
+    );
+}
+
+#[test]
 fn onboarding_uses_catalog_models_and_real_tools() {
     let src = fs::read_to_string(panel_src_dir().join("app.jsx")).expect("read app.jsx");
     assert!(

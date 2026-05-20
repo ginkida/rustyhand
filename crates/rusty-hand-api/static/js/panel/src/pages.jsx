@@ -190,11 +190,15 @@ const ProvidersList = ({ providers }) => {
       {providers.slice(0, 6).map(p => {
         const id = p.id || p.name || "—";
         const auth = (p.auth_status || "").toLowerCase();
+        // Backend AuthStatus enum emits exactly three serialised values:
+        // "configured" (key present), "missing" (key required but absent),
+        // "not_required" (local providers like ollama). Older branches
+        // testing for "ok"/"set"/"local" were never reachable; kept "ok"
+        // for forward-compat in case channel-style auth ever flows in.
         let state = "idle";
-        if (auth === "ok" || auth === "configured" || auth === "set") state = "connected";
-        else if (auth === "local") state = "local";
+        if (auth === "ok" || auth === "configured") state = "connected";
+        else if (auth === "not_required") state = "local";
         else if (auth === "fallback" || id === "mock") state = "fallback";
-        else if (auth === "missing" && p.key_required === false) state = "local";
         const models = p.model_count != null ? `${p.model_count} model${p.model_count === 1 ? "" : "s"}` : "";
         const env = p.api_key_env && p.api_key_env !== "—" ? p.api_key_env : "";
         const detail = [models, env].filter(Boolean).join(" · ") || "—";
@@ -4607,7 +4611,10 @@ function ProviderState() {
         const auth = (p.auth_status || "").toLowerCase();
         let label = auth || "—";
         let err = false, warn = false;
-        if (auth === "ok") label = "Connected";
+        // Backend `AuthStatus` serialises as configured/missing/not_required.
+        // `ok` left in for forward-compat; never emitted by /api/providers today.
+        if (auth === "ok" || auth === "configured") label = "Connected";
+        else if (auth === "not_required") label = "Local (no key)";
         else if (auth === "missing") { label = "No key"; warn = p.key_required !== false; }
         else if (auth === "invalid") { label = "Invalid"; err = true; }
         else if (auth === "rate_limited") { label = "Rate-limited"; warn = true; }
@@ -6207,8 +6214,10 @@ function SettingsPage() {
               {providers.map(p => {
                 const auth = (p.auth_status || "").toLowerCase();
                 let badge;
-                if (auth === "ok") badge = <span className="badge live">set</span>;
-                else if (auth === "missing" && p.key_required === false) badge = <span className="badge sky">local</span>;
+                // Backend emits "configured" / "missing" / "not_required" via
+                // AuthStatus serde. "ok" left as defensive forward-compat.
+                if (auth === "ok" || auth === "configured") badge = <span className="badge live">set</span>;
+                else if (auth === "not_required") badge = <span className="badge sky">local</span>;
                 else if (p.id === "mock" || auth === "fallback") badge = <span className="badge demo">fallback</span>;
                 else if (auth === "invalid") badge = <span className="badge error">invalid</span>;
                 else badge = <span className="badge idle">not set</span>;
