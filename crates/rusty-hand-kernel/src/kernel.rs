@@ -4705,22 +4705,49 @@ async fn cron_deliver_response(
         }
         CronDelivery::Webhook { url } => {
             tracing::debug!(url = %url, "Cron: delivering via webhook");
-            let client = reqwest::Client::builder()
+            let client = match reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
-                .build();
-            if let Ok(client) = client {
-                let payload = serde_json::json!({
-                    "agent_id": agent_id.to_string(),
-                    "response": response,
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                });
-                match client.post(url).json(&payload).send().await {
-                    Ok(resp) => {
-                        tracing::debug!(status = %resp.status(), "Cron webhook delivered");
+                .build()
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "Cron webhook delivery: failed to build HTTP client"
+                    );
+                    return;
+                }
+            };
+            let payload = serde_json::json!({
+                "agent_id": agent_id.to_string(),
+                "response": response,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            });
+            match client.post(url).json(&payload).send().await {
+                Ok(resp) => {
+                    // Previously logged every status at debug level —
+                    // a user whose webhook returned 500 saw the same
+                    // log as a successful 200. Distinguish 2xx from
+                    // 4xx/5xx so silent webhook failures surface in
+                    // logs (matches the channel-delivery path's status
+                    // discipline).
+                    let status = resp.status();
+                    if status.is_success() {
+                        tracing::debug!(status = %status, "Cron webhook delivered");
+                    } else {
+                        let body = resp
+                            .text()
+                            .await
+                            .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
+                        tracing::warn!(
+                            status = %status,
+                            body = %body,
+                            "Cron webhook delivery returned non-success status"
+                        );
                     }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "Cron webhook delivery failed");
-                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Cron webhook delivery failed");
                 }
             }
         }
@@ -5997,6 +6024,39 @@ mod tests {
     /// pinning that each channel branch chains `.filter(|s|
     /// !s.is_empty())` on the env lookup. A pure source-shape
     /// assertion keeps the pattern uniform.
+    /// Regression: the `CronDelivery::Webhook` branch in
+    /// `cron_deliver_response` logged every HTTP status at `debug`
+    /// level — a user whose webhook returned 500 saw the same log
+    /// line as a successful 200, so genuine delivery failures got
+    /// buried. Mirror the Slack/Discord status discipline: `2xx` →
+    /// debug, anything else → warn with the response body.
+    #[test]
+    fn cron_webhook_delivery_warns_on_non_success_status() {
+        let src = include_str!("kernel.rs");
+        let start = src
+            .find("CronDelivery::Webhook { url } => {")
+            .expect("Webhook delivery branch must exist");
+        // 2 KB window covers the whole branch.
+        let window = &src[start..start + 2500];
+
+        // Must distinguish 2xx via .is_success().
+        assert!(
+            window.contains("status.is_success()"),
+            "Webhook delivery must branch on `status.is_success()`"
+        );
+        // Non-success body must be readable + logged at warn.
+        assert!(
+            window.contains("Cron webhook delivery returned non-success status"),
+            "Webhook delivery must warn-log non-success status with body"
+        );
+        // Old behaviour — single `tracing::debug!(status = %resp.status())`
+        // without a branch — must not be reintroduced.
+        assert!(
+            !window.contains("tracing::debug!(status = %resp.status(), \"Cron webhook delivered\")"),
+            "old fire-and-debug pattern must not return"
+        );
+    }
+
     /// Regression: the Discord recipient validation used
     /// `recipient.chars().all(|c| c.is_ascii_digit())` only, which is
     /// vacuously true for an empty string. Empty `recipient` slipped
