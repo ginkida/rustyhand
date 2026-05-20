@@ -4825,6 +4825,20 @@ async fn cron_send_to_channel(
             }
         }
         "slack" => {
+            // Mirror the Telegram/Discord branches: validate the
+            // recipient string before hitting the API and log the
+            // outcome so silent drops don't pile up. Slack accepts
+            // channel IDs (C…, G…), DMs (D…), and `#name` / `@name`
+            // forms — they all share the property of being non-empty
+            // ASCII; reject empty up-front and let Slack itself
+            // reject malformed values (which we'll now surface in
+            // a log line instead of swallowing).
+            if recipient.trim().is_empty() {
+                tracing::warn!(
+                    "Cron: empty Slack recipient — refusing to send"
+                );
+                return;
+            }
             // Same Some("") guard as Telegram — Slack's bearer_auth
             // accepts the empty token, the API replies auth_failed,
             // and the `let _ = ...send().await` drops the error
@@ -4843,12 +4857,48 @@ async fn cron_send_to_channel(
                     "channel": recipient,
                     "text": message,
                 });
-                let _ = client
+                match client
                     .post(url)
                     .bearer_auth(&token)
                     .json(&payload)
                     .send()
-                    .await;
+                    .await
+                {
+                    Ok(resp) => {
+                        // Slack returns 200 OK even on logical errors
+                        // (`{"ok": false, "error": "channel_not_found"}`).
+                        // Read the body briefly to surface those cases
+                        // instead of silently treating HTTP 200 as success.
+                        let status = resp.status();
+                        let body = resp
+                            .text()
+                            .await
+                            .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
+                        if body.contains("\"ok\":false") || !status.is_success() {
+                            tracing::warn!(
+                                status = %status,
+                                body = %body,
+                                channel = "slack",
+                                "Cron channel delivery failed"
+                            );
+                        } else {
+                            tracing::debug!(
+                                status = %status,
+                                channel = "slack",
+                                "Cron channel delivery sent"
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            channel = "slack",
+                            "Cron channel delivery failed"
+                        );
+                    }
+                }
+            } else {
+                tracing::warn!("Cron: Slack token not available for channel delivery");
             }
         }
         "discord" => {
@@ -4873,12 +4923,47 @@ async fn cron_send_to_channel(
             if let Some(token) = token {
                 let url = format!("https://discord.com/api/v10/channels/{recipient}/messages");
                 let payload = serde_json::json!({ "content": message });
-                let _ = client
+                match client
                     .post(&url)
                     .header("Authorization", format!("Bot {token}"))
                     .json(&payload)
                     .send()
-                    .await;
+                    .await
+                {
+                    Ok(resp) => {
+                        let status = resp.status();
+                        if !status.is_success() {
+                            // Read the body briefly so 4xx/5xx surface
+                            // a useful payload instead of just a status
+                            // code. Mirrors the Slack/Telegram paths.
+                            let body = resp
+                                .text()
+                                .await
+                                .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
+                            tracing::warn!(
+                                status = %status,
+                                body = %body,
+                                channel = "discord",
+                                "Cron channel delivery failed"
+                            );
+                        } else {
+                            tracing::debug!(
+                                status = %status,
+                                channel = "discord",
+                                "Cron channel delivery sent"
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            channel = "discord",
+                            "Cron channel delivery failed"
+                        );
+                    }
+                }
+            } else {
+                tracing::warn!("Cron: Discord token not available for channel delivery");
             }
         }
         _ => {
@@ -5899,6 +5984,52 @@ mod tests {
     /// pinning that each channel branch chains `.filter(|s|
     /// !s.is_empty())` on the env lookup. A pure source-shape
     /// assertion keeps the pattern uniform.
+    /// Regression: the Slack and Discord branches of
+    /// `cron_send_to_channel` used `let _ = client.post(...).send()
+    /// .await;` — every transport error and every API-level "ok:
+    /// false" response was silently dropped without a log line.
+    /// Telegram's branch already produced a debug or warn log for
+    /// each outcome. After the v0.7.79 cleanup all three channels
+    /// match `Ok(resp)` / `Err(e)` and at minimum log the status
+    /// (plus the body on failure). Slack also bails on empty
+    /// recipient up-front, mirroring Telegram's chat-id guard and
+    /// Discord's numeric-id guard.
+    #[test]
+    fn cron_channel_dispatch_logs_delivery_outcomes() {
+        let src = include_str!("kernel.rs");
+        let start = src
+            .find("async fn cron_send_to_channel(")
+            .expect("cron_send_to_channel must exist");
+        let after = &src[start + 1..];
+        let end_rel = after.find("\nstruct ").unwrap_or(after.len());
+        let window = &src[start..start + end_rel];
+
+        // No fire-and-forget `let _ = client.post(...).send().await;`
+        // should remain — every call site must match on the result.
+        assert!(
+            !window.contains(".send()\n                    .await;"),
+            "cron_send_to_channel must not use fire-and-forget `let _ = ...send().await;`"
+        );
+
+        // Slack branch must reject empty recipient with a log line.
+        let slack_start = window
+            .find("\"slack\" => {")
+            .expect("slack branch must exist");
+        let slack_window = &window[slack_start..slack_start + 2500];
+        assert!(
+            slack_window.contains("empty Slack recipient"),
+            "Slack branch must reject empty recipient with a warn log"
+        );
+        // Slack 200-but-ok:false case must be surfaced. The needle is
+        // doubly-escaped because the source-file text we're scanning
+        // contains the literal `\"ok\":false` (with backslashes — Rust
+        // source-level escape sequences for the `"` inside the string).
+        assert!(
+            slack_window.contains("\\\"ok\\\":false"),
+            "Slack branch must check the JSON body for `\\\"ok\\\":false`"
+        );
+    }
+
     #[test]
     fn cron_channel_dispatch_filters_empty_env_tokens() {
         let src = include_str!("kernel.rs");
