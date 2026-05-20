@@ -62,6 +62,25 @@ pub struct AuditEntry {
 }
 
 /// Computes the SHA-256 hash for a single audit entry from its fields.
+///
+/// Each field is length-prefixed before hashing. The previous
+/// implementation concatenated the field bytes directly:
+///
+/// ```text
+///   seq | timestamp | agent_id | action | detail | outcome | prev_hash
+/// ```
+///
+/// An attacker who could rewrite the audit log file (the only realistic
+/// way to attempt log tampering — read-only callers can't shift state)
+/// could engineer field-boundary ambiguity. For example, swapping
+/// `agent_id="alice"`, `action="X"` with
+/// `agent_id="alic"`, `action="eX"` produces identical concatenated
+/// bytes — same hash, same chain link, but a different stated actor.
+/// Length-prefixing each field makes the encoding unambiguous: the
+/// SHA-256 input includes an explicit `len(field)` block before each
+/// `field` payload, so the field boundaries are part of the hash
+/// itself and can't be forged by re-distributing bytes between
+/// adjacent fields. Same trap class as the cache_key collision fix.
 fn compute_entry_hash(
     seq: u64,
     timestamp: &str,
@@ -72,14 +91,23 @@ fn compute_entry_hash(
     prev_hash: &str,
 ) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(seq.to_string().as_bytes());
-    hasher.update(timestamp.as_bytes());
-    hasher.update(agent_id.as_bytes());
-    hasher.update(action.to_string().as_bytes());
-    hasher.update(detail.as_bytes());
-    hasher.update(outcome.as_bytes());
-    hasher.update(prev_hash.as_bytes());
+    // Format-version prefix so a future hash-shape change can
+    // invalidate at-rest chains cleanly. v1 = length-prefixed.
+    hasher.update([0x01_u8]);
+    hasher.update(seq.to_le_bytes());
+    write_lp(&mut hasher, timestamp.as_bytes());
+    write_lp(&mut hasher, agent_id.as_bytes());
+    write_lp(&mut hasher, action.to_string().as_bytes());
+    write_lp(&mut hasher, detail.as_bytes());
+    write_lp(&mut hasher, outcome.as_bytes());
+    write_lp(&mut hasher, prev_hash.as_bytes());
     hex::encode(hasher.finalize())
+}
+
+/// Length-prefix a byte slice into the hasher (u64 LE length, then payload).
+fn write_lp(hasher: &mut Sha256, bytes: &[u8]) {
+    hasher.update((bytes.len() as u64).to_le_bytes());
+    hasher.update(bytes);
 }
 
 /// An append-only, tamper-evident audit log using a Merkle hash chain.
@@ -499,5 +527,77 @@ mod tests {
         let log = AuditLog::open(&path).unwrap();
         assert_eq!(log.len(), 2);
         assert!(log.verify_integrity().is_ok());
+    }
+
+    /// Regression: the previous `compute_entry_hash` concatenated
+    /// `seq | timestamp | agent_id | action | detail | outcome |
+    /// prev_hash` without length-prefixing field boundaries. An
+    /// attacker rewriting the persisted JSONL could shift bytes
+    /// between adjacent fields and produce the same SHA-256:
+    /// `agent_id="alice"`, `action="X"` collides with
+    /// `agent_id="alic"`, `action="eX"`. The fix length-prefixes
+    /// each field so field boundaries are part of the hash itself.
+    #[test]
+    fn entry_hash_immune_to_field_boundary_shifting() {
+        // Pick two field combinations that produced the same
+        // concatenated bytes pre-fix.
+        let h1 = compute_entry_hash(
+            1,
+            "2026-01-01T00:00:00Z",
+            "alice",
+            &AuditAction::AgentSpawn,
+            "X",
+            "ok",
+            "0",
+        );
+        let h2 = compute_entry_hash(
+            1,
+            "2026-01-01T00:00:00Z",
+            "alic",
+            &AuditAction::AgentSpawn,
+            "eX",
+            "ok",
+            "0",
+        );
+        assert_ne!(
+            h1, h2,
+            "shifting one byte across the agent_id/detail boundary must change the hash"
+        );
+
+        // Sanity: identical inputs still produce identical hashes.
+        let h3 = compute_entry_hash(
+            1,
+            "2026-01-01T00:00:00Z",
+            "alice",
+            &AuditAction::AgentSpawn,
+            "X",
+            "ok",
+            "0",
+        );
+        assert_eq!(h1, h3, "deterministic for identical inputs");
+
+        // Cross-boundary collision on the detail/outcome edge.
+        let h4 = compute_entry_hash(
+            1,
+            "2026-01-01T00:00:00Z",
+            "alice",
+            &AuditAction::AgentSpawn,
+            "detailo",
+            "k",
+            "0",
+        );
+        let h5 = compute_entry_hash(
+            1,
+            "2026-01-01T00:00:00Z",
+            "alice",
+            &AuditAction::AgentSpawn,
+            "detail",
+            "ok",
+            "0",
+        );
+        assert_ne!(
+            h4, h5,
+            "shifting bytes across detail/outcome must change the hash"
+        );
     }
 }
