@@ -1970,6 +1970,32 @@ impl KernelConfig {
             );
         }
 
+        // auth_profiles are key-rotation pools per provider. The kernel's
+        // resolve_driver picks the highest-priority profile whose env var
+        // is non-empty (see kernel::pick_profile_env_var). If every profile
+        // for a provider has an empty/unset env var, the kernel silently
+        // falls back to the default_model env var — which is usually what
+        // the operator wanted, but the configured profile names contribute
+        // nothing. Surface that at boot so the operator can fix the env
+        // (or remove the dead profile).
+        for (provider, profiles) in &self.auth_profiles {
+            for prof in profiles {
+                if prof.api_key_env.is_empty() {
+                    warnings.push(format!(
+                        "auth_profiles[{provider}].{name} has empty api_key_env — \
+                         profile cannot be selected by the key-rotation logic",
+                        name = prof.name
+                    ));
+                    continue;
+                }
+                check_provider_key(
+                    &prof.api_key_env,
+                    &format!("auth_profiles[{provider}].{}", prof.name),
+                    &mut warnings,
+                );
+            }
+        }
+
         // --- Approval trust mode notice ---
         //
         // Trust mode (`approval.auto_approve_autonomous = true`) is the
@@ -2168,6 +2194,75 @@ mod tests {
         assert_eq!(
             ds_count, 1,
             "distinct env var must warn separately, got: {warnings:?}"
+        );
+    }
+
+    /// Regression: `validate()` previously only checked
+    /// `default_model.api_key_env` and `fallback_providers[*].api_key_env`
+    /// at boot. Auth profiles (used for key rotation) were not validated
+    /// at all. An operator who configures `auth_profiles.anthropic =
+    /// [{name="b", api_key_env="ANTHROPIC_K2"}]` but never exports
+    /// `ANTHROPIC_K2` would see no boot warning — the dead profile
+    /// silently never gets selected (the kernel falls back to the
+    /// default env var). The fix surfaces both kinds of failure:
+    /// (a) `api_key_env = ""` — a profile that can never be selected,
+    /// (b) the named env var is unset/empty at boot.
+    #[test]
+    fn test_validate_warns_on_unset_auth_profile_env() {
+        let mut config = KernelConfig::default();
+        // Default-model uses a separate fake env so its warning is
+        // distinguishable and doesn't pollute the assertion.
+        config.default_model.api_key_env =
+            "RUSTY_HAND_TEST_NONEXISTENT_LLM_KEY_AUTHPROF_DM".to_string();
+
+        let mut profiles_map = std::collections::HashMap::new();
+        profiles_map.insert(
+            "anthropic".to_string(),
+            vec![
+                AuthProfile {
+                    name: "primary".to_string(),
+                    api_key_env: "RUSTY_HAND_TEST_NONEXISTENT_AUTHPROF_PRIMARY".to_string(),
+                    priority: 0,
+                },
+                AuthProfile {
+                    name: "blank".to_string(),
+                    api_key_env: "".to_string(),
+                    priority: 1,
+                },
+            ],
+        );
+        config.auth_profiles = profiles_map;
+
+        let warnings = config.validate();
+
+        let primary_warns: Vec<&String> = warnings
+            .iter()
+            .filter(|w| w.contains("RUSTY_HAND_TEST_NONEXISTENT_AUTHPROF_PRIMARY"))
+            .collect();
+        assert_eq!(
+            primary_warns.len(),
+            1,
+            "unset auth_profiles env var must warn exactly once, got: {warnings:?}"
+        );
+        assert!(
+            primary_warns[0].contains("auth_profiles[anthropic].primary"),
+            "warning must name the profile, got: {}",
+            primary_warns[0]
+        );
+
+        let blank_warns: Vec<&String> = warnings
+            .iter()
+            .filter(|w| w.contains("auth_profiles[anthropic].blank"))
+            .collect();
+        assert_eq!(
+            blank_warns.len(),
+            1,
+            "auth_profile with empty api_key_env must warn once, got: {warnings:?}"
+        );
+        assert!(
+            blank_warns[0].contains("empty api_key_env"),
+            "warning must explain the empty-key cause, got: {}",
+            blank_warns[0]
         );
     }
 
