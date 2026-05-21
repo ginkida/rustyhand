@@ -401,12 +401,20 @@ fn describe_event(event: &Event) -> String {
             format!("Message from {:?}: {}", msg.role, msg.content)
         }
         EventPayload::ToolResult(tr) => {
+            // Tool outputs can contain arbitrary text — file_read of a
+            // Cyrillic doc, web_search results in any language, browser
+            // page text. Naive `&s[..200]` panics when byte 200 lands
+            // inside a multi-byte UTF-8 char. describe_event is called
+            // from the trigger evaluation hot path; one oversized
+            // non-ASCII tool result would crash the kernel's event
+            // dispatch task.
+            let preview = rusty_hand_types::text::truncate_bytes(&tr.content, 200);
             format!(
                 "Tool '{}' {} ({}ms): {}",
                 tr.tool_id,
                 if tr.success { "succeeded" } else { "failed" },
                 tr.execution_time_ms,
-                &tr.content[..tr.content.len().min(200)]
+                preview
             )
         }
         EventPayload::MemoryUpdate(delta) => {
@@ -848,6 +856,48 @@ mod tests {
             engine.evaluate(&spawn_again).len(),
             1,
             "explicit \"*\" wildcard must still match every spawn"
+        );
+    }
+
+    /// Regression: `describe_event` used `&tr.content[..tr.content.len().min(200)]`
+    /// to truncate ToolResult content for the activation prompt — naive
+    /// byte slicing that panics when byte 200 lands inside a multi-byte
+    /// UTF-8 char. Tool outputs commonly contain non-ASCII (file_read of
+    /// a Cyrillic doc, web_search results in any language, browser page
+    /// text). One oversized non-ASCII tool result crashes the kernel's
+    /// event-dispatch task that publishes ToolResult events through the
+    /// trigger engine.
+    #[test]
+    fn describe_event_handles_multibyte_tool_output_at_truncation_boundary() {
+        // 1-byte ASCII prefix shifts the 2-byte Я sequence onto odd
+        // byte offsets so byte 200 lands inside a Я (its continuation
+        // byte), not on a boundary.
+        let blob = format!("a{}", "Я".repeat(120));
+        assert!(blob.len() > 200);
+        assert!(
+            !blob.is_char_boundary(200),
+            "test setup must place byte 200 mid-char"
+        );
+
+        let event = Event::new(
+            AgentId::new(),
+            EventTarget::Broadcast,
+            EventPayload::ToolResult(ToolOutput {
+                tool_id: "file_read".to_string(),
+                tool_use_id: "tu-1".to_string(),
+                content: blob,
+                success: true,
+                execution_time_ms: 12,
+            }),
+        );
+
+        // Pre-fix: panic inside `&tr.content[..200]`.
+        let desc = describe_event(&event);
+        assert!(desc.contains("file_read"));
+        assert!(desc.contains("succeeded"));
+        assert!(
+            std::str::from_utf8(desc.as_bytes()).is_ok(),
+            "description must be valid UTF-8 even when truncated"
         );
     }
 }
