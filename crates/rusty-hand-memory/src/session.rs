@@ -380,7 +380,10 @@ impl SessionStore {
             .map_err(|e| RustyHandError::Internal(e.to_string()))?;
 
         let q_lower = query.to_lowercase();
-        let like_pat = format!("%{q_lower}%");
+        // Escape SQLite LIKE wildcards (`%` and `_`) so a query like
+        // "100%" doesn't silently match anything containing "100". The
+        // ESCAPE clause below tells SQLite to use `\` as the escape char.
+        let like_pat = format!("%{}%", crate::sql_util::escape_like_pattern(&q_lower));
         let cap = (limit * 5).clamp(50, 500) as i64;
 
         // Fast path: query rows whose content_text index is already populated.
@@ -388,7 +391,7 @@ impl SessionStore {
             .prepare(
                 "SELECT id, agent_id, content_text, label \
                  FROM sessions \
-                 WHERE content_text IS NOT NULL AND lower(content_text) LIKE ?1 \
+                 WHERE content_text IS NOT NULL AND lower(content_text) LIKE ?1 ESCAPE '\\' \
                  ORDER BY updated_at DESC \
                  LIMIT ?2",
             )
@@ -1212,5 +1215,81 @@ mod tests {
         assert_eq!(results.len(), 1);
         let excerpt = results[0]["excerpt"].as_str().unwrap();
         assert!(excerpt.contains("needle"));
+    }
+
+    /// Regression: `search_sessions` built the LIKE pattern with
+    /// `format!("%{q_lower}%")`, which lets `%` and `_` in the user's
+    /// query act as SQLite wildcards. A user searching for "100%"
+    /// silently matched any session containing "100" (the `%`
+    /// expanded to "any chars"); a user searching for "node_modules"
+    /// matched anything containing "node" + any single char +
+    /// "modules". False positives in search results — not a security
+    /// issue, but a real correctness bug.
+    #[test]
+    fn search_sessions_treats_percent_as_literal() {
+        let store = setup();
+        let agent_id = AgentId::new();
+
+        // Session A: contains the literal "100%" — should match.
+        let mut s_a = store.create_session(agent_id).unwrap();
+        s_a.messages.push(Message::user("Discount: 100% off today"));
+        store.save_session(&s_a).unwrap();
+
+        // Session B: contains "100" but NOT "100%" — should NOT match
+        // a query for "100%". Pre-fix, the `%` expanded to any chars
+        // and this matched.
+        let mut s_b = store.create_session(agent_id).unwrap();
+        s_b.messages.push(Message::user("Ran 100 iterations"));
+        store.save_session(&s_b).unwrap();
+
+        let results = store.search_sessions("100%", 10).unwrap();
+        let session_ids: Vec<String> = results
+            .iter()
+            .map(|r| r["session_id"].as_str().unwrap().to_string())
+            .collect();
+
+        assert!(
+            session_ids.contains(&s_a.id.0.to_string()),
+            "session with literal 100% must match — got: {session_ids:?}"
+        );
+        assert!(
+            !session_ids.contains(&s_b.id.0.to_string()),
+            "session without literal 100% must NOT match — pre-fix the % \
+             acted as a wildcard. Got: {session_ids:?}"
+        );
+    }
+
+    /// Same regression, for the `_` (single-char) wildcard.
+    #[test]
+    fn search_sessions_treats_underscore_as_literal() {
+        let store = setup();
+        let agent_id = AgentId::new();
+
+        // Session A: contains "node_modules"
+        let mut s_a = store.create_session(agent_id).unwrap();
+        s_a.messages
+            .push(Message::user("checked node_modules path"));
+        store.save_session(&s_a).unwrap();
+
+        // Session B: contains "nodexmodules" (no literal _)
+        let mut s_b = store.create_session(agent_id).unwrap();
+        s_b.messages.push(Message::user("found nodexmodules dir"));
+        store.save_session(&s_b).unwrap();
+
+        let results = store.search_sessions("node_modules", 10).unwrap();
+        let session_ids: Vec<String> = results
+            .iter()
+            .map(|r| r["session_id"].as_str().unwrap().to_string())
+            .collect();
+
+        assert!(
+            session_ids.contains(&s_a.id.0.to_string()),
+            "literal node_modules must match"
+        );
+        assert!(
+            !session_ids.contains(&s_b.id.0.to_string()),
+            "nodexmodules must NOT match — pre-fix the _ acted as a \
+             single-char wildcard. Got: {session_ids:?}"
+        );
     }
 }

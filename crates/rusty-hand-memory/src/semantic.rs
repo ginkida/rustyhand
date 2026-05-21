@@ -131,10 +131,16 @@ impl SemanticStore {
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         let mut param_idx = 1;
 
-        // Text search filter (only when no embeddings — vector search handles relevance)
+        // Text search filter (only when no embeddings — vector search handles relevance).
+        // SQLite LIKE treats `%` and `_` as wildcards; without escaping, a user
+        // searching for "100%" would silently match "1000ms", "100x", etc. Escape
+        // the user input and tell SQLite our escape character is `\`.
         if query_embedding.is_none() && !query.is_empty() {
-            sql.push_str(&format!(" AND content LIKE ?{param_idx}"));
-            params.push(Box::new(format!("%{query}%")));
+            sql.push_str(&format!(" AND content LIKE ?{param_idx} ESCAPE '\\'"));
+            params.push(Box::new(format!(
+                "%{}%",
+                crate::sql_util::escape_like_pattern(query)
+            )));
             param_idx += 1;
         }
 

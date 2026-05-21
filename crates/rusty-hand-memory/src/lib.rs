@@ -12,6 +12,7 @@ pub mod knowledge;
 pub mod migration;
 pub mod semantic;
 pub mod session;
+pub mod sql_util;
 pub mod structured;
 pub mod usage;
 
