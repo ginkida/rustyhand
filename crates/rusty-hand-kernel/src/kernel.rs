@@ -493,6 +493,39 @@ fn truncate_utf8_bytes(input: &str, max_bytes: usize) -> String {
     input[..end].to_string()
 }
 
+/// Pick which env var to read the API key from when auth profiles are configured.
+///
+/// Returns the highest-priority profile's env var **only if that env var is
+/// actually populated** with a non-empty value. Otherwise falls back to the
+/// agent's default env var. Pre-fix this used `std::env::var(...).is_ok()`,
+/// which considered an env var set to the empty string (`FOO=""` — a common
+/// shell mistake) as "configured" — the same v0.7.9-era trap that
+/// `pick_api_key` was created to defend against. The driver would then 401
+/// silently and `agent_loop` would return an empty response.
+///
+/// `is_set` is injected so unit tests can exercise the precedence rules
+/// without mutating process env vars (unsafe under cargo's parallel runner).
+fn pick_profile_env_var(
+    profiles: Option<&Vec<rusty_hand_types::config::AuthProfile>>,
+    default_env: &str,
+    is_set: impl Fn(&str) -> bool,
+) -> String {
+    let Some(profiles) = profiles else {
+        return default_env.to_string();
+    };
+    if profiles.is_empty() {
+        return default_env.to_string();
+    }
+    let mut sorted: Vec<_> = profiles.iter().collect();
+    sorted.sort_by_key(|p| p.priority);
+    let best = &sorted[0];
+    if is_set(&best.api_key_env) {
+        best.api_key_env.clone()
+    } else {
+        default_env.to_string()
+    }
+}
+
 /// Read a workspace identity file with a size cap to prevent prompt stuffing.
 /// Returns None if the file doesn't exist or is empty.
 fn read_identity_file(workspace: &Path, filename: &str) -> Option<String> {
@@ -3929,25 +3962,11 @@ impl RustyHandKernel {
                 .as_deref()
                 .unwrap_or(&self.config.default_model.api_key_env);
 
-            let api_key_env =
-                if let Some(profiles) = self.config.auth_profiles.get(agent_provider.as_str()) {
-                    if !profiles.is_empty() {
-                        // Pick highest-priority profile (lowest priority number)
-                        let mut sorted: Vec<_> = profiles.iter().collect();
-                        sorted.sort_by_key(|p| p.priority);
-                        let best = &sorted[0];
-                        // Use the profile's env var if the key exists, otherwise fall back
-                        if std::env::var(&best.api_key_env).is_ok() {
-                            best.api_key_env.clone()
-                        } else {
-                            default_key_env.to_string()
-                        }
-                    } else {
-                        default_key_env.to_string()
-                    }
-                } else {
-                    default_key_env.to_string()
-                };
+            let api_key_env = pick_profile_env_var(
+                self.config.auth_profiles.get(agent_provider.as_str()),
+                default_key_env,
+                |name| std::env::var(name).is_ok_and(|s| !s.is_empty()),
+            );
 
             let driver_config = DriverConfig {
                 provider: agent_provider.clone(),
@@ -3978,10 +3997,15 @@ impl RustyHandKernel {
                 }
                 let config = DriverConfig {
                     provider: fb.provider.clone(),
+                    // Same v0.7.9 Some("") trap: a manifest with
+                    // fallback api_key_env = "FOO" plus an env that
+                    // exports FOO="" used to slip through as
+                    // Some("") and instantiate the fallback driver
+                    // with an empty bearer token. Filter explicitly.
                     api_key: fb
                         .api_key_env
                         .as_ref()
-                        .and_then(|env| std::env::var(env).ok()),
+                        .and_then(|env| std::env::var(env).ok().filter(|s| !s.is_empty())),
                     base_url: fb.base_url.clone(),
                 };
                 match drivers::create_driver(&config) {
@@ -6230,6 +6254,73 @@ mod tests {
         assert!(
             window.contains(needle),
             "Discord branch must filter empty bot_token_env values"
+        );
+    }
+
+    /// Regression: `resolve_driver`'s auth-profile selection used to
+    /// pick a profile if `std::env::var(profile.api_key_env).is_ok()`
+    /// — but `is_ok()` returns true for `FOO=""` too. The empty key
+    /// then flowed into `DriverConfig.api_key = Some("")`. For known
+    /// providers `pick_api_key` would filter the empty string and
+    /// fail loudly with MissingApiKey rather than silently fall back
+    /// to the default env var. So an agent whose user has both
+    /// (a) a working default key, and (b) any empty auth_profile env
+    /// var for the same provider, would fail to spawn.
+    ///
+    /// Fix: skip profiles whose env var is unset OR empty.
+    #[test]
+    fn pick_profile_env_var_skips_empty_profile_env() {
+        use rusty_hand_types::config::AuthProfile;
+        let profiles = vec![AuthProfile {
+            name: "secondary".into(),
+            api_key_env: "ANTHROPIC_PROFILE_2".into(),
+            priority: 0,
+        }];
+
+        // Profile env var is unset → fall back to default.
+        let pick = pick_profile_env_var(Some(&profiles), "ANTHROPIC_API_KEY", |_| false);
+        assert_eq!(pick, "ANTHROPIC_API_KEY");
+
+        // Profile env var is set but empty → fall back to default
+        // (the bug: pre-fix this returned "ANTHROPIC_PROFILE_2"
+        // because is_ok() matched empty strings).
+        let pick = pick_profile_env_var(Some(&profiles), "ANTHROPIC_API_KEY", |name| {
+            // Simulate FOO="" — present but empty. The injected
+            // predicate models the post-fix shape: "set AND
+            // non-empty". A correct caller returns false here, so the
+            // helper should fall back to the default.
+            let _ = name;
+            false
+        });
+        assert_eq!(pick, "ANTHROPIC_API_KEY");
+
+        // Profile env var is set and non-empty → use it.
+        let pick = pick_profile_env_var(Some(&profiles), "ANTHROPIC_API_KEY", |name| {
+            name == "ANTHROPIC_PROFILE_2"
+        });
+        assert_eq!(pick, "ANTHROPIC_PROFILE_2");
+    }
+
+    /// Source-shape audit: the call site that wires `pick_profile_env_var`
+    /// to `std::env::var(...)` MUST use the empty-string filter. Without
+    /// it the helper's `is_set` predicate degrades to `is_ok()` and the
+    /// fix above is moot.
+    #[test]
+    fn resolve_driver_auth_profile_selection_filters_empty_env_var() {
+        let src = include_str!("kernel.rs").replace("\r\n", "\n");
+        let prod_end = src.find("#[cfg(test)]").expect("test mod exists");
+        let prod = &src[..prod_end];
+
+        assert!(
+            prod.contains("|name| std::env::var(name).is_ok_and(|s| !s.is_empty())"),
+            "auth-profile env-var selection must reject empty env vars"
+        );
+
+        // The fallback-driver chain also reads `std::env::var(env).ok()`
+        // for `fb.api_key_env`. Same Some(\"\") trap. Pin the filter.
+        assert!(
+            prod.contains(".and_then(|env| std::env::var(env).ok().filter(|s| !s.is_empty()))"),
+            "fallback-driver chain must filter empty api_key_env values"
         );
     }
 }
