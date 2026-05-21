@@ -108,23 +108,52 @@ impl CredentialVault {
                 }
                 Err(e) => {
                     warn!("Could not store in OS keyring: {e}. Saving key to file fallback.",);
-                    // Save key to a dedicated file instead of printing to stderr
+                    // Save key to a dedicated file instead of printing to stderr.
+                    //
+                    // SECURITY: On Unix the file is opened with mode 0600 at
+                    // create time via the open(2) syscall. Pre-fix this used
+                    // `std::fs::write` (mode 0666 & ~umask = typically 0644)
+                    // followed by a separate `set_permissions(0600)`. Between
+                    // the write and the chmod, the AES-256-GCM master key for
+                    // the credential vault — the most sensitive secret in the
+                    // codebase, used to decrypt every stored OAuth token /
+                    // API key / etc. — was briefly world-readable on disk.
+                    // Same TOCTOU window as iter 59 closed for secrets.env.
                     let key_file = self.path.with_file_name("vault-key.b64");
-                    if let Err(write_err) = std::fs::write(&key_file, key_b64.as_bytes()) {
+                    let write_result = {
+                        #[cfg(unix)]
+                        {
+                            use std::io::Write;
+                            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+                            (|| -> std::io::Result<()> {
+                                let mut f = std::fs::OpenOptions::new()
+                                    .write(true)
+                                    .create(true)
+                                    .truncate(true)
+                                    .mode(0o600)
+                                    .open(&key_file)?;
+                                f.write_all(key_b64.as_bytes())?;
+                                // Re-apply defensively for the pre-existing
+                                // file case where open() inherits the inode's
+                                // mode rather than the requested one.
+                                let _ = std::fs::set_permissions(
+                                    &key_file,
+                                    std::fs::Permissions::from_mode(0o600),
+                                );
+                                Ok(())
+                            })()
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            std::fs::write(&key_file, key_b64.as_bytes())
+                        }
+                    };
+                    if let Err(write_err) = write_result {
                         warn!(
                             "Could not write vault key file: {write_err}. Set {} env var manually.",
                             VAULT_KEY_ENV
                         );
                     } else {
-                        // Restrict permissions to owner-only on Unix
-                        #[cfg(unix)]
-                        {
-                            use std::os::unix::fs::PermissionsExt;
-                            let _ = std::fs::set_permissions(
-                                &key_file,
-                                std::fs::Permissions::from_mode(0o600),
-                            );
-                        }
                         warn!(
                             "Vault key saved to {:?} — move it to {} env var for production use.",
                             key_file, VAULT_KEY_ENV
@@ -456,7 +485,36 @@ fn store_keyring_key(key_b64: &str) -> Result<(), String> {
             .collect();
         let encoded =
             base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &obfuscated);
-        std::fs::write(&keyring_path, encoded).map_err(|e| format!("write: {e}"))?;
+
+        // SECURITY: open with 0600 at create-time so the obfuscated
+        // master key never lives on disk at default 0644. The XOR mask
+        // is derived from `machine_fingerprint()` — a value any local
+        // user on the box can recompute — so this file is effectively
+        // plaintext to any local attacker that can read it. Pre-fix
+        // `std::fs::write` created the file with default umask (0644
+        // on typical systems), leaving the obfuscated key world-
+        // readable for the brief window between create and the next
+        // process-level chmod (which never came — there was no chmod).
+        #[cfg(unix)]
+        {
+            use std::io::Write;
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&keyring_path)
+                .map_err(|e| format!("write: {e}"))?;
+            f.write_all(encoded.as_bytes())
+                .map_err(|e| format!("write: {e}"))?;
+            // Re-apply defensively for the pre-existing-file case.
+            let _ = std::fs::set_permissions(&keyring_path, std::fs::Permissions::from_mode(0o600));
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::write(&keyring_path, encoded).map_err(|e| format!("write: {e}"))?;
+        }
         Ok(())
     }
     #[cfg(test)]
@@ -612,5 +670,40 @@ mod tests {
         let k1 = derive_key(&master, &salt).unwrap();
         let k2 = derive_key(&master, &salt).unwrap();
         assert_eq!(k1.as_ref(), k2.as_ref());
+    }
+
+    /// Regression (iter 67): the vault master-key fallback file
+    /// (`vault-key.b64`) was created via `std::fs::write` (mode 0666
+    /// & ~umask = 0644 on typical systems), then chmod'd to 0600 in a
+    /// separate syscall. Between the write and the chmod the AES-256-GCM
+    /// master key — used to decrypt every OAuth token / API key /
+    /// extension credential stored in the vault — sat on disk world-
+    /// readable. Same TOCTOU class as iter 59's `write_secret_env`
+    /// fix; this is the highest-impact instance because the key
+    /// decrypts everything else.
+    ///
+    /// Init runs the keyring-store path first; if that fails (which it
+    /// does in `cfg(test)` by design) the fallback file write kicks in.
+    /// On Unix we then verify the file's mode is 0600.
+    #[test]
+    #[cfg(unix)]
+    fn vault_init_fallback_key_file_is_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = CredentialVault::new(dir.path().join("vault.enc"));
+        vault.init().expect("init should succeed via fallback");
+
+        let key_file = dir.path().join("vault-key.b64");
+        assert!(
+            key_file.exists(),
+            "fallback path must have written the key file (keyring is disabled in tests)"
+        );
+        let meta = std::fs::metadata(&key_file).unwrap();
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "vault-key.b64 must be 0600 — it holds the AES-256-GCM master key; \
+             got {mode:o}"
+        );
     }
 }
