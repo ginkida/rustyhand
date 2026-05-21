@@ -648,11 +648,67 @@ fn sanitize_function_tags(text: &str) -> String {
     out
 }
 
-/// Truncate a string to `max_len` chars, appending `…` if truncated.
+/// Truncate a string so the byte length stays under `max_len`, appending `…`
+/// if truncated.
+///
+/// The function used to do `&s[..max_len-1]` directly — naive byte slicing
+/// that panics when the cut lands inside a multi-byte UTF-8 char. Tool
+/// inputs / results commonly contain non-ASCII (file_read of a Cyrillic
+/// doc, web_fetch results, command output in any locale), so the TUI's
+/// tool-call display panicked the chat screen on the first oversized
+/// non-ASCII payload — bringing the entire TUI down mid-stream.
 fn truncate_line(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}\u{2026}", &s[..max_len.saturating_sub(1)])
+        return s.to_string();
+    }
+    // Reserve one byte for the ellipsis below; snap the cut down to the
+    // nearest char boundary so the slice never lands mid-char.
+    let cut = rusty_hand_types::text::truncate_bytes(s, max_len.saturating_sub(1));
+    format!("{cut}\u{2026}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression: pre-fix `truncate_line` did `&s[..max_len-1]` which
+    /// panics when the byte cut lands inside a multi-byte UTF-8 char.
+    /// Tool inputs/results commonly include non-ASCII content, so the
+    /// TUI chat screen panicked mid-stream the first time a tool
+    /// returned a long Cyrillic / CJK / emoji payload — taking the
+    /// whole TUI down. Post-fix: snap to char boundary, never panic.
+    #[test]
+    fn truncate_line_handles_multibyte_at_cut_boundary() {
+        // 1-byte ASCII prefix shifts 2-byte Cyrillic chars onto odd
+        // byte offsets; with max_len=41 the cut at byte 40 (= max_len-1)
+        // lands inside a "Я" continuation byte (boundaries are at 0, 1,
+        // 3, 5, …, 39, 41 — so 40 is NOT a boundary).
+        let blob = format!("a{}", "Я".repeat(80));
+        let max_len = 41;
+        let cut = max_len - 1;
+        assert!(blob.len() > max_len);
+        assert!(
+            !blob.is_char_boundary(cut),
+            "test setup must place the cut mid-char"
+        );
+
+        // Pre-fix: panic inside &blob[..40].
+        let out = truncate_line(&blob, max_len);
+        assert!(
+            std::str::from_utf8(out.as_bytes()).is_ok(),
+            "output must be valid UTF-8"
+        );
+        assert!(
+            out.ends_with('\u{2026}'),
+            "truncated output must keep the ellipsis suffix"
+        );
+        assert!(out.len() <= max_len + '\u{2026}'.len_utf8());
+    }
+
+    /// Short strings are returned unchanged.
+    #[test]
+    fn truncate_line_passes_short_strings_through() {
+        assert_eq!(truncate_line("hi", 100), "hi");
+        assert_eq!(truncate_line("", 5), "");
     }
 }
