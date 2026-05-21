@@ -133,7 +133,17 @@ impl TelegramAdapter {
                             warn!("Telegram sendMessage plain-text fallback failed ({s}): {b}");
                         }
                         Err(e) => {
-                            warn!("Telegram sendMessage plain-text fallback transport error: {e}");
+                            // reqwest::Error::Display includes the
+                            // request URL, which embeds the bot token
+                            // for Telegram. Redact before logging so
+                            // syslog/journalctl don't archive the
+                            // token. (iter 65: shared helper from
+                            // rusty_hand_types::text.)
+                            let safe =
+                                rusty_hand_types::text::redact_telegram_token(&e.to_string());
+                            warn!(
+                                "Telegram sendMessage plain-text fallback transport error: {safe}"
+                            );
                         }
                     }
                 } else {
@@ -236,7 +246,10 @@ impl TelegramAdapter {
                         warn!("Telegram editMessageText plain-text fallback failed ({s}): {b}");
                     }
                     Err(e) => {
-                        warn!("Telegram editMessageText plain-text fallback transport error: {e}");
+                        let safe = rusty_hand_types::text::redact_telegram_token(&e.to_string());
+                        warn!(
+                            "Telegram editMessageText plain-text fallback transport error: {safe}"
+                        );
                     }
                 }
             } else if !body_text.contains("message is not modified") {
@@ -642,7 +655,8 @@ impl ChannelAdapter for TelegramAdapter {
                 let resp = match result {
                     Ok(resp) => resp,
                     Err(e) => {
-                        warn!("Telegram getUpdates network error: {e}, retrying in {backoff:?}");
+                        let safe = rusty_hand_types::text::redact_telegram_token(&e.to_string());
+                        warn!("Telegram getUpdates network error: {safe}, retrying in {backoff:?}");
                         tokio::time::sleep(backoff).await;
                         backoff = (backoff * 2).min(MAX_BACKOFF);
                         continue;
@@ -871,7 +885,12 @@ impl ChannelAdapter for TelegramAdapter {
                     {
                         Ok(mid) => message_id = Some(mid),
                         Err(e) => {
-                            warn!("Telegram streaming: failed to send initial message: {e}");
+                            // The underlying reqwest::Error embeds the
+                            // request URL (which contains the bot
+                            // token); redact before logging.
+                            let safe =
+                                rusty_hand_types::text::redact_telegram_token(&e.to_string());
+                            warn!("Telegram streaming: failed to send initial message: {safe}");
                             break;
                         }
                     }
@@ -888,8 +907,9 @@ impl ChannelAdapter for TelegramAdapter {
                     // Truncate to Telegram's 4096 char limit
                     let display: String = full_text.chars().take(4096).collect();
                     if let Err(e) = self.api_edit_message(chat_id, mid, &display).await {
+                        let safe = rusty_hand_types::text::redact_telegram_token(&e.to_string());
                         tracing::debug!(
-                            chat_id, mid, error = %e,
+                            chat_id, mid, error = %safe,
                             "Telegram streaming: mid-stream edit failed (will retry next tick)"
                         );
                     }
@@ -910,23 +930,27 @@ impl ChannelAdapter for TelegramAdapter {
                 let first = &chunks[0];
                 if chunks.len() == 1 {
                     if let Err(e) = self.api_edit_message(chat_id, mid, first).await {
+                        let safe = rusty_hand_types::text::redact_telegram_token(&e.to_string());
                         warn!(
-                            chat_id, mid, error = %e,
+                            chat_id, mid, error = %safe,
                             "Telegram streaming: final edit failed — user view stale"
                         );
                     }
                 } else {
                     // Edit first message, send rest as new messages.
                     if let Err(e) = self.api_edit_message(chat_id, mid, first).await {
+                        let safe = rusty_hand_types::text::redact_telegram_token(&e.to_string());
                         warn!(
-                            chat_id, mid, error = %e,
+                            chat_id, mid, error = %safe,
                             "Telegram streaming: final edit (chunk 1) failed"
                         );
                     }
                     for (idx, extra) in chunks[1..].iter().enumerate() {
                         if let Err(e) = self.api_send_message(chat_id, extra).await {
+                            let safe =
+                                rusty_hand_types::text::redact_telegram_token(&e.to_string());
                             warn!(
-                                chat_id, chunk_idx = idx + 2, error = %e,
+                                chat_id, chunk_idx = idx + 2, error = %safe,
                                 "Telegram streaming: overflow chunk send failed — partial response lost"
                             );
                         }
@@ -1643,6 +1667,49 @@ mod tests {
         assert!(
             prod.contains("editMessageText plain-text fallback transport error"),
             "editMessageText fallback must warn-log transport errors"
+        );
+    }
+
+    /// Regression (iter 65): every Telegram error log path used to
+    /// format `{e}` where `e: reqwest::Error`. `Error::Display`
+    /// appends `for url ({URL})` — and Telegram embeds the bot token
+    /// directly in the URL path. Pre-fix every send-failure log line
+    /// (rate limit, blocked bot, network blip) wrote the token to
+    /// journalctl/syslog/Loki. Iter 64 fixed the kernel's cron path;
+    /// this iter promoted the helper to `rusty_hand_types::text` and
+    /// wired the adapter's failure paths through it.
+    ///
+    /// Source-shape audit: every Telegram error log site that
+    /// formats a reqwest::Error must route through
+    /// `rusty_hand_types::text::redact_telegram_token`. A future
+    /// refactor that drops the redact() call leaks the token again.
+    #[test]
+    fn telegram_error_logs_redact_bot_token() {
+        let src = include_str!("telegram.rs").replace("\r\n", "\n");
+        let prod_end = src.find("#[cfg(test)]").expect("test mod exists");
+        let prod = &src[..prod_end];
+
+        // Each error-logging site that formats a reqwest::Error must
+        // pipe through the redactor. Count occurrences so a future
+        // addition of another `error: {e}` log line trips this test.
+        let red_count = prod
+            .matches("rusty_hand_types::text::redact_telegram_token(&e.to_string())")
+            .count();
+        assert!(
+            red_count >= 5,
+            "expected ≥5 redact_telegram_token call sites (initial-send, mid-stream edit, \
+             final edit, final edit chunk 1, overflow chunk send + the 2 Markdown fallbacks + \
+             getUpdates), got {red_count}"
+        );
+
+        // No remaining `error: {e}` site that formats a raw reqwest::
+        // Error without redacting. The audit pattern below catches
+        // both `error: {e}` and `error = %e,` shapes that take a raw
+        // reqwest::Error after a `.send().await` arm.
+        let bad_inline = "warn!(\"Telegram getUpdates network error: {e},";
+        assert!(
+            !prod.contains(bad_inline),
+            "getUpdates network error must route through redact_telegram_token"
         );
     }
 }

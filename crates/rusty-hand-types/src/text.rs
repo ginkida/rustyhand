@@ -36,6 +36,47 @@ pub fn floor_char_boundary(s: &str, idx: usize) -> usize {
     end
 }
 
+/// Redact the Telegram bot token segment from any string (typically a
+/// `reqwest::Error::Display` output).
+///
+/// Telegram's REST API embeds the bot token in the URL path:
+/// `https://api.telegram.org/bot{TOKEN}/sendMessage`. reqwest's
+/// `Error::Display` includes the request URL on failure, so logging
+/// the raw error leaks the bot token to any consumer that scrapes
+/// the daemon's stderr (journalctl, syslog, Loki, Vector, etc.).
+///
+/// This helper finds every `telegram.org/bot…/` segment and replaces
+/// the token (between `bot` and the next `/`) with `<redacted>`.
+/// Returns the original string unchanged if no token pattern is found.
+///
+/// Shared with the kernel's cron-channel delivery and the
+/// rusty-hand-channels Telegram adapter — both build the same URL
+/// shape and both used to leak tokens via tracing::warn on send
+/// failure.
+pub fn redact_telegram_token(s: &str) -> String {
+    const HOST: &str = "telegram.org/bot";
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(idx) = rest.find(HOST) {
+        let marker_end = idx + HOST.len();
+        out.push_str(&rest[..marker_end]);
+        let after = &rest[marker_end..];
+        match after.find('/') {
+            Some(slash) => {
+                out.push_str("<redacted>");
+                rest = &after[slash..];
+            }
+            None => {
+                out.push_str("<redacted>");
+                rest = "";
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Truncate a string to at most `max_chars` characters.
 /// Unlike byte-based slicing, this always produces valid UTF-8.
 pub fn truncate_chars(s: &str, max_chars: usize) -> String {
@@ -128,5 +169,39 @@ mod tests {
         assert_eq!(truncate_with_ellipsis("hello world", 5), "hello...");
         assert_eq!(truncate_with_ellipsis("hi", 10), "hi");
         assert_eq!(truncate_with_ellipsis("🦀🦀🦀🦀🦀", 3), "🦀🦀🦀...");
+    }
+
+    #[test]
+    fn redact_telegram_token_strips_token_from_url() {
+        let raw = "error sending request for url (https://api.telegram.org/bot1234567890:ABCDEF_secret_token/sendMessage): connection refused";
+        let red = redact_telegram_token(raw);
+        assert!(!red.contains("1234567890:ABCDEF_secret_token"));
+        assert!(red.contains("api.telegram.org/bot<redacted>/sendMessage"));
+        assert!(red.contains("connection refused"));
+    }
+
+    #[test]
+    fn redact_telegram_token_handles_multiple_occurrences() {
+        let raw = "redirect from https://api.telegram.org/botABC/sendMessage to https://api.telegram.org/botXYZ/getMe";
+        let red = redact_telegram_token(raw);
+        assert!(!red.contains("botABC/"));
+        assert!(!red.contains("botXYZ/"));
+        assert_eq!(red.matches("bot<redacted>").count(), 2);
+    }
+
+    #[test]
+    fn redact_telegram_token_passthrough_for_unrelated() {
+        let raw = "error sending request for url (https://api.openai.com/v1/embeddings): timeout";
+        assert_eq!(redact_telegram_token(raw), raw);
+    }
+
+    #[test]
+    fn redact_telegram_token_handles_trailing_token_with_no_slash() {
+        // Edge case: error truncated mid-URL with no trailing `/`. The
+        // token must still be redacted (don't leave it dangling).
+        let raw = "https://api.telegram.org/bot1234:secret";
+        let red = redact_telegram_token(raw);
+        assert!(red.ends_with("bot<redacted>"));
+        assert!(!red.contains("1234:secret"));
     }
 }

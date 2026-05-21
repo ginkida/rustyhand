@@ -4818,42 +4818,10 @@ fn is_valid_discord_channel_id(recipient: &str) -> bool {
     recipient.len() >= MIN_DISCORD_ID_LEN && recipient.chars().all(|c| c.is_ascii_digit())
 }
 
-/// Redact the Telegram bot token segment from any string (typically a
-/// reqwest::Error display). Telegram's REST API takes the bot token in
-/// the URL path: `https://api.telegram.org/bot{TOKEN}/sendMessage`.
-/// reqwest's `Error::Display` includes the request URL on failure, so
-/// raw error logging would leak the token to any log consumer.
-///
-/// Strategy: find every `bot…/` segment after `telegram.org/` and
-/// replace its body (between `bot` and the next `/`) with `<redacted>`.
-/// Returns the original string unchanged if no token pattern is found.
-pub(crate) fn redact_telegram_token(s: &str) -> String {
-    const HOST: &str = "telegram.org/bot";
-    let mut out = String::with_capacity(s.len());
-    let mut rest = s;
-    while let Some(idx) = rest.find(HOST) {
-        // Push everything up to and including the `bot` marker.
-        let marker_end = idx + HOST.len();
-        out.push_str(&rest[..marker_end]);
-        // Find the next `/` that terminates the token. If absent, the
-        // rest of the string is the token (or trailing garbage); redact
-        // to end.
-        let after = &rest[marker_end..];
-        match after.find('/') {
-            Some(slash) => {
-                out.push_str("<redacted>");
-                rest = &after[slash..];
-            }
-            None => {
-                out.push_str("<redacted>");
-                rest = "";
-                break;
-            }
-        }
-    }
-    out.push_str(rest);
-    out
-}
+/// Re-export the shared Telegram-token redactor so this file keeps a
+/// stable local name in tests and call sites. The implementation lives
+/// in `rusty_hand_types::text` so the channels crate can share it.
+pub(crate) use rusty_hand_types::text::redact_telegram_token;
 
 async fn cron_send_to_channel(
     kernel: &RustyHandKernel,
