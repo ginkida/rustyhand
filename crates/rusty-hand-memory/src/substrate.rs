@@ -141,10 +141,28 @@ impl MemorySubstrate {
         self.structured.load_agent(agent_id)
     }
 
-    /// Remove an agent from persistent storage and cascade-delete sessions.
+    /// Remove an agent from persistent storage and cascade-delete its
+    /// per-agent data: sessions, key-value pairs, and semantic memories.
+    ///
+    /// Pre-fix this only cleaned sessions and the agent row itself — KV
+    /// pairs and semantic memories were orphaned and accumulated
+    /// indefinitely. Over a long-lived install this both bloated the DB
+    /// and kept previously-stored content (including potential PII) at
+    /// rest after the agent was killed.
+    ///
+    /// `usage_events` and the knowledge graph are intentionally NOT
+    /// cascaded: usage history feeds analytics that pre-date the agent's
+    /// removal (cost tracking, billing), and the knowledge graph is
+    /// shared across agents — destroying it on one agent's removal
+    /// would surface as data loss for other agents that reference the
+    /// same entities.
     pub fn remove_agent(&self, agent_id: AgentId) -> RustyHandResult<()> {
-        // Delete associated sessions first
+        // Best-effort delete sessions first (preserves audit log if the
+        // session blob is somehow corrupt — we still want the agent
+        // record gone).
         let _ = self.sessions.delete_agent_sessions(agent_id);
+        let _ = self.structured.delete_all_kv_for_agent(agent_id);
+        let _ = self.semantic.delete_all_for_agent(agent_id);
         self.structured.remove_agent(agent_id)
     }
 
@@ -1125,6 +1143,94 @@ mod tests {
         assert_eq!(
             restored.get(agent_id, "format").await.unwrap(),
             Some(serde_json::json!("messagepack"))
+        );
+    }
+
+    /// Regression: `remove_agent` used to leave behind KV pairs and
+    /// semantic memories owned by the deleted agent. Over a long-lived
+    /// install these orphaned rows bloated the DB and kept previously-
+    /// stored content at rest. Now the cascade covers sessions + KV +
+    /// memories. Usage events and the shared knowledge graph are
+    /// intentionally NOT cascaded (see remove_agent docstring).
+    #[tokio::test]
+    async fn remove_agent_cascade_clears_kv_and_memories() {
+        use rusty_hand_types::memory::MemorySource;
+        use std::collections::HashMap;
+
+        let substrate = MemorySubstrate::open_in_memory(0.1).unwrap();
+        let alice = AgentId::new();
+        let bob = AgentId::new();
+
+        // Populate alice with KV + a semantic memory.
+        substrate
+            .set(alice, "preference", serde_json::json!({"theme": "dark"}))
+            .await
+            .unwrap();
+        substrate
+            .remember(
+                alice,
+                "Alice met Bob in Paris",
+                MemorySource::Conversation,
+                "personal",
+                HashMap::new(),
+            )
+            .await
+            .unwrap();
+
+        // Bob also has KV + memory — must survive alice's removal.
+        substrate
+            .set(bob, "preference", serde_json::json!({"theme": "light"}))
+            .await
+            .unwrap();
+        substrate
+            .remember(
+                bob,
+                "Bob likes Paris",
+                MemorySource::Conversation,
+                "personal",
+                HashMap::new(),
+            )
+            .await
+            .unwrap();
+
+        substrate.remove_agent(alice).unwrap();
+
+        // Alice's data: gone.
+        assert!(
+            substrate.get(alice, "preference").await.unwrap().is_none(),
+            "alice's KV must be deleted by remove_agent"
+        );
+        let alice_memories = substrate
+            .recall(
+                "Paris",
+                100,
+                Some(rusty_hand_types::memory::MemoryFilter::agent(alice)),
+            )
+            .await
+            .unwrap();
+        assert!(
+            alice_memories.is_empty(),
+            "alice's semantic memories must be gone, got {} rows",
+            alice_memories.len()
+        );
+
+        // Bob's data: intact.
+        assert_eq!(
+            substrate.get(bob, "preference").await.unwrap(),
+            Some(serde_json::json!({"theme": "light"})),
+            "bob's KV must NOT be affected by alice's removal"
+        );
+        let bob_memories = substrate
+            .recall(
+                "Paris",
+                100,
+                Some(rusty_hand_types::memory::MemoryFilter::agent(bob)),
+            )
+            .await
+            .unwrap();
+        assert!(
+            !bob_memories.is_empty(),
+            "bob's semantic memories must survive"
         );
     }
 }

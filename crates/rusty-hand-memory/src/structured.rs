@@ -100,6 +100,26 @@ impl StructuredStore {
         Ok(())
     }
 
+    /// Delete all key-value pairs belonging to an agent.
+    ///
+    /// Called from `MemorySubstrate::remove_agent` to cascade cleanup. Pre-fix
+    /// the substrate only deleted sessions and the agent row itself — KV pairs
+    /// were orphaned and accumulated indefinitely, bloating the DB and
+    /// leaving previously-stored content (potentially user-provided PII)
+    /// at rest after the agent that owned them was killed.
+    pub fn delete_all_kv_for_agent(&self, agent_id: AgentId) -> RustyHandResult<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| RustyHandError::Internal(e.to_string()))?;
+        conn.execute(
+            "DELETE FROM kv_store WHERE agent_id = ?1",
+            rusqlite::params![agent_id.0.to_string()],
+        )
+        .map_err(|e| RustyHandError::Memory(e.to_string()))?;
+        Ok(())
+    }
+
     /// List all key-value pairs for an agent.
     pub fn list_kv(&self, agent_id: AgentId) -> RustyHandResult<Vec<(String, serde_json::Value)>> {
         let conn = self
@@ -469,5 +489,42 @@ mod tests {
         store.set(agent_id, "key", serde_json::json!("v2")).unwrap();
         let value = store.get(agent_id, "key").unwrap();
         assert_eq!(value, Some(serde_json::json!("v2")));
+    }
+
+    /// Regression: `delete_all_kv_for_agent` removes every KV pair the
+    /// agent owns, but only for that agent — pairs belonging to other
+    /// agents must survive (per-agent isolation).
+    #[test]
+    fn delete_all_kv_for_agent_scopes_to_owner() {
+        let store = setup();
+        let alice = AgentId::new();
+        let bob = AgentId::new();
+
+        store
+            .set(alice, "secret", serde_json::json!("alice-only"))
+            .unwrap();
+        store
+            .set(alice, "pref", serde_json::json!({"theme": "dark"}))
+            .unwrap();
+        store
+            .set(bob, "secret", serde_json::json!("bob-only"))
+            .unwrap();
+
+        store.delete_all_kv_for_agent(alice).unwrap();
+
+        assert!(
+            store.get(alice, "secret").unwrap().is_none(),
+            "alice's KV must be gone after delete_all_kv_for_agent(alice)"
+        );
+        assert!(
+            store.get(alice, "pref").unwrap().is_none(),
+            "all of alice's keys must be gone, not just one"
+        );
+        assert_eq!(
+            store.get(bob, "secret").unwrap(),
+            Some(serde_json::json!("bob-only")),
+            "bob's KV must be untouched — pre-fix this could happen if the \
+             query used a missing agent_id predicate or wildcarded the agent"
+        );
     }
 }

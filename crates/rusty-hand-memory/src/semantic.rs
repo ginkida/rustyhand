@@ -308,6 +308,27 @@ impl SemanticStore {
         Ok(())
     }
 
+    /// Hard-delete every memory fragment owned by an agent.
+    ///
+    /// Used by `MemorySubstrate::remove_agent` for cascade cleanup when the
+    /// owning agent is killed. Pre-fix these rows were orphaned and remained
+    /// queryable (they're soft-deleted by default and only filtered out of
+    /// `recall`, but the DB row stays). For a killed agent we use a HARD
+    /// delete — there's no semantic reason to retain memories for an agent
+    /// the operator explicitly destroyed.
+    pub fn delete_all_for_agent(&self, agent_id: AgentId) -> RustyHandResult<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| RustyHandError::Internal(e.to_string()))?;
+        conn.execute(
+            "DELETE FROM memories WHERE agent_id = ?1",
+            rusqlite::params![agent_id.0.to_string()],
+        )
+        .map_err(|e| RustyHandError::Memory(e.to_string()))?;
+        Ok(())
+    }
+
     /// Update the embedding for an existing memory.
     pub fn update_embedding(&self, id: MemoryId, embedding: &[f32]) -> RustyHandResult<()> {
         let conn = self
