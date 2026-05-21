@@ -104,12 +104,26 @@ impl DiscordAdapter {
                 .send()
                 .await?;
 
+            // Discord returns 4xx for missing-access (403), unknown-channel
+            // (404), rate-limit (429), bot-was-kicked (403), missing-
+            // permissions (403). Pre-fix this warn-logged the body and
+            // silently returned Ok(()) — the bridge dispatcher believed
+            // the message was delivered. Same silent-failure class as
+            // Slack and the Telegram fallback paths. Return an Err so
+            // the caller can surface the failure to the operator.
             if !resp.status().is_success() {
+                let status = resp.status();
                 let body_text = resp
                     .text()
                     .await
                     .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
-                warn!("Discord sendMessage failed: {body_text}");
+                warn!(
+                    channel_id = %channel_id,
+                    status = %status,
+                    body = %body_text,
+                    "Discord sendMessage failed"
+                );
+                return Err(format!("Discord sendMessage failed: {status} — {body_text}").into());
             }
         }
         Ok(())
@@ -700,5 +714,41 @@ mod tests {
         let adapter = DiscordAdapter::new("test-token".to_string(), vec![123, 456], 33280);
         assert_eq!(adapter.name(), "discord");
         assert_eq!(adapter.channel_type(), ChannelType::Discord);
+    }
+
+    /// Regression: `api_send_message` previously warn-logged non-2xx
+    /// Discord responses (missing_access 403, unknown_channel 404,
+    /// rate_limit 429, bot-kicked 403) and then silently returned
+    /// `Ok(())`. The bridge dispatcher believed every send succeeded.
+    /// Same silent-failure class as Slack (iter 56). Source-shape
+    /// audit pins the fix: the function must return an `Err` after
+    /// the warn so callers can surface failures.
+    #[test]
+    fn api_send_message_returns_err_on_discord_non_success() {
+        let src = include_str!("discord.rs").replace("\r\n", "\n");
+        let prod_end = src.find("#[cfg(test)]").expect("test mod exists");
+        let prod = &src[..prod_end];
+
+        assert!(
+            prod.contains("if !resp.status().is_success()"),
+            "non-success guard must still be in place"
+        );
+        // The corrective Err return inside the guard.
+        assert!(
+            prod.contains("return Err(format!(\"Discord sendMessage failed:"),
+            "api_send_message must Err on Discord 4xx/5xx (not silently return Ok)"
+        );
+
+        // Pre-fix shape: warn-then-Ok without propagating.
+        let bad = [
+            "warn!(\"Discord sendMessage failed: {body_text}\");\n",
+            "            }\n        }\n        Ok(())",
+        ]
+        .concat();
+        assert!(
+            !prod.contains(&bad),
+            "warn-then-Ok pattern must not return — dispatcher cannot \
+             surface failed Discord deliveries without an Err"
+        );
     }
 }
