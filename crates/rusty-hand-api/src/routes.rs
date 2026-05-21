@@ -6504,6 +6504,16 @@ fn write_secret_env(path: &std::path::Path, key: &str, value: &str) -> Result<()
 }
 
 /// Remove a key from the secrets.env file.
+///
+/// Mirrors the perm-discipline of `write_secret_env`: the file is opened
+/// with mode 0600 at open-time on Unix, AND `set_permissions(0o600)` is
+/// applied defensively to catch the case where the file already existed
+/// with looser perms (e.g. created by a previous, buggy version, or
+/// edited manually with a loose umask). Pre-fix `remove_secret_env`
+/// used `std::fs::write` which preserves the existing inode's mode —
+/// if that mode happened to be 0644 (because the user vi'd the file
+/// with their default umask), removing one key left the OTHER keys in
+/// the file at 0644, world-readable.
 fn remove_secret_env(path: &std::path::Path, key: &str) -> Result<(), std::io::Error> {
     if !path.exists() {
         return Ok(());
@@ -6515,7 +6525,32 @@ fn remove_secret_env(path: &std::path::Path, key: &str) -> Result<(), std::io::E
         .map(|l| l.to_string())
         .collect();
 
-    std::fs::write(path, lines.join("\n") + "\n")?;
+    let content = lines.join("\n") + "\n";
+
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        f.write_all(content.as_bytes())?;
+        if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+            tracing::error!(
+                path = %path.display(),
+                error = %e,
+                "SECURITY: Failed to re-tighten secrets-file perms to 0600 after key removal"
+            );
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, content)?;
+    }
 
     Ok(())
 }
@@ -9412,5 +9447,41 @@ mod secret_env_perms_tests {
             mode, 0o600,
             "overwrite must re-tighten perms to 0600, got {mode:o}"
         );
+    }
+
+    /// Regression (iter 66): `remove_secret_env` used `std::fs::write`
+    /// which preserves the existing inode's mode. If the file had been
+    /// loosened to 0644 by an external process (operator vi'ed the
+    /// file with default umask, or a pre-iter-59 version of the
+    /// daemon created it), removing one key left the other keys in
+    /// the file at 0644 — world-readable. Same fix discipline as
+    /// `write_secret_env` (iter 59): open via OpenOptions with
+    /// mode(0o600) AND defensively re-apply 0o600 after writing.
+    #[test]
+    fn remove_secret_env_tightens_perms_back_to_0600() {
+        use super::{remove_secret_env, write_secret_env};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("secrets.env");
+
+        write_secret_env(&path, "KEY_KEEP", "value-stays").unwrap();
+        write_secret_env(&path, "KEY_GONE", "value-to-remove").unwrap();
+        // Simulate a pre-existing loose-mode file by manually chmod'ing
+        // 0644 — what a vi-with-default-umask would leave behind.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        remove_secret_env(&path, "KEY_GONE").unwrap();
+
+        let meta = std::fs::metadata(&path).unwrap();
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "remove_secret_env must re-tighten perms to 0600, got {mode:o}"
+        );
+
+        // The other key must survive the removal.
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("KEY_KEEP=value-stays"));
+        assert!(!content.contains("KEY_GONE"));
     }
 }
