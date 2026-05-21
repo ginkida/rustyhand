@@ -2545,6 +2545,7 @@ pub async fn health_detail(State(state): State<Arc<AppState>>) -> impl IntoRespo
     Json(serde_json::json!({
         "status": status,
         "version": env!("CARGO_PKG_VERSION"),
+        "schema_version": rusty_hand_memory::migration::SCHEMA_VERSION,
         "uptime_seconds": state.started_at.elapsed().as_secs(),
         "panic_count": health.panic_count,
         "restart_count": health.restart_count,

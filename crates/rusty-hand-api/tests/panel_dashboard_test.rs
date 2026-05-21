@@ -516,6 +516,52 @@ async fn dashboard_wires_write_paths() {
     }
 }
 
+/// Regression: the dashboard hard-coded `v0.7.76` in the sidebar and
+/// `0.7.78` as a fallback in two pages.jsx call sites. These literals
+/// drifted out of date every release. Worse, the sidebar's `v0.7.76`
+/// was never replaced by the live health response — it was rendered
+/// unconditionally. Same for `schema v8` (the actual schema is now
+/// at v9 per `rusty_hand_memory::migration::SCHEMA_VERSION`).
+///
+/// Fix: bind the sidebar version + schema to `health.version` and
+/// `health.schema_version` (a new field on /api/health/detail), and
+/// replace the fallbacks with "—". This test pins both directions:
+/// the new wiring is in place AND no stale literal survives.
+#[tokio::test]
+async fn dashboard_does_not_hardcode_stale_version_literals() {
+    let (_, body) = fetch_dashboard().await;
+
+    // Stale literals must NOT come back.
+    for stale in ["0.7.76", "0.7.77", "0.7.78"] {
+        let needle = format!("\"{stale}\"");
+        assert!(
+            !body.contains(&needle),
+            "dashboard must not contain a hardcoded {stale:?} version literal — \
+             these rot every release. Use health.version with a — fallback."
+        );
+        let needle = format!("v{stale}");
+        assert!(
+            !body.contains(&needle),
+            "dashboard must not contain a hardcoded v{stale} sidebar literal"
+        );
+    }
+    assert!(
+        !body.contains("schema v8"),
+        "dashboard must not hardcode `schema v8` — the live value is \
+         health.schema_version (currently 9). Hardcoded suffix rots."
+    );
+
+    // The new wiring must be in place: both fields are read from health.
+    assert!(
+        body.contains("health.version"),
+        "sidebar/settings must read health.version from /api/health/detail"
+    );
+    assert!(
+        body.contains("health.schema_version"),
+        "sidebar must read health.schema_version from /api/health/detail"
+    );
+}
+
 /// Regression: AnalyticsPage used to surface two tiles that read
 /// `stats.cache_hit_rate` and `stats.p95_latency_ms` from `/api/usage`.
 /// The kernel's `usage_stats` handler only returns `{agents: [...]}` —

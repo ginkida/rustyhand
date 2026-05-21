@@ -33,7 +33,9 @@ function OverviewPage({ go }) {
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
-  const version = (health && health.version) || "0.7.78";
+  // Fall back to a placeholder rather than a hardcoded version literal
+  // — those rot every release and lie to the user on initial paint.
+  const version = (health && health.version) || "—";
   const uptime = (health && health.uptime_seconds) ? formatUptime(health.uptime_seconds) : null;
 
   return (
@@ -6173,7 +6175,9 @@ function SettingsPage() {
 
   const apiListen = (config && (config.api_listen || (config.api && config.api.listen))) || "—";
   const proxy = (config && (config.proxy_url || (config.proxy && config.proxy.url))) || null;
-  const version = (health && health.version) || "0.7.78";
+  // Fall back to a placeholder rather than a hardcoded version literal
+  // — those rot every release and lie to the user on initial paint.
+  const version = (health && health.version) || "—";
   const uptime = health && health.uptime_seconds != null ? formatUptime(health.uptime_seconds) : "—";
   const agentCount = health && health.agent_count != null ? health.agent_count : "—";
 
