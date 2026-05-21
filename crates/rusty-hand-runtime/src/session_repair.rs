@@ -762,6 +762,55 @@ mod tests {
         assert_eq!(repaired[1].role, Role::Assistant);
     }
 
+    /// Regression: `agent_loop`'s safety-valve trim
+    /// (`messages.drain(..trim_count)` when `messages.len() >
+    /// MAX_HISTORY_MESSAGES`) can dislodge tool_use ↔ tool_result
+    /// pairing: a ToolResult in the surviving window whose matching
+    /// ToolUse was in the dropped prefix becomes an orphan. Anthropic
+    /// and OpenAI both reject the next request with 400 "tool_use_id
+    /// `X` not found in messages." — surfacing to the user as "agent
+    /// stopped responding" with no obvious cause. agent_loop now
+    /// re-runs `validate_and_repair` post-drain to clean up; this test
+    /// pins the helper's behaviour for that exact post-drain shape.
+    #[test]
+    fn validate_and_repair_drops_post_drain_orphan_tool_results() {
+        // Pre-drain, this would be a valid pair: assistant ToolUse + user
+        // ToolResult. Post-drain (simulated: just the tail), the
+        // ToolResult survives without its ToolUse — orphan.
+        let post_drain = vec![
+            Message {
+                role: Role::User,
+                content: MessageContent::Blocks(vec![ContentBlock::ToolResult {
+                    tool_use_id: "tu-was-trimmed".to_string(),
+                    content: "result from a tool the LLM never saw called".to_string(),
+                    is_error: false,
+                }]),
+            },
+            Message::user("follow-up question"),
+            Message::assistant("response"),
+        ];
+
+        let repaired = validate_and_repair(&post_drain);
+
+        // Orphan dropped → the trailing user/assistant pair survives.
+        for m in &repaired {
+            if let MessageContent::Blocks(blocks) = &m.content {
+                for b in blocks {
+                    if let ContentBlock::ToolResult { tool_use_id, .. } = b {
+                        panic!(
+                            "post-drain orphan tool_result not stripped: {tool_use_id}. \
+                             agent_loop's re-repair would have caught this."
+                        );
+                    }
+                }
+            }
+        }
+        assert!(
+            !repaired.is_empty(),
+            "subsequent user/assistant messages must survive the cleanup"
+        );
+    }
+
     #[test]
     fn merges_consecutive_user_messages() {
         let messages = vec![

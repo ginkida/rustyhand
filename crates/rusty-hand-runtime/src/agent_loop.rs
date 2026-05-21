@@ -245,6 +245,15 @@ pub async fn run_agent_loop(
             "Trimming old messages to prevent context overflow"
         );
         messages.drain(..trim_count);
+        // Drain can dislodge tool-use/tool-result pairing: a ToolResult
+        // in the surviving window whose matching ToolUse was in the
+        // dropped prefix is now an orphan. Anthropic and OpenAI both
+        // reject orphan tool_results with HTTP 400, surfacing as
+        // "tool_use_id … not found" — which a fresh user sees as
+        // "agent stopped responding" with no obvious cause.
+        // validate_and_repair already ran on the pre-drain history;
+        // re-run it on the surviving slice to catch the new orphans.
+        messages = crate::session_repair::validate_and_repair(&messages);
     }
 
     // Use autonomous config max_iterations if set, else default
@@ -1200,6 +1209,10 @@ pub async fn run_agent_loop_streaming(
             "Trimming old messages to prevent context overflow (streaming)"
         );
         messages.drain(..trim_count);
+        // Re-repair: drain can dislodge tool_use ↔ tool_result pairs (the
+        // pre-drain validate_and_repair only sees the full history). See
+        // the non-streaming `run_agent_loop` for the rationale.
+        messages = crate::session_repair::validate_and_repair(&messages);
     }
 
     // Use autonomous config max_iterations if set, else default
