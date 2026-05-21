@@ -4443,11 +4443,11 @@ function ChannelConfigModal({ channel, onClose, onSaved }) {
 function AnalyticsPage() {
   // /api/usage/daily returns up to 30 daily buckets: {days:[{date, cost_usd, requests}], today_cost_usd, first_event_date}.
   // /api/usage/by-model returns per-model spend totals.
-  // /api/usage returns aggregate stats including cache hit-rate.
-  // /api/usage/agents (legacy /api/usage path) returns per-agent token + tool_call counts.
+  // /api/usage/summary returns aggregate totals: call_count, total_tool_calls, total_*_tokens, total_cost_usd.
+  // /api/usage returns per-agent token + tool_call counts (the legacy "usage_stats" handler).
   const [daily] = usePolling("/api/usage/daily", 30000);
   const [byModel] = usePolling("/api/usage/by-model", 30000);
-  const [stats] = usePolling("/api/usage", 30000);
+  const [summary] = usePolling("/api/usage/summary", 30000);
   const [agentsResp] = usePolling("/api/agents?limit=200", 30000);
   const [usageAgents] = usePolling("/api/usage", 30000);
   const agents = (agentsResp && agentsResp.agents) ? agentsResp.agents.map(normalizeAgent) : [];
@@ -4484,11 +4484,15 @@ function AnalyticsPage() {
   const seriesForChart = hourSeries.length ? hourSeries : Array(24).fill(0);
   const totalForChart = seriesForChart.reduce((s, v) => s + v, 0);
 
-  const cacheHitRate = stats && stats.cache_hit_rate != null
-    ? `${Math.round(Number(stats.cache_hit_rate) * 100)}%`
+  // /api/usage/summary is the real source of truth for call totals. The
+  // pre-fix `cache_hit_rate` / `p95_latency_ms` tiles read fields that
+  // /api/usage never returned — they were stuck at "—" forever. Wire
+  // the tiles to summary.call_count / summary.total_tool_calls instead.
+  const llmCalls = summary && summary.call_count != null
+    ? Number(summary.call_count).toLocaleString()
     : "—";
-  const p95 = stats && stats.p95_latency_ms != null
-    ? `${(Number(stats.p95_latency_ms) / 1000).toFixed(2)}s`
+  const totalToolCalls = summary && summary.total_tool_calls != null
+    ? Number(summary.total_tool_calls).toLocaleString()
     : "—";
 
   return (
@@ -4496,7 +4500,7 @@ function AnalyticsPage() {
       <div className="page-head">
         <div>
           <h1 className="page-title">Analytics</h1>
-          <p className="page-sub">Token spend, latency, cache hits · sourced from <span className="mono">/api/usage</span> · <span className="mono">/api/usage/daily</span> · <span className="mono">/api/usage/by-model</span></p>
+          <p className="page-sub">Spend, calls, tool usage · sourced from <span className="mono">/api/usage/summary</span> · <span className="mono">/api/usage/daily</span> · <span className="mono">/api/usage/by-model</span></p>
         </div>
         <div className="page-actions">
           <div className="seg"><button className="on">7d</button></div>
@@ -4515,8 +4519,8 @@ function AnalyticsPage() {
       <div className="tiles">
         <Tile label="Total spend · 7d"  value={`$${totalSpend7d.toFixed(2)}`}  foot={daily ? `${days.length} day(s) of data` : "loading…"} spark={dailyCosts.slice(-12)}/>
         <Tile label="LLM requests · 7d" value={totalRequests7d.toLocaleString()} foot={daily ? `${avgPerDay.toFixed(0)} / day avg` : "loading…"} spark={days.slice(-12).map(d => d.requests || 0)}/>
-        <Tile label="Cache hit-rate"    value={cacheHitRate} foot={stats ? "LLM cache · 24h TTL" : "loading…"} spark={[0,0,0,0,0,0,0,0,0,0,0,0]}/>
-        <Tile label="p95 latency"       value={p95} foot={stats ? "kernel telemetry" : "loading…"} spark={[0,0,0,0,0,0,0,0,0,0,0,0]}/>
+        <Tile label="LLM calls · total" value={llmCalls}       foot={summary ? "kernel UsageStore" : "loading…"} spark={[0,0,0,0,0,0,0,0,0,0,0,0]}/>
+        <Tile label="Tool calls · total" value={totalToolCalls} foot={summary ? "kernel UsageStore" : "loading…"} spark={[0,0,0,0,0,0,0,0,0,0,0,0]}/>
       </div>
 
       <div className="grid-12">

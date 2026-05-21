@@ -255,6 +255,7 @@ async fn dashboard_wires_every_kernel_endpoint_it_uses() {
         // Analytics extras
         "/api/usage/by-model",
         "/api/usage",
+        "/api/usage/summary",
         // Knowledge / Settings / Audit
         "/api/knowledge",
         "/api/knowledge/query",
@@ -513,4 +514,41 @@ async fn dashboard_wires_write_paths() {
             "missing `{needle}` ({what}) — the corresponding write-path was reverted"
         );
     }
+}
+
+/// Regression: AnalyticsPage used to surface two tiles that read
+/// `stats.cache_hit_rate` and `stats.p95_latency_ms` from `/api/usage`.
+/// The kernel's `usage_stats` handler only returns `{agents: [...]}` —
+/// those fields are never populated, so the tiles were stuck at "—"
+/// forever (a permanent UI dead-end shipped to every dashboard install).
+/// Fix: tiles now read from `/api/usage/summary` (real backed totals).
+/// Pin both the new wiring and the absence of the dead bindings so a
+/// future refactor can't reintroduce them.
+#[tokio::test]
+async fn analytics_page_does_not_use_dead_bindings() {
+    let (_, body) = fetch_dashboard().await;
+
+    // Dead bindings must NOT come back.
+    assert!(
+        !body.contains("stats.cache_hit_rate"),
+        "AnalyticsPage must not read stats.cache_hit_rate — /api/usage never returns that field"
+    );
+    assert!(
+        !body.contains("stats.p95_latency_ms"),
+        "AnalyticsPage must not read stats.p95_latency_ms — /api/usage never returns that field"
+    );
+
+    // New wiring: summary tiles must read from /api/usage/summary.
+    assert!(
+        body.contains("/api/usage/summary"),
+        "AnalyticsPage must poll /api/usage/summary for total call counts"
+    );
+    assert!(
+        body.contains("summary.call_count"),
+        "AnalyticsPage must read summary.call_count for the LLM-calls tile"
+    );
+    assert!(
+        body.contains("summary.total_tool_calls"),
+        "AnalyticsPage must read summary.total_tool_calls for the tool-calls tile"
+    );
 }
