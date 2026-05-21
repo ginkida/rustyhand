@@ -2624,6 +2624,29 @@ pub async fn reset_demo_seed(State(state): State<Arc<AppState>>) -> impl IntoRes
 // Prometheus metrics endpoint
 // ---------------------------------------------------------------------------
 
+/// Escape a string for use as a Prometheus exposition-format label value.
+///
+/// Per the spec (https://prometheus.io/docs/instrumenting/exposition_formats/),
+/// label values must escape `\` → `\\`, `"` → `\"`, and `\n` → `\n`. All
+/// other characters (including UTF-8 multi-byte chars) pass through.
+///
+/// Used by /api/metrics for agent/provider/model labels. The agent name
+/// comes from a user-submitted manifest with no explicit char restriction,
+/// so an agent named `evil"bot` would otherwise emit malformed metrics
+/// that break every scraper pulling /api/metrics.
+fn escape_prom_label(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 /// GET /api/metrics — Prometheus text-format metrics.
 ///
 /// Returns counters and gauges for monitoring RustyHand in production:
@@ -2661,9 +2684,17 @@ pub async fn prometheus_metrics(State(state): State<Arc<AppState>>) -> impl Into
     out.push_str("# HELP rusty_hand_tool_calls_total Total tool calls (rolling hourly window).\n");
     out.push_str("# TYPE rusty_hand_tool_calls_total gauge\n");
     for agent in &agents {
-        let name = &agent.name;
-        let provider = &agent.manifest.model.provider;
-        let model = &agent.manifest.model.model;
+        // Prometheus exposition format requires that label values
+        // escape `\`, `"`, and `\n` (any other char passes through).
+        // agent.name comes from a user-submitted manifest with no
+        // explicit char restriction, and model strings can contain `/`
+        // (e.g. `anthropic/claude-sonnet-4.6`) which is fine — but a
+        // name like `evil"bot` or `path\to\agent` would emit
+        // `agent="evil"bot"` and break every Prometheus scraper that
+        // pulls /api/metrics. Sanitise per the spec.
+        let name = escape_prom_label(&agent.name);
+        let provider = escape_prom_label(&agent.manifest.model.provider);
+        let model = escape_prom_label(&agent.manifest.model.model);
         if let Some((tokens, tools)) = state.kernel.scheduler.get_usage(agent.id) {
             out.push_str(&format!(
                 "rusty_hand_tokens_total{{agent=\"{name}\",provider=\"{provider}\",model=\"{model}\"}} {tokens}\n"
@@ -9211,6 +9242,67 @@ mod mask_config_tests {
         assert!(
             out.contains("\"ANTHROPIC_API_KEY\""),
             "api_key_env (pointer to env name) must NOT be redacted"
+        );
+    }
+}
+
+#[cfg(test)]
+mod prometheus_label_tests {
+    use super::*;
+
+    /// Regression: Prometheus exposition format requires `\`, `"`, and
+    /// `\n` to be escaped in label values. The previous code
+    /// interpolated `agent.name` directly into
+    /// `agent="{name}"` — so an agent named `evil"bot` produced
+    /// `agent="evil"bot"`, malformed output that breaks every
+    /// scraper pulling /api/metrics for the entire scrape cycle
+    /// (not just that one line — most scrapers reject the whole
+    /// payload).
+    #[test]
+    fn escape_prom_label_handles_quote_backslash_newline() {
+        // Quote: literal " must become \"
+        assert_eq!(escape_prom_label(r#"evil"bot"#), r#"evil\"bot"#);
+        // Backslash: \ must become \\
+        assert_eq!(escape_prom_label(r"a\b"), r"a\\b");
+        // Newline: literal newline must become two chars: \ and n.
+        assert_eq!(escape_prom_label("a\nb"), r"a\nb");
+        // Mixed
+        assert_eq!(escape_prom_label("agent\"\\\nfoo"), r#"agent\"\\\nfoo"#);
+    }
+
+    /// Ordinary names (including UTF-8 multi-byte content like
+    /// Cyrillic or model paths with `/`) pass through unchanged.
+    #[test]
+    fn escape_prom_label_passes_safe_strings_through() {
+        assert_eq!(escape_prom_label("rusty-helper"), "rusty-helper");
+        assert_eq!(
+            escape_prom_label("anthropic/claude-sonnet-4.6"),
+            "anthropic/claude-sonnet-4.6"
+        );
+        assert_eq!(escape_prom_label("агент"), "агент");
+        assert_eq!(escape_prom_label("MiniMax-M2.7"), "MiniMax-M2.7");
+        assert_eq!(escape_prom_label(""), "");
+    }
+
+    /// After escaping, the label line round-trips as a valid
+    /// Prometheus exposition format entry — there are no UNescaped
+    /// quotes inside the value (we count exactly two: the opening
+    /// and closing `"`).
+    #[test]
+    fn escaped_label_value_produces_valid_metric_line() {
+        let name = escape_prom_label(r#"evil"bot"#);
+        let line = format!("rusty_hand_tokens_total{{agent=\"{name}\"}} 42");
+        // Every `"` that is NOT preceded by `\` must be one of exactly
+        // 2 boundary quotes (open + close of the label value).
+        let unescaped_quotes = line
+            .as_bytes()
+            .iter()
+            .enumerate()
+            .filter(|(i, &b)| b == b'"' && (*i == 0 || line.as_bytes()[*i - 1] != b'\\'))
+            .count();
+        assert_eq!(
+            unescaped_quotes, 2,
+            "exactly two unescaped quotes (open + close of label value), got {line}"
         );
     }
 }
