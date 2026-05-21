@@ -472,8 +472,12 @@ impl SessionStore {
                 let text = extract_content_text(&messages);
                 let t_lower = text.to_lowercase();
                 if let Some(pos) = t_lower.find(&q_lower) {
-                    let start = pos.saturating_sub(60);
-                    let end = (pos + query.len() + 60).min(text.len());
+                    let start =
+                        rusty_hand_types::text::floor_char_boundary(&text, pos.saturating_sub(60));
+                    let end = rusty_hand_types::text::floor_char_boundary(
+                        &text,
+                        (pos + query.len() + 60).min(text.len()),
+                    );
                     let excerpt = text[start..end].to_string();
                     results.push(serde_json::json!({
                         "session_id": session_id,
@@ -1169,6 +1173,41 @@ mod tests {
         store.save_session(&session).unwrap();
 
         // Before fix: panic inside text[start..end].to_string().
+        let results = store.search_sessions("needle", 5).unwrap();
+        assert_eq!(results.len(), 1);
+        let excerpt = results[0]["excerpt"].as_str().unwrap();
+        assert!(excerpt.contains("needle"));
+    }
+
+    /// Regression: the search_sessions blob-fallback path (used for
+    /// pre-migration-v8 rows where `content_text` is NULL) had the
+    /// same `text[pos.saturating_sub(60)..pos+60]` panic as the fast
+    /// path. Fast-path test above doesn't reach this branch because
+    /// `save_session` always populates `content_text`. NULL the column
+    /// manually to force the fallback.
+    #[test]
+    fn search_sessions_blob_fallback_handles_multibyte_boundaries() {
+        let store = setup();
+        let agent_id = AgentId::new();
+        let mut session = store.create_session(agent_id).unwrap();
+        let body = format!("a🦀{}needle{}🦀tail", "x".repeat(59), "y".repeat(40));
+        assert_eq!(body.find("needle"), Some(64));
+        assert!(!body.is_char_boundary(4));
+        session.messages.push(Message::user(&body));
+        store.save_session(&session).unwrap();
+
+        // Force pre-v8 path: clear content_text so the fast path skips
+        // this row and the blob fallback rebuilds text from messages.
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE sessions SET content_text = NULL WHERE id = ?1",
+                rusqlite::params![session.id.0.to_string()],
+            )
+            .unwrap();
+        }
+
+        // Before fix: panic inside the blob-fallback excerpt slice.
         let results = store.search_sessions("needle", 5).unwrap();
         assert_eq!(results.len(), 1);
         let excerpt = results[0]["excerpt"].as_str().unwrap();
