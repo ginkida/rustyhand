@@ -3338,9 +3338,17 @@ pub async fn audit_recent(
     let entries = state.kernel.audit_log.recent(fetch_n);
     let tip = state.kernel.audit_log.tip_hash();
 
+    // Pre-fix this filter used `e.agent_id.starts_with(&filter)` — a
+    // 1-char filter matched every agent whose UUID happened to start
+    // with the same hex char (≈1/16 of all agents). The dashboard's
+    // Activity tab passes a full UUID and expects that exact agent.
+    // System-emitted audit entries use literal strings like `"system"`
+    // for their agent_id field (not UUIDs), so we compare on the
+    // stored string verbatim rather than re-parsing as a UUID — both
+    // shapes round-trip through exact equality.
     let items: Vec<serde_json::Value> = entries
         .iter()
-        .filter(|e| agent_id_filter.is_empty() || e.agent_id.starts_with(&agent_id_filter))
+        .filter(|e| agent_id_filter.is_empty() || e.agent_id == agent_id_filter)
         .take(n)
         .map(|e| {
             let agent_name = uuid::Uuid::parse_str(&e.agent_id)

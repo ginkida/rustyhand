@@ -393,15 +393,37 @@ async fn audit_recent_envelope_and_entry_shape() {
     );
     for e in filtered_entries {
         let id = e["agent_id"].as_str().unwrap_or("");
-        assert!(
-            id.starts_with(&agent_a),
-            "filtered entry has agent_id={id}, expected prefix {agent_a}"
+        // Exact-match: pre-fix the server used `starts_with`, so the
+        // dashboard's per-agent timeline mixed in entries from any
+        // sibling agent whose UUID happened to share the same hex
+        // prefix (≈1/16 collision rate per char).
+        assert_eq!(
+            id, agent_a,
+            "filtered entry has agent_id={id}, expected exact match for {agent_a}"
         );
         assert_ne!(
             id, agent_b,
             "agent_b entries must not appear when filtering for agent_a"
         );
     }
+
+    // Negative case: a short prefix of agent_a's UUID must NOT match —
+    // pre-fix the server did `starts_with(&filter)`, so passing the
+    // first 4 hex chars of agent_a's UUID would return entries for ALL
+    // agents whose UUID happened to share that prefix. With exact-
+    // match semantics, a partial UUID matches nothing.
+    let short_prefix: String = agent_a.chars().take(4).collect();
+    let partial = get_json(
+        &server.base_url,
+        &format!("/api/audit/recent?n=50&agent_id={short_prefix}"),
+    )
+    .await;
+    let partial_entries = partial["entries"].as_array().expect("entries is array");
+    assert!(
+        partial_entries.is_empty(),
+        "partial UUID prefix must not match — got {} entries for filter `{short_prefix}`",
+        partial_entries.len()
+    );
 }
 
 /// `GET /api/audit/verify` returns `{valid, entries, tip_hash}` for a healthy
