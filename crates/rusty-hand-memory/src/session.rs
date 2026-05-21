@@ -418,8 +418,14 @@ impl SessionStore {
                 Some(p) => p,
                 None => continue,
             };
-            let start = pos.saturating_sub(60);
-            let end = (pos + query.len() + 60).min(text.len());
+            // Snap to char boundaries — pos.saturating_sub(60) and
+            // pos + 60 are byte-arithmetic and can land mid-character
+            // for Cyrillic/CJK/emoji content. Slicing there panics.
+            let start = rusty_hand_types::text::floor_char_boundary(&text, pos.saturating_sub(60));
+            let end = rusty_hand_types::text::floor_char_boundary(
+                &text,
+                (pos + query.len() + 60).min(text.len()),
+            );
             let excerpt = text[start..end].to_string();
             results.push(serde_json::json!({
                 "session_id": session_id,
@@ -1137,5 +1143,35 @@ mod tests {
         // After fix: cut cleanly, length within bound.
         assert!(out.len() <= 64 * 1024);
         assert!(out.starts_with('a'));
+    }
+
+    /// Regression: `search_sessions` built excerpts via
+    /// `text[start..end]` where `start = pos.saturating_sub(60)` and
+    /// `end = pos + query.len() + 60`. Both are byte arithmetic that
+    /// can land mid-character. With chars of mixed width (e.g. an
+    /// emoji embedded in ASCII), `pos - 60` falls inside the emoji's
+    /// continuation bytes and slicing panics.
+    #[test]
+    fn search_sessions_excerpt_handles_multibyte_boundaries() {
+        let store = setup();
+        let agent_id = AgentId::new();
+        let mut session = store.create_session(agent_id).unwrap();
+        // Layout: "a"(byte 0) + 🦀(bytes 1-4) + "x"*59(5-63) + "needle"(64+).
+        // pos for "needle" = 64; pos - 60 = 4 = mid-emoji (NOT a boundary).
+        // Trailing context for the end-side slice too.
+        let body = format!("a🦀{}needle{}🦀tail", "x".repeat(59), "y".repeat(40));
+        assert_eq!(body.find("needle"), Some(64));
+        assert!(
+            !body.is_char_boundary(4),
+            "test setup must place pos-60 inside the 4-byte emoji"
+        );
+        session.messages.push(Message::user(&body));
+        store.save_session(&session).unwrap();
+
+        // Before fix: panic inside text[start..end].to_string().
+        let results = store.search_sessions("needle", 5).unwrap();
+        assert_eq!(results.len(), 1);
+        let excerpt = results[0]["excerpt"].as_str().unwrap();
+        assert!(excerpt.contains("needle"));
     }
 }

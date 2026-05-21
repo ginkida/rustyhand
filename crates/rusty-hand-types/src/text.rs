@@ -19,6 +19,23 @@ pub fn truncate_bytes(s: &str, max_bytes: usize) -> &str {
     &s[..end]
 }
 
+/// Snap a byte index down to the nearest UTF-8 char boundary at or below
+/// `idx`. Returns `s.len()` if `idx >= s.len()`.
+///
+/// Use this when you need to slice `s[a..b]` after computing `a`/`b` via
+/// arithmetic on positions (e.g. `pos.saturating_sub(60)`, `pos + 60`) —
+/// arithmetic positions can land mid-character.
+pub fn floor_char_boundary(s: &str, idx: usize) -> usize {
+    if idx >= s.len() {
+        return s.len();
+    }
+    let mut end = idx;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    end
+}
+
 /// Truncate a string to at most `max_chars` characters.
 /// Unlike byte-based slicing, this always produces valid UTF-8.
 pub fn truncate_chars(s: &str, max_chars: usize) -> String {
@@ -79,6 +96,31 @@ mod tests {
         assert_eq!(truncate_chars("hello", 3), "hel");
         assert_eq!(truncate_chars("hi", 10), "hi");
         assert_eq!(truncate_chars("🦀🦀🦀", 2), "🦀🦀");
+    }
+
+    #[test]
+    fn floor_char_boundary_ascii() {
+        let s = "hello world";
+        for i in 0..=s.len() {
+            assert_eq!(floor_char_boundary(s, i), i);
+        }
+        assert_eq!(floor_char_boundary(s, 999), s.len());
+    }
+
+    #[test]
+    fn floor_char_boundary_multibyte() {
+        // Cyrillic: each char is 2 bytes
+        let s = "Привет"; // 12 bytes, 6 chars
+        assert_eq!(floor_char_boundary(s, 0), 0);
+        assert_eq!(floor_char_boundary(s, 1), 0); // mid-char, snap down
+        assert_eq!(floor_char_boundary(s, 2), 2); // boundary
+        assert_eq!(floor_char_boundary(s, 3), 2); // mid-char, snap down
+        assert_eq!(floor_char_boundary(s, 12), 12);
+        assert_eq!(floor_char_boundary(s, 100), s.len());
+        // Slicing at the result must never panic
+        for i in 0..=20 {
+            let _ = &s[..floor_char_boundary(s, i)];
+        }
     }
 
     #[test]
