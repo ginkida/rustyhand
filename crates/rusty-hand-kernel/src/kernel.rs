@@ -4818,6 +4818,43 @@ fn is_valid_discord_channel_id(recipient: &str) -> bool {
     recipient.len() >= MIN_DISCORD_ID_LEN && recipient.chars().all(|c| c.is_ascii_digit())
 }
 
+/// Redact the Telegram bot token segment from any string (typically a
+/// reqwest::Error display). Telegram's REST API takes the bot token in
+/// the URL path: `https://api.telegram.org/bot{TOKEN}/sendMessage`.
+/// reqwest's `Error::Display` includes the request URL on failure, so
+/// raw error logging would leak the token to any log consumer.
+///
+/// Strategy: find every `bot…/` segment after `telegram.org/` and
+/// replace its body (between `bot` and the next `/`) with `<redacted>`.
+/// Returns the original string unchanged if no token pattern is found.
+pub(crate) fn redact_telegram_token(s: &str) -> String {
+    const HOST: &str = "telegram.org/bot";
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(idx) = rest.find(HOST) {
+        // Push everything up to and including the `bot` marker.
+        let marker_end = idx + HOST.len();
+        out.push_str(&rest[..marker_end]);
+        // Find the next `/` that terminates the token. If absent, the
+        // rest of the string is the token (or trailing garbage); redact
+        // to end.
+        let after = &rest[marker_end..];
+        match after.find('/') {
+            Some(slash) => {
+                out.push_str("<redacted>");
+                rest = &after[slash..];
+            }
+            None => {
+                out.push_str("<redacted>");
+                rest = "";
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 async fn cron_send_to_channel(
     kernel: &RustyHandKernel,
     channel: &str,
@@ -4902,8 +4939,16 @@ async fn cron_send_to_channel(
                             );
                         }
                         Err(e) => {
+                            // SECURITY: reqwest's Display includes the
+                            // request URL on failure, and Telegram's API
+                            // embeds the bot token directly in the URL
+                            // path (`/bot{TOKEN}/...`). Logging the
+                            // reqwest::Error verbatim leaks the token to
+                            // any log shipper / syslog / journalctl
+                            // consumer. Redact the token segment before
+                            // emitting.
                             tracing::warn!(
-                                error = %e,
+                                error = %redact_telegram_token(&e.to_string()),
                                 channel = "telegram",
                                 "Cron channel delivery failed"
                             );
@@ -6167,6 +6212,55 @@ mod tests {
         // Valid snowflake-shaped IDs (15+ digits) pass.
         assert!(is_valid_discord_channel_id("123456789012345"));
         assert!(is_valid_discord_channel_id("1234567890123456789"));
+    }
+
+    /// Regression: when the Telegram cron channel delivery failed,
+    /// the `Err` arm logged `tracing::warn!(error = %e, ...)`. reqwest's
+    /// `Error::Display` includes the request URL on failure, and
+    /// Telegram embeds the bot token directly in the URL path
+    /// (`/bot{TOKEN}/sendMessage`). The token was leaking into any log
+    /// aggregator that scraped the daemon's stderr (journalctl, syslog,
+    /// Loki, etc.). Pre-fix every Telegram send failure (rate-limited
+    /// chats, blocked bot, network errors) wrote the token to disk.
+    ///
+    /// Source-shape audit: the Err arm now routes the error through
+    /// `redact_telegram_token` before logging, and `redact_telegram_token`
+    /// itself replaces the token segment with `<redacted>`. Behavioural
+    /// tests below pin the redaction function.
+    #[test]
+    fn redact_telegram_token_strips_token_from_urls() {
+        // Standard reqwest::Error::Display shape includes "for url ({URL})".
+        let raw = "error sending request for url (https://api.telegram.org/bot1234567890:ABCDEF_secret_token/sendMessage): connection refused";
+        let red = redact_telegram_token(raw);
+        assert!(
+            !red.contains("1234567890:ABCDEF_secret_token"),
+            "redacted output must not contain the original token, got: {red}"
+        );
+        assert!(
+            red.contains("api.telegram.org/bot<redacted>/sendMessage"),
+            "redacted output must keep the URL shape intact, got: {red}"
+        );
+        // Connection-refused tail must survive (operators need the
+        // error context to debug the transport failure).
+        assert!(red.contains("connection refused"));
+    }
+
+    #[test]
+    fn redact_telegram_token_handles_multiple_occurrences() {
+        // Pathological case: the error string contains TWO Telegram URLs
+        // (e.g. a redirect chain). Each token segment must be redacted.
+        let raw = "redirect from https://api.telegram.org/botABC/sendMessage to https://api.telegram.org/botXYZ/getMe";
+        let red = redact_telegram_token(raw);
+        assert!(!red.contains("botABC/"));
+        assert!(!red.contains("botXYZ/"));
+        assert_eq!(red.matches("bot<redacted>").count(), 2);
+    }
+
+    #[test]
+    fn redact_telegram_token_passthrough_for_unrelated_strings() {
+        // Non-Telegram error: the string must be returned unchanged.
+        let raw = "error sending request for url (https://api.openai.com/v1/embeddings): timeout";
+        assert_eq!(redact_telegram_token(raw), raw);
     }
 
     /// Regression: the Slack and Discord branches of
