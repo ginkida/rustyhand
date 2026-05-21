@@ -341,8 +341,14 @@ fn build_conversation_text(messages: &[Message], config: &CompactionConfig) -> S
                 if !s.is_empty() {
                     if oversized {
                         let limit = config.max_chunk_chars / 4;
+                        // Naive `&s[..limit]` panics if byte `limit` lands
+                        // mid-character. Conversation text routinely
+                        // contains non-ASCII (agent replies in any
+                        // language, tool outputs containing translated
+                        // content). Route through truncate_bytes.
                         let truncated = if s.len() > limit {
-                            format!("{}...[truncated from {} chars]", &s[..limit], s.len())
+                            let head = rusty_hand_types::text::truncate_bytes(s, limit);
+                            format!("{head}...[truncated from {} chars]", s.len())
                         } else {
                             s.clone()
                         };
@@ -359,9 +365,9 @@ fn build_conversation_text(messages: &[Message], config: &CompactionConfig) -> S
                             if !text.is_empty() {
                                 if oversized && text.len() > config.max_chunk_chars / 4 {
                                     let limit = config.max_chunk_chars / 4;
+                                    let head = rusty_hand_types::text::truncate_bytes(text, limit);
                                     conversation_text.push_str(&format!(
-                                        "{role_label}: {}...[truncated from {} chars]\n\n",
-                                        &text[..limit],
+                                        "{role_label}: {head}...[truncated from {} chars]\n\n",
                                         text.len()
                                     ));
                                 } else {
@@ -1227,6 +1233,48 @@ mod tests {
             text.contains("truncated from"),
             "Oversized message should be truncated, got: {}",
             &text[..text.len().min(200)]
+        );
+    }
+
+    /// Regression: `build_conversation_text` used `&s[..limit]` for
+    /// the Text variant and `&text[..limit]` for the Blocks::Text
+    /// variant. Both panic when byte `limit` lands inside a multi-
+    /// byte UTF-8 char. `limit = max_chunk_chars / 4`. For default
+    /// configs and any non-English content (Cyrillic, CJK, emoji)
+    /// crossing the threshold, the compactor would panic mid-build
+    /// — the LLM compaction call never runs and the session can't
+    /// be summarised, eventually overflowing the context window.
+    #[test]
+    fn build_conversation_text_handles_multibyte_oversized_input() {
+        let config = CompactionConfig {
+            max_chunk_chars: 1000, // limit = 250
+            ..CompactionConfig::default()
+        };
+        // Build a Cyrillic blob of 2000 bytes (1000 chars × 2 bytes).
+        // Byte 250 (limit) lands inside a Cyrillic char on odd offsets.
+        // Prefix with 1 ASCII char to force odd alignment.
+        let blob = format!("a{}", "Я".repeat(1000));
+        assert!(blob.len() > 250);
+        assert!(!blob.is_char_boundary(250));
+        let messages = vec![Message::user(&blob)];
+        // Pre-fix: panic inside &s[..limit].
+        let text = build_conversation_text(&messages, &config);
+        assert!(
+            text.contains("truncated from"),
+            "Oversized non-ASCII message must be truncated cleanly"
+        );
+
+        // Also exercise the Blocks::Text path.
+        let blob2 = format!("b{}", "Я".repeat(1000));
+        let blocked = Message {
+            role: rusty_hand_types::message::Role::User,
+            content: MessageContent::Blocks(vec![ContentBlock::Text { text: blob2 }]),
+        };
+        let messages2 = vec![blocked];
+        let text2 = build_conversation_text(&messages2, &config);
+        assert!(
+            text2.contains("truncated from"),
+            "Oversized non-ASCII Blocks message must be truncated cleanly"
         );
     }
 
