@@ -98,9 +98,21 @@ impl SlackAdapter {
                 .json()
                 .await?;
 
+            // Slack returns 200 with `ok: false` for app-level errors
+            // (channel_not_found, not_in_channel, token_revoked,
+            // restricted_action, channel_archived, …). Pre-fix this
+            // logged a warn and silently returned Ok(()) — the bridge
+            // dispatcher believed the message was delivered, so failed
+            // sends were invisible to the operator without grepping
+            // logs. Return the error so the caller can surface it.
             if resp["ok"].as_bool() != Some(true) {
                 let err = resp["error"].as_str().unwrap_or("unknown");
-                warn!("Slack chat.postMessage failed: {err}");
+                warn!(
+                    channel_id = %channel_id,
+                    error = %err,
+                    "Slack chat.postMessage failed"
+                );
+                return Err(format!("Slack chat.postMessage failed: {err}").into());
             }
         }
         Ok(())
@@ -580,5 +592,42 @@ mod tests {
         );
         assert_eq!(adapter.name(), "slack");
         assert_eq!(adapter.channel_type(), ChannelType::Slack);
+    }
+
+    /// Regression: `api_send_message` previously logged a warn on
+    /// Slack's `ok: false` response shape (channel_not_found,
+    /// not_in_channel, token_revoked, channel_archived, …) but
+    /// returned `Ok(())`. The bridge dispatcher saw success and
+    /// silently dropped the message. Source-shape audit pins the
+    /// fix: the function must return an `Err` after the warn so the
+    /// caller can surface the failure to the operator. A future
+    /// refactor that drops the `return Err(...)` trips this test.
+    #[test]
+    fn api_send_message_returns_err_on_slack_ok_false() {
+        let src = include_str!("slack.rs").replace("\r\n", "\n");
+        let prod_end = src.find("#[cfg(test)]").expect("test mod exists");
+        let prod = &src[..prod_end];
+
+        assert!(
+            prod.contains("if resp[\"ok\"].as_bool() != Some(true)"),
+            "ok-false guard must still be in place"
+        );
+        // The corrective Err return inside the guard.
+        assert!(
+            prod.contains("return Err(format!(\"Slack chat.postMessage failed:"),
+            "api_send_message must Err on ok=false (not silently return Ok)"
+        );
+        // Pre-fix shape: a bare warn without a propagated error.
+        let bad = [
+            "warn!(\"Slack chat.postMessage failed:",
+            " {err}\");\n",
+            "            }\n        }\n        Ok(())",
+        ]
+        .concat();
+        assert!(
+            !prod.contains(&bad),
+            "warn-then-Ok pattern must not return — the dispatcher cannot \
+             surface failed Slack deliveries without an Err"
+        );
     }
 }
