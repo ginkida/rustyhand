@@ -60,7 +60,17 @@ pub async fn gcra_rate_limit(
     let path = request.uri().path().to_string();
     let cost = operation_cost(&method, &path);
 
-    if limiter.check_key_n(&ip, cost).is_err() {
+    // governor::check_key_n returns a nested Result:
+    //   Ok(Ok(()))              → request is within budget, allow.
+    //   Ok(Err(NotUntil))       → rate-limited (bucket empty).
+    //   Err(InsufficientCapacity) → cost exceeds the burst limit (cost > 500
+    //                              with our Quota::per_minute(500)).
+    // The previous `.is_err()` check only fired on InsufficientCapacity,
+    // which never happens with our cost table (max 100). The rate-limited
+    // case slipped through Ok(Err) and the request was admitted — so the
+    // "500 tokens / minute per IP" doc above was never actually enforced.
+    let allowed = matches!(limiter.check_key_n(&ip, cost), Ok(Ok(_)));
+    if !allowed {
         tracing::warn!(ip = %ip, cost = cost.get(), path = %path, "GCRA rate limit exceeded");
         return Response::builder()
             .status(StatusCode::TOO_MANY_REQUESTS)
@@ -78,6 +88,68 @@ pub async fn gcra_rate_limit(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: the previous middleware used
+    /// `limiter.check_key_n(&ip, cost).is_err()` which fires only when
+    /// cost > burst (InsufficientCapacity). The rate-limited case
+    /// `Ok(Err(NotUntil))` slipped through and the request was allowed.
+    /// In practice, with our cost table (max 100) and burst 500, the
+    /// rate limit was effectively disabled — an attacker could hammer
+    /// the API as fast as they wanted from one IP and never get a 429.
+    ///
+    /// This test drains a small-quota limiter and confirms the SECOND
+    /// allow-check returns `Ok(Err(NotUntil))` — the case the old
+    /// `.is_err()` predicate would miss but the new `matches!(
+    /// Ok(Ok(_)))` correctly rejects.
+    #[test]
+    fn check_key_n_distinguishes_rate_limit_from_capacity_overflow() {
+        use governor::{Quota, RateLimiter};
+        use std::net::{IpAddr, Ipv4Addr};
+
+        // Quota of 1 token per minute, burst 1, so the first request
+        // costs the only token and the second is rate-limited.
+        let q = Quota::per_minute(NonZeroU32::new(1).unwrap());
+        let lim: KeyedRateLimiter = RateLimiter::keyed(q);
+        let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        let cost = NonZeroU32::new(1).unwrap();
+
+        // First call drains the bucket.
+        let first = lim.check_key_n(&ip, cost);
+        assert!(
+            matches!(first, Ok(Ok(_))),
+            "first call must be allowed, got: {first:?}"
+        );
+
+        // Second call is rate-limited: outer Ok, inner Err.
+        let second = lim.check_key_n(&ip, cost);
+        assert!(
+            matches!(second, Ok(Err(_))),
+            "second call must surface as Ok(Err(_)) — \
+             governor's rate-limited shape — got: {second:?}"
+        );
+        // The fix uses `matches!(_, Ok(Ok(_)))`, which correctly
+        // rejects this. The old `.is_err()` would NOT reject it
+        // (outer is Ok), letting the request through.
+        let allowed = matches!(second, Ok(Ok(_)));
+        assert!(!allowed, "post-fix predicate must deny the second call");
+        // Pre-fix predicate for contrast — demonstrates the silent
+        // bypass that shipped to every API install.
+        let old_predicate = second.is_err();
+        assert!(
+            !old_predicate,
+            "old `.is_err()` predicate was false for the rate-limited \
+             case — that is exactly why the limit didn't apply"
+        );
+
+        // InsufficientCapacity (cost > burst=1) does still produce
+        // outer Err.
+        let too_big = lim.check_key_n(&ip, NonZeroU32::new(2).unwrap());
+        assert!(
+            too_big.is_err(),
+            "cost > burst must produce outer Err, got: {too_big:?}"
+        );
+    }
+
     #[test]
     fn test_costs() {
         assert_eq!(operation_cost("GET", "/api/health").get(), 1);
