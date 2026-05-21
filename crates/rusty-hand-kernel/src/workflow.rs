@@ -924,7 +924,18 @@ impl WorkflowEngine {
 
                                 current_input = output.clone();
 
-                                if output.to_lowercase().contains(&until_lower) {
+                                // Empty `until` means "no termination
+                                // condition — run all max_iterations".
+                                // Pre-fix this used a bare
+                                // `contains(&until_lower)`, but
+                                // `String::contains("")` returns true,
+                                // so a loop step with no `until`
+                                // configured (or `until = ""`) would
+                                // terminate after exactly 1 iteration
+                                // — silently ignoring max_iterations.
+                                if !until_lower.is_empty()
+                                    && output.to_lowercase().contains(&until_lower)
+                                {
                                     info!(
                                         step = i + 1,
                                         name = %step.name,
@@ -1354,6 +1365,67 @@ mod tests {
 
         let run = engine.get_run(run_id).await.unwrap();
         assert_eq!(run.step_results.len(), 3); // max_iterations
+    }
+
+    /// Regression: when `StepMode::Loop { until }` was set to the empty
+    /// string (a likely default if the workflow YAML omits the field or
+    /// the operator just wants a fixed-iteration loop), the loop body
+    /// terminated after exactly ONE iteration because
+    /// `output.to_lowercase().contains("")` is always true. The user's
+    /// `max_iterations` was silently ignored.
+    ///
+    /// Post-fix: an empty `until` means "no termination condition" —
+    /// the loop runs `max_iterations` times. Non-empty `until` keeps
+    /// the substring-match semantics (covered by `test_loop_until_condition`).
+    #[tokio::test]
+    async fn test_loop_with_empty_until_runs_all_iterations() {
+        let engine = WorkflowEngine::new();
+        let wf = Workflow {
+            id: WorkflowId::new(),
+            name: "loop-empty-until".to_string(),
+            description: "".to_string(),
+            steps: vec![WorkflowStep {
+                name: "iterate".to_string(),
+                agent: StepAgent::ByName {
+                    name: "a".to_string(),
+                },
+                prompt_template: "{{input}}".to_string(),
+                mode: StepMode::Loop {
+                    max_iterations: 4,
+                    until: String::new(),
+                },
+                timeout_secs: 10,
+                error_mode: ErrorMode::Fail,
+                output_var: None,
+            }],
+            created_at: Utc::now(),
+        };
+        let wf_id = engine.register(wf).await;
+        let run_id = engine.create_run(wf_id, "seed".to_string()).await.unwrap();
+
+        let call_count = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let cc = call_count.clone();
+        let sender = move |_id: AgentId, _msg: String| {
+            let cc = cc.clone();
+            async move {
+                cc.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(("anything".to_string(), 10u64, 5u64))
+            }
+        };
+
+        let result = engine.execute_run(run_id, mock_resolver, sender).await;
+        assert!(result.is_ok());
+
+        // Pre-fix: 1 iteration (empty `until` matched immediately).
+        // Post-fix: full max_iterations = 4.
+        let run = engine.get_run(run_id).await.unwrap();
+        assert_eq!(
+            run.step_results.len(),
+            4,
+            "empty `until` must run all max_iterations, got {} step results",
+            run.step_results.len()
+        );
+        assert_eq!(call_count.load(std::sync::atomic::Ordering::SeqCst), 4);
     }
 
     #[tokio::test]
