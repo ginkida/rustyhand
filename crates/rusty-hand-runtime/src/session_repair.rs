@@ -570,8 +570,30 @@ fn is_base64_char(c: char) -> bool {
 }
 
 /// Remove common prompt injection markers from content.
+///
+/// All markers are ASCII. Pre-fix this used `content.to_lowercase()` to
+/// build a parallel string for case-insensitive `.find()`, then used the
+/// byte positions FROM the lowercase string to slice the ORIGINAL.
+///
+/// That only works when `content.to_lowercase()` has the same byte length
+/// as `content`. For Unicode that's NOT guaranteed — Turkish 'İ' (U+0130,
+/// 2 bytes) lowercases to "i" + COMBINING DOT ABOVE (U+0307, 2 bytes) =
+/// 3 bytes, expanding the lowercase string by 1 byte per occurrence.
+/// After the first replacement, `search_pos` (in lowercase coordinates)
+/// could point past `result.len()`, and `result[search_pos..]` panicked
+/// with "index out of bounds".
+///
+/// Concrete repro: content containing 'İ' followed by any of the markers
+/// crashes `session_repair::strip_tool_result_details` mid-stream, which
+/// in turn crashes the compactor and the agent_loop turn that triggered
+/// the repair. Turkish/Lithuanian inputs and any agent-on-agent
+/// communication where one side capitalised an I would trip this.
+///
+/// Fix: scan the byte slice directly with an ASCII case-insensitive
+/// byte-by-byte compare. All markers are pure ASCII so this is exact;
+/// non-ASCII bytes (including 'İ's two-byte UTF-8 representation) never
+/// match a marker byte and pass through untouched.
 fn strip_injection_markers(content: &str) -> String {
-    // These patterns are commonly used in prompt injection attempts
     const INJECTION_MARKERS: &[&str] = &[
         "<|system|>",
         "<|im_start|>",
@@ -587,30 +609,52 @@ fn strip_injection_markers(content: &str) -> String {
         "disregard previous",
     ];
 
-    let mut result = content.to_string();
-    let lower = result.to_lowercase();
-
-    for marker in INJECTION_MARKERS {
-        let marker_lower = marker.to_lowercase();
-        // Case-insensitive replacement
-        if lower.contains(&marker_lower) {
-            // Find and replace case-insensitively
-            let mut new_result = String::with_capacity(result.len());
-            let mut search_pos = 0;
-            let result_lower = result.to_lowercase();
-
-            while let Some(found) = result_lower[search_pos..].find(&marker_lower) {
-                let abs_pos = search_pos + found;
-                new_result.push_str(&result[search_pos..abs_pos]);
-                new_result.push_str("[injection marker removed]");
-                search_pos = abs_pos + marker.len();
-            }
-            new_result.push_str(&result[search_pos..]);
-            result = new_result;
+    // ASCII case-insensitive byte-slice contains-at.
+    fn matches_at(haystack: &[u8], pos: usize, needle: &[u8]) -> bool {
+        if pos + needle.len() > haystack.len() {
+            return false;
         }
+        for (i, &nb) in needle.iter().enumerate() {
+            if !haystack[pos + i].eq_ignore_ascii_case(&nb) {
+                return false;
+            }
+        }
+        true
     }
 
-    result
+    let bytes = content.as_bytes();
+    let mut out = String::with_capacity(content.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let mut matched_len = 0usize;
+        for marker in INJECTION_MARKERS {
+            // SAFETY (correctness): all markers are valid ASCII, so their
+            // byte lengths align with char boundaries and the byte-level
+            // compare is exact. A non-ASCII byte at position i never
+            // matches an ASCII marker byte (continuation bytes 0x80-0xBF
+            // and lead bytes 0xC0+ are outside ASCII alphanumerics +
+            // punctuation that markers use).
+            if matches_at(bytes, i, marker.as_bytes()) {
+                matched_len = marker.len();
+                break;
+            }
+        }
+        if matched_len > 0 {
+            out.push_str("[injection marker removed]");
+            i += matched_len;
+        } else {
+            // Walk one CHAR (not one byte) so we never split a multi-byte
+            // UTF-8 sequence. We know `i` is currently on a char boundary.
+            let ch_len = content[i..]
+                .chars()
+                .next()
+                .map(|c| c.len_utf8())
+                .unwrap_or(1);
+            out.push_str(&content[i..i + ch_len]);
+            i += ch_len;
+        }
+    }
+    out
 }
 
 /// Remove NO_REPLY assistant turns and their preceding user-message triggers
@@ -971,6 +1015,55 @@ mod tests {
             "Should remove injection attempt"
         );
         assert!(stripped.contains("[injection marker removed]"));
+    }
+
+    /// Regression: `strip_injection_markers` used `content.to_lowercase()`
+    /// to drive case-insensitive search but applied the resulting byte
+    /// positions to the ORIGINAL (un-lowercased) string. That assumes
+    /// `to_lowercase()` preserves byte length, which is false for some
+    /// Unicode chars — most notably Turkish 'İ' (U+0130, 2 bytes UTF-8)
+    /// lowercases to "i" + COMBINING DOT ABOVE (U+0307, 2 bytes) = 3
+    /// bytes. After the first marker replacement the `search_pos` index
+    /// (in lowercase coordinates) overshoots `result.len()` and slicing
+    /// panicked with "byte index N is out of bounds".
+    ///
+    /// Pre-fix this took down any session repair pass that processed
+    /// content with 'İ' followed by an injection marker — which crashes
+    /// the compactor and the agent_loop turn that triggered the repair.
+    /// Concrete trigger: agent tool output containing the literal
+    /// "İ" before "<|system|>" (or any other marker).
+    #[test]
+    fn strip_injection_markers_handles_lowercase_byte_expansion() {
+        // The 'İ' (U+0130) at the front shifts every byte offset by +1
+        // when to_lowercase() is applied (lowercase = "i" + U+0307 =
+        // 3 bytes, original 'İ' = 2 bytes). Two markers in sequence
+        // ensures search_pos increments past result.len() pre-fix.
+        let content = "İ <|system|> trailing İ <|im_start|> end";
+
+        // Pre-fix: panic inside result[search_pos..]. Post-fix: returns
+        // a valid String with both markers replaced.
+        let stripped = strip_injection_markers(content);
+
+        assert!(
+            !stripped.contains("<|system|>"),
+            "first marker must be replaced — got: {stripped:?}"
+        );
+        assert!(
+            !stripped.contains("<|im_start|>"),
+            "second marker must be replaced — got: {stripped:?}"
+        );
+        assert_eq!(
+            stripped.matches("[injection marker removed]").count(),
+            2,
+            "exactly two markers replaced"
+        );
+        // The 'İ' chars must round-trip intact (we walked CHAR-by-CHAR,
+        // not byte-by-byte, so multi-byte sequences are never split).
+        assert!(stripped.contains('İ'));
+        assert!(
+            std::str::from_utf8(stripped.as_bytes()).is_ok(),
+            "output must be valid UTF-8"
+        );
     }
 
     #[test]
