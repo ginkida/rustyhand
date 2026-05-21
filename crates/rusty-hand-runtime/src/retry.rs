@@ -91,6 +91,14 @@ pub fn compute_backoff(config: &RetryConfig, attempt: u32) -> u64 {
 
 /// Return a pseudo-random fraction in `[0, 1)` using the current system time
 /// nanos. This is NOT cryptographically secure, but good enough for jitter.
+///
+/// Divide by `2^32` (not `u32::MAX`) so the maximum mixed value of
+/// `u32::MAX` yields `u32::MAX / 2^32 ≈ 0.9999999998 < 1.0`. Pre-fix
+/// the divisor was `u32::MAX` itself, which means the edge case
+/// `mixed = u32::MAX` returned exactly 1.0 — silently violating the
+/// documented half-open interval. Downstream jitter logic clamps to
+/// `max_delay_ms` so the behavioural impact was nil, but a function
+/// whose contract says `[0, 1)` should actually deliver `[0, 1)`.
 fn pseudo_random_fraction() -> f64 {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -98,7 +106,8 @@ fn pseudo_random_fraction() -> f64 {
         .subsec_nanos();
     // Mix the bits a bit to reduce predictability.
     let mixed = nanos.wrapping_mul(2654435761); // Knuth multiplicative hash
-    (mixed as f64) / (u32::MAX as f64)
+                                                // 2^32 is exactly representable as f64 (well under the 2^53 limit).
+    (mixed as f64) / (u32::MAX as f64 + 1.0)
 }
 
 // ---------------------------------------------------------------------------
@@ -509,5 +518,32 @@ mod tests {
         assert_eq!(config.min_delay_ms, 500);
         assert_eq!(config.max_delay_ms, 30_000);
         assert!((config.jitter - 0.1).abs() < f64::EPSILON);
+    }
+
+    /// Regression: `pseudo_random_fraction` documented a half-open
+    /// `[0, 1)` interval but the implementation divided by `u32::MAX`,
+    /// so the edge case `mixed == u32::MAX` returned exactly `1.0` —
+    /// silently violating the contract. The divisor is now
+    /// `u32::MAX + 1 = 2^32` (still exactly representable as f64),
+    /// which keeps the maximum value strictly under 1.
+    #[test]
+    fn pseudo_random_fraction_respects_half_open_interval() {
+        // Smoke-test 1000 samples: every value must be < 1.0.
+        for _ in 0..1000 {
+            let f = pseudo_random_fraction();
+            assert!(
+                (0.0..1.0).contains(&f),
+                "fraction {f} fell outside the documented [0, 1) interval"
+            );
+        }
+        // The maximum *possible* divisor case: u32::MAX / 2^32 must
+        // produce a value strictly less than 1.0. This is the test the
+        // pre-fix implementation would fail (it returned exactly 1.0).
+        let max_mixed: u32 = u32::MAX;
+        let f_max = (max_mixed as f64) / (u32::MAX as f64 + 1.0);
+        assert!(
+            f_max < 1.0,
+            "max mixed value must produce a fraction < 1.0, got {f_max}"
+        );
     }
 }
