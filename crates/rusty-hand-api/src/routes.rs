@@ -3452,8 +3452,13 @@ pub async fn logs_stream(
 
                 let action_str = format!("{:?}", entry.action);
 
-                // Apply agent_id filter (exact prefix match covers both UUID and name)
-                if !agent_id_filter.is_empty() && !entry.agent_id.starts_with(&agent_id_filter) {
+                // Apply agent_id filter (exact match — pre-fix this used
+                // `starts_with`, which the dashboard's per-agent log
+                // streams expected to be exact match. A short filter
+                // matched any agent_id sharing the prefix, mixing
+                // sibling agents into the live stream. Same fix class
+                // as /api/audit/recent in iter 62.)
+                if !agent_id_filter.is_empty() && entry.agent_id != agent_id_filter {
                     continue;
                 }
 
@@ -4479,7 +4484,14 @@ pub async fn list_sessions(
                         .and_then(|uuid| state.kernel.registry.get(AgentId(uuid)))
                         .map(|entry| entry.name);
                     if !agent_filter.is_empty() {
-                        let matches_id = agent_id.starts_with(&agent_filter);
+                        // Exact match on agent_id (pre-fix `starts_with`
+                        // returned sessions for any agent whose UUID
+                        // shared the filter prefix — same regression
+                        // class as iter 62's /api/audit/recent fix).
+                        // Name match remains case-insensitive equality
+                        // so dashboard short-form (?agent=name) still
+                        // works.
+                        let matches_id = agent_id == agent_filter;
                         let matches_name = agent_name
                             .as_deref()
                             .map(|n| n.eq_ignore_ascii_case(&agent_filter))

@@ -856,6 +856,31 @@ async fn sessions_endpoint_envelope() {
         arr.is_empty(),
         "filter on a non-existent agent name must return an empty list, got: {body}"
     );
+
+    // Regression (iter 63): the agent_id filter was prefix-match
+    // (`starts_with`), so passing the first 4 hex chars of a real
+    // agent's UUID returned that agent's sessions — and every other
+    // agent's sessions whose UUID happened to share that prefix.
+    // Exact-match semantics: a partial UUID matches nothing.
+    let body = get_json(&server.base_url, "/api/sessions").await;
+    if let Some(any_session) = body["sessions"].as_array().and_then(|a| a.first()) {
+        if let Some(real_aid) = any_session["agent_id"].as_str() {
+            if real_aid.len() >= 4 {
+                let prefix: String = real_aid.chars().take(4).collect();
+                let body = get_json(
+                    &server.base_url,
+                    &format!("/api/sessions?agent_id={prefix}"),
+                )
+                .await;
+                let arr = body["sessions"].as_array().expect("sessions is array");
+                assert!(
+                    arr.is_empty(),
+                    "partial UUID prefix `{prefix}` must not match — got {} sessions",
+                    arr.len()
+                );
+            }
+        }
+    }
 }
 
 /// `GET /api/agents/{id}/metrics` returns counters the dashboard activity
