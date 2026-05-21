@@ -6420,6 +6420,15 @@ pub async fn create_skill(
 
 /// Write or update a key in the secrets.env file.
 /// File format: one `KEY=value` per line. Existing keys are overwritten.
+///
+/// SECURITY: On Unix the file is opened with mode 0600 at create time via
+/// the open(2) syscall. Pre-fix this used `std::fs::write` (which creates
+/// with 0666 & ~umask = 0644 on typical systems) followed by a separate
+/// `set_permissions(0600)`. Between the write and the chmod the file was
+/// briefly world-readable on disk — a local-attacker race window where
+/// the just-written API key could be slurped from the freshly-created
+/// secrets.env. Now the restrictive mode is applied at open time and is
+/// in force before any bytes are written.
 fn write_secret_env(path: &std::path::Path, key: &str, value: &str) -> Result<(), std::io::Error> {
     let mut lines: Vec<String> = if path.exists() {
         std::fs::read_to_string(path)?
@@ -6441,15 +6450,34 @@ fn write_secret_env(path: &std::path::Path, key: &str, value: &str) -> Result<()
         std::fs::create_dir_all(parent)?;
     }
 
-    std::fs::write(path, lines.join("\n") + "\n")?;
+    let content = lines.join("\n") + "\n";
 
-    // SECURITY: Restrict file permissions on Unix — secrets must not be world-readable
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        f.write_all(content.as_bytes())?;
+        // For existing files, OpenOptions::mode is ignored — re-apply
+        // 0600 defensively so a pre-existing 0644 file gets tightened.
         if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
-            tracing::error!(path = %path.display(), error = %e, "SECURITY: Failed to set 0600 permissions on secrets file");
+            tracing::error!(
+                path = %path.display(),
+                error = %e,
+                "SECURITY: Failed to set 0600 permissions on secrets file"
+            );
         }
+    }
+
+    #[cfg(not(unix))]
+    {
+        // Windows: rely on the default ACL of the home directory.
+        std::fs::write(path, content)?;
     }
 
     Ok(())
@@ -9304,6 +9332,65 @@ mod prometheus_label_tests {
         assert_eq!(
             unescaped_quotes, 2,
             "exactly two unescaped quotes (open + close of label value), got {line}"
+        );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod secret_env_perms_tests {
+    use super::write_secret_env;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// Regression: `write_secret_env` previously called `std::fs::write`
+    /// (mode 0666 & ~umask = typically 0644) and only chmod'd to 0600
+    /// AFTER the write completed. Between the two syscalls the file
+    /// existed on disk with world-readable perms — a local attacker
+    /// could read a freshly-set API key during that window. Now the
+    /// file is opened with mode 0600 via OpenOptionsExt at create time,
+    /// so the restrictive perms are in force BEFORE any bytes are
+    /// written.
+    #[test]
+    fn write_secret_env_creates_with_0600_on_first_write() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("secrets.env");
+        assert!(!path.exists(), "test starts with no file");
+
+        write_secret_env(&path, "TEST_API_KEY", "sk-secret-value").unwrap();
+
+        let meta = std::fs::metadata(&path).unwrap();
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "newly-created secrets file must be 0600, got {mode:o}"
+        );
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("TEST_API_KEY=sk-secret-value"));
+    }
+
+    /// A second write to an existing file must also leave it at 0600 —
+    /// open(O_TRUNC) on an existing file does NOT re-apply the requested
+    /// mode (Unix preserves the existing inode's mode). The defensive
+    /// `set_permissions(0600)` after the write covers that case.
+    #[test]
+    fn write_secret_env_keeps_0600_on_overwrite() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("secrets.env");
+
+        // Initial write creates with 0600.
+        write_secret_env(&path, "KEY_1", "value1").unwrap();
+        // Manually loosen perms to simulate a pre-existing 0644 file
+        // (e.g. created by a previous, buggy version).
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        // Second write must tighten back to 0600.
+        write_secret_env(&path, "KEY_2", "value2").unwrap();
+
+        let meta = std::fs::metadata(&path).unwrap();
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "overwrite must re-tighten perms to 0600, got {mode:o}"
         );
     }
 }
