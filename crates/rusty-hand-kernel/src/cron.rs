@@ -294,7 +294,19 @@ impl CronScheduler {
                 meta.job.last_run = Some(Utc::now());
                 meta.last_status = Some("ok".to_string());
                 meta.consecutive_errors = 0;
-                if meta.one_shot {
+                // `CronSchedule::At { at }` semantically fires ONCE at a
+                // specific time. `compute_next_run` returns `at` unchanged,
+                // so without removal `next_run` is set to `at` again — a
+                // past timestamp — and `claim_due_jobs` picks it up on the
+                // very next tick. Pre-fix this required the operator to
+                // remember to also pass `one_shot: true` at creation; if
+                // they forgot, the job re-fired every ~1s indefinitely.
+                // Treat `At` as implicitly one-shot.
+                let is_at_schedule = matches!(
+                    meta.job.schedule,
+                    rusty_hand_types::scheduler::CronSchedule::At { .. }
+                );
+                if meta.one_shot || is_at_schedule {
                     true
                 } else {
                     meta.job.next_run = Some(compute_next_run(&meta.job.schedule));
@@ -321,10 +333,40 @@ impl CronScheduler {
     /// auto-disabled after [`MAX_CONSECUTIVE_ERRORS`] consecutive permanent
     /// failures.
     pub fn record_failure(&self, id: CronJobId, error_msg: &str, transient: bool) {
+        // `At` schedules fire once at a specific time; on failure we
+        // must remove the job (or disable it) — re-scheduling at the
+        // past `at` would re-fire on every tick. Match the success-path
+        // semantics. Permanent failures remove; transient failures
+        // also remove because there's no future point at which an `At`
+        // job will be "ready again".
+        let is_at_schedule = self
+            .jobs
+            .get(&id)
+            .map(|m| {
+                matches!(
+                    m.job.schedule,
+                    rusty_hand_types::scheduler::CronSchedule::At { .. }
+                )
+            })
+            .unwrap_or(false);
+
         if let Some(mut meta) = self.jobs.get_mut(&id) {
             meta.job.last_run = Some(Utc::now());
             let truncated: String = error_msg.chars().take(256).collect();
             meta.last_status = Some(format!("error: {truncated}"));
+            if is_at_schedule {
+                debug!(
+                    job_id = %id,
+                    "At-schedule failure: removing job (no future fire time)"
+                );
+                if !transient {
+                    meta.consecutive_errors += 1;
+                }
+                // Drop the mutable borrow before removing.
+                drop(meta);
+                self.jobs.remove(&id);
+                return;
+            }
             if transient {
                 // Transient error (provider down, rate-limit, timeout) — reschedule
                 // without counting toward the auto-disable threshold.
@@ -855,6 +897,75 @@ mod tests {
             status.len() <= 263,
             "Status should be truncated, got {} chars",
             status.len()
+        );
+    }
+
+    /// Regression: `CronSchedule::At { at }` jobs created without an
+    /// explicit `one_shot: true` flag re-fired indefinitely. The
+    /// scheduling logic does:
+    ///   1. claim_due_jobs: next_run = None (claim), run job.
+    ///   2. record_success: next_run = compute_next_run(schedule) = at.
+    ///   3. tick: at < now → claim again → infinite loop at ~1s cadence.
+    ///
+    /// The API's parse_cron_job_fields defaults `one_shot` to false, so
+    /// any operator who sets up an `At` schedule via the API without
+    /// explicitly opting into one-shot hit the loop. Treat `At` as
+    /// implicitly one-shot in record_success.
+    #[test]
+    fn at_schedule_is_implicitly_one_shot_on_success() {
+        let (sched, _tmp) = make_scheduler(10);
+        let agent_id = AgentId::new();
+        let mut job = make_job(agent_id);
+        // Switch from Every to At — both with one_shot=false to prove
+        // the schedule shape is what makes the difference.
+        job.schedule = rusty_hand_types::scheduler::CronSchedule::At {
+            at: Utc::now() + Duration::seconds(1),
+        };
+        let id = sched.add_job(job, false /* not one_shot */).unwrap();
+
+        // Simulate the run completing successfully.
+        sched.record_success(id);
+
+        // Pre-fix: job survives with next_run = at (already past).
+        // Post-fix: job is removed.
+        assert!(
+            sched.get_meta(id).is_none(),
+            "At-schedule job must be removed after one success, regardless of one_shot flag"
+        );
+    }
+
+    /// Same regression for the failure path. An `At` job whose execution
+    /// fails permanently used to be rescheduled at the past `at`, which
+    /// re-fired on the next tick. Remove it instead.
+    #[test]
+    fn at_schedule_is_removed_after_failure() {
+        let (sched, _tmp) = make_scheduler(10);
+        let agent_id = AgentId::new();
+        let mut job = make_job(agent_id);
+        job.schedule = rusty_hand_types::scheduler::CronSchedule::At {
+            at: Utc::now() + Duration::seconds(1),
+        };
+        let id = sched.add_job(job, false).unwrap();
+
+        // Permanent failure on an At-schedule should drop the job.
+        sched.record_failure(id, "auth failed", false /* not transient */);
+
+        assert!(
+            sched.get_meta(id).is_none(),
+            "At-schedule job must be removed after a permanent failure"
+        );
+
+        // Same for transient failure — there's no future fire time.
+        let mut job = make_job(agent_id);
+        job.schedule = rusty_hand_types::scheduler::CronSchedule::At {
+            at: Utc::now() + Duration::seconds(1),
+        };
+        let id = sched.add_job(job, false).unwrap();
+        sched.record_failure(id, "timeout", true /* transient */);
+        assert!(
+            sched.get_meta(id).is_none(),
+            "At-schedule job must be removed after a transient failure too — \
+             there is no future point at which it would be 'ready again'"
         );
     }
 }
