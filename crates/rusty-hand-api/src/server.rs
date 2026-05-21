@@ -34,6 +34,17 @@ pub struct DaemonInfo {
 ///
 /// Returns `(router, shared_state)`. The caller can use `state.bridge_manager`
 /// to shut down the bridge on exit.
+/// Common localhost dev frontend ports allowed by CORS and WebSocket
+/// origin checks.
+///
+/// Kept as a single source of truth so the three origin sets (WS allowlist,
+/// no-auth CORS, auth-on CORS) stay in sync. Pre-consolidation: WS allowed
+/// {3000, 4200, 8080}, no-auth CORS allowed only {3000, 8080} (port 4200
+/// — RustyHand's own default — was missing), and auth-on CORS allowed only
+/// {4200, 8080}. A user developing a custom frontend on :3000 with auth on
+/// could connect WebSockets but their REST calls were blocked by CORS.
+pub const DEV_ORIGIN_PORTS: &[u16] = &[3000, 4200, 8080];
+
 pub async fn build_router(
     kernel: Arc<RustyHandKernel>,
     listen_addr: SocketAddr,
@@ -49,7 +60,7 @@ pub async fn build_router(
         format!("http://localhost:{ws_port}"),
         format!("http://127.0.0.1:{ws_port}"),
     ];
-    for p in [3000u16, 4200, 8080] {
+    for &p in DEV_ORIGIN_PORTS {
         if p != ws_port {
             allowed_ws_origins.push(format!("http://localhost:{p}"));
             allowed_ws_origins.push(format!("http://127.0.0.1:{p}"));
@@ -67,8 +78,14 @@ pub async fn build_router(
 
     // CORS: allow localhost origins by default. If API key is set, the API
     // is protected anyway. For development, permissive CORS is convenient.
-    let cors = if state.kernel.config.api_key.is_empty() {
-        // No auth → restrict CORS to localhost origins (include both 127.0.0.1 and localhost)
+    // CORS allow-list — same dev origins for both auth modes so the set
+    // stays in sync with `allowed_ws_origins` above. The previous split
+    // had no-auth and auth-on covering different subsets of the dev
+    // ports, which surfaced as "WebSocket connects but REST calls fail
+    // with CORS" when the dashboard frontend ran on a port covered by
+    // one set but not the other. Auth still gates the request body —
+    // CORS only governs which Origins the browser will let JS use.
+    let cors = {
         let port = listen_addr.port();
         let mut origins: Vec<axum::http::HeaderValue> = Vec::new();
         if let Ok(v) = format!("http://{listen_addr}").parse() {
@@ -77,46 +94,17 @@ pub async fn build_router(
         if let Ok(v) = format!("http://localhost:{port}").parse() {
             origins.push(v);
         }
-        // Also allow common dev ports
-        for p in [3000u16, 8080] {
+        if let Ok(v) = format!("http://127.0.0.1:{port}").parse() {
+            origins.push(v);
+        }
+        for &p in DEV_ORIGIN_PORTS {
             if p != port {
-                if let Ok(v) = format!("http://127.0.0.1:{p}").parse() {
-                    origins.push(v);
-                }
                 if let Ok(v) = format!("http://localhost:{p}").parse() {
                     origins.push(v);
                 }
-            }
-        }
-        CorsLayer::new()
-            .allow_origin(origins)
-            .allow_methods(tower_http::cors::Any)
-            .allow_headers(tower_http::cors::Any)
-    } else {
-        // Auth enabled → restrict CORS to localhost + configured origins.
-        // SECURITY: CorsLayer::permissive() is dangerous — any website could
-        // make cross-origin requests. Restrict to known origins instead.
-        let mut origins: Vec<axum::http::HeaderValue> = Vec::new();
-        if let Ok(v) = format!("http://{listen_addr}").parse() {
-            origins.push(v);
-        }
-        for static_origin in [
-            "http://localhost:4200",
-            "http://127.0.0.1:4200",
-            "http://localhost:8080",
-            "http://127.0.0.1:8080",
-        ] {
-            if let Ok(v) = static_origin.parse() {
-                origins.push(v);
-            }
-        }
-        // Add the actual listen address variants
-        if listen_addr.port() != 4200 && listen_addr.port() != 8080 {
-            if let Ok(v) = format!("http://localhost:{}", listen_addr.port()).parse() {
-                origins.push(v);
-            }
-            if let Ok(v) = format!("http://127.0.0.1:{}", listen_addr.port()).parse() {
-                origins.push(v);
+                if let Ok(v) = format!("http://127.0.0.1:{p}").parse() {
+                    origins.push(v);
+                }
             }
         }
         CorsLayer::new()
@@ -910,5 +898,59 @@ fn is_process_alive(pid: u32) -> bool {
     {
         let _ = pid;
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression: `allowed_ws_origins` (in `build_router`) and the two
+    /// CORS branches used to drift apart. Pre-fix the WS list covered
+    /// {3000, 4200, 8080}; the no-auth CORS branch covered {3000, 8080}
+    /// (4200 missing); the auth-on CORS branch covered {4200, 8080}
+    /// (3000 missing). Result: a user whose dashboard frontend ran on
+    /// a port covered by one set but not the other saw WebSockets
+    /// connect and REST calls fail with a CORS error — or vice-versa.
+    ///
+    /// Fix: a single `DEV_ORIGIN_PORTS` constant + a unified CORS block
+    /// that no longer branches on auth mode (auth is enforced on the
+    /// request itself, not via CORS).
+    #[test]
+    fn dev_origin_ports_constant_covers_known_dev_ports() {
+        assert!(DEV_ORIGIN_PORTS.contains(&3000));
+        assert!(DEV_ORIGIN_PORTS.contains(&4200));
+        assert!(DEV_ORIGIN_PORTS.contains(&8080));
+    }
+
+    /// Source-shape audit: both the WS-origin builder and the CORS
+    /// builder must iterate `DEV_ORIGIN_PORTS`. A future refactor that
+    /// reintroduces a hard-coded `[3000u16, 8080]` literal trips this.
+    #[test]
+    fn build_router_uses_dev_origin_ports_constant_consistently() {
+        let src = include_str!("server.rs").replace("\r\n", "\n");
+        let prod_end = src.find("#[cfg(test)]").expect("test mod exists");
+        let prod = &src[..prod_end];
+
+        let occurrences = prod.matches("for &p in DEV_ORIGIN_PORTS").count()
+            + prod.matches("for &p in DEV_ORIGIN_PORTS {").count();
+        // Two call sites: WS allowlist + unified CORS block.
+        assert!(
+            occurrences >= 2,
+            "expected ≥2 iterations of DEV_ORIGIN_PORTS, found {occurrences} \
+             — WS allowlist and CORS must both use the shared constant"
+        );
+
+        // The pre-fix hard-coded lists must not return.
+        assert!(
+            !prod.contains("for p in [3000u16, 8080]"),
+            "no-auth CORS branch must not hard-code [3000, 8080] — \
+             it omits the default RustyHand port 4200"
+        );
+        assert!(
+            !prod.contains("\"http://localhost:4200\","),
+            "auth-on CORS branch must not hard-code static \
+             localhost:4200/8080 (omits 3000)"
+        );
     }
 }
