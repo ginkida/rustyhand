@@ -3623,55 +3623,65 @@ async fn execute_knowledge_query(
     state: &AppState,
     pattern: rusty_hand_types::memory::GraphPattern,
 ) -> serde_json::Value {
-    match state.kernel.memory.query_graph(pattern).await {
-        Ok(matches) => {
-            let mut nodes: Vec<serde_json::Value> = Vec::new();
-            let mut edges: Vec<serde_json::Value> = Vec::new();
-            let mut seen_nodes = std::collections::HashSet::new();
+    let matches = state
+        .kernel
+        .memory
+        .query_graph(pattern)
+        .await
+        .unwrap_or_default();
 
-            for m in &matches {
-                if seen_nodes.insert(m.source.id.clone()) {
-                    nodes.push(serde_json::json!({
-                        "id": m.source.id,
-                        "type": m.source.entity_type,
-                        "name": m.source.name,
-                        "properties": m.source.properties,
-                    }));
-                }
-                if seen_nodes.insert(m.target.id.clone()) {
-                    nodes.push(serde_json::json!({
-                        "id": m.target.id,
-                        "type": m.target.entity_type,
-                        "name": m.target.name,
-                        "properties": m.target.properties,
-                    }));
-                }
-                edges.push(serde_json::json!({
-                    "id": m.relation.id,
-                    "source": m.source.id,
-                    "target": m.target.id,
-                    "type": serde_json::to_string(&m.relation.relation).unwrap_or_default(),
-                    "confidence": m.relation.confidence,
-                    "properties": m.relation.properties,
+    let mut nodes: Vec<serde_json::Value> = Vec::new();
+    let mut edges: Vec<serde_json::Value> = Vec::new();
+    let mut seen_nodes = std::collections::HashSet::new();
+
+    for m in &matches {
+        if seen_nodes.insert(m.source.id.clone()) {
+            nodes.push(serde_json::json!({
+                "id": m.source.id,
+                "type": m.source.entity_type,
+                "name": m.source.name,
+                "properties": m.source.properties,
+            }));
+        }
+        if seen_nodes.insert(m.target.id.clone()) {
+            nodes.push(serde_json::json!({
+                "id": m.target.id,
+                "type": m.target.entity_type,
+                "name": m.target.name,
+                "properties": m.target.properties,
+            }));
+        }
+        edges.push(serde_json::json!({
+            "id": m.relation.id,
+            "source": m.source.id,
+            "target": m.target.id,
+            "type": serde_json::to_string(&m.relation.relation).unwrap_or_default(),
+            "confidence": m.relation.confidence,
+            "properties": m.relation.properties,
+        }));
+    }
+
+    // Include standalone entities (no relations) so newly added nodes
+    // appear in the Knowledge page before any edges connect them.
+    if let Ok(all_entities) = state.kernel.memory.list_entities().await {
+        for e in all_entities {
+            if seen_nodes.insert(e.id.clone()) {
+                nodes.push(serde_json::json!({
+                    "id": e.id,
+                    "type": e.entity_type,
+                    "name": e.name,
+                    "properties": e.properties,
                 }));
             }
-
-            serde_json::json!({
-                "nodes": nodes,
-                "edges": edges,
-                "total_nodes": nodes.len(),
-                "total_edges": edges.len(),
-            })
-        }
-        Err(e) => {
-            tracing::warn!("Knowledge graph query failed: {e}");
-            serde_json::json!({
-                "nodes": [],
-                "edges": [],
-                "error": "Knowledge graph query failed",
-            })
         }
     }
+
+    serde_json::json!({
+        "nodes": nodes,
+        "edges": edges,
+        "total_nodes": nodes.len(),
+        "total_edges": edges.len(),
+    })
 }
 
 /// GET /api/knowledge — Get knowledge graph (all entities and relations).

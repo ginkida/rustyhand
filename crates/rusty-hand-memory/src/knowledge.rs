@@ -143,6 +143,59 @@ impl KnowledgeStore {
         Ok(affected > 0)
     }
 
+    /// List all entities in the knowledge graph.
+    pub fn list_entities(&self) -> RustyHandResult<Vec<Entity>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| RustyHandError::Internal(e.to_string()))?;
+        let mut stmt = conn
+            .prepare("SELECT id, entity_type, name, properties, created_at, updated_at FROM entities ORDER BY name")
+            .map_err(|e| RustyHandError::Memory(e.to_string()))?;
+        let rows = stmt
+            .query_map([], |row| {
+                let id: String = row.get(0)?;
+                let entity_type_str: String = row.get(1)?;
+                let name: String = row.get(2)?;
+                let props_str: String = row.get::<_, String>(3).unwrap_or_default();
+                let created_at_str: String = row.get::<_, String>(4).unwrap_or_default();
+                let updated_at_str: String = row.get::<_, String>(5).unwrap_or_default();
+                Ok((
+                    id,
+                    entity_type_str,
+                    name,
+                    props_str,
+                    created_at_str,
+                    updated_at_str,
+                ))
+            })
+            .map_err(|e| RustyHandError::Memory(e.to_string()))?;
+        let mut entities = Vec::new();
+        for row in rows {
+            let (id, entity_type_str, name, props_str, created_at_str, updated_at_str) =
+                row.map_err(|e| RustyHandError::Memory(e.to_string()))?;
+            let entity_type: EntityType = serde_json::from_str::<EntityType>(&entity_type_str)
+                .unwrap_or(EntityType::Custom(entity_type_str));
+            let properties: std::collections::HashMap<String, serde_json::Value> =
+                serde_json::from_str(&props_str).unwrap_or_default();
+            let created_at = chrono::DateTime::parse_from_rfc3339(&created_at_str)
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+                .unwrap_or_else(|_| chrono::Utc::now());
+            let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_at_str)
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+                .unwrap_or_else(|_| chrono::Utc::now());
+            entities.push(Entity {
+                id,
+                entity_type,
+                name,
+                properties,
+                created_at,
+                updated_at,
+            });
+        }
+        Ok(entities)
+    }
+
     /// Query the knowledge graph with a pattern.
     pub fn query_graph(&self, pattern: GraphPattern) -> RustyHandResult<Vec<GraphMatch>> {
         let conn = self

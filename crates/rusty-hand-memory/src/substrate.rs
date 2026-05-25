@@ -239,6 +239,14 @@ impl MemorySubstrate {
         self.sessions.get_session_metadata_batch()
     }
 
+    /// List all entities in the knowledge graph (including standalone ones).
+    pub async fn list_entities(&self) -> RustyHandResult<Vec<Entity>> {
+        let store = self.knowledge.clone();
+        tokio::task::spawn_blocking(move || store.list_entities())
+            .await
+            .map_err(|e| RustyHandError::Internal(e.to_string()))?
+    }
+
     /// Delete a session by ID.
     pub fn delete_session(&self, session_id: SessionId) -> RustyHandResult<()> {
         self.sessions.delete_session(session_id)
