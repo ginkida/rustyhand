@@ -3,7 +3,6 @@
 // Knowledge, Skills, Approvals, Audit, Settings.
 
 const { useState, useEffect, useMemo, useRef } = React;
-const D = window.RH_DATA;
 
 /* ============================== OVERVIEW ============================== */
 //
@@ -23,16 +22,16 @@ function OverviewPage({ go }) {
   const [usage] = usePolling("/api/usage/daily", 60000);
   const [providersResp] = useApi("/api/providers");
 
-  const agents = (agentsResp && agentsResp.agents) ? agentsResp.agents.map(normalizeAgent) : D.agents;
+  const agents = (agentsResp && agentsResp.agents) ? agentsResp.agents.map(normalizeAgent) : [];
   const totalAgents = (agentsResp && agentsResp.total) ?? agents.length;
   const live = agents.filter(a => a.state === "running").length;
   const errors = agents.filter(a => a.state === "error").length;
   const days = (usage && usage.days) || [];
-  const cost24 = usage ? (usage.today_cost_usd || 0) : D.costSeries.reduce((s, v) => s + v, 0);
+  const cost24 = usage ? (usage.today_cost_usd || 0) : 0;
   const ticks24 = (usage && usage.ticks_today) || 0;
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
-  const approvalRows = (approvalsResp && approvalsResp.approvals) || D.approvals;
+  const approvalRows = (approvalsResp && approvalsResp.approvals) || [];
   // Fall back to a placeholder rather than a hardcoded version literal
   // — those rot every release and lie to the user on initial paint.
   const version = (health && health.version) || "—";
@@ -47,7 +46,7 @@ function OverviewPage({ go }) {
           <p className="page-sub">
             System pulse · kernel <span className="mono">v{version}</span>
             {uptime && <> · uptime <span className="mono">{uptime}</span></>}
-            {" "}· schema <span className="mono">v8</span>
+            {health && health.schema_version != null && <> · schema <span className="mono">v{health.schema_version}</span></>}
           </p>
         </div>
         <div className="page-actions">
@@ -76,7 +75,18 @@ function OverviewPage({ go }) {
               <span>Live activity</span>
               <div className="ch-actions">
                 <button className="btn sm ghost" onClick={refreshAudit}><I.refresh/></button>
-                <button className="btn sm ghost"><I.download/> Export</button>
+                <button className="btn sm ghost" onClick={() => {
+                  const entries = (audit && audit.entries) || [];
+                  if (entries.length === 0) { toastWarn("No audit entries to export"); return; }
+                  const csv = rowsToCsv(entries, [
+                    { key: "timestamp", label: "timestamp" },
+                    { key: "agent_name", label: "agent" },
+                    { key: "action", label: "action" },
+                    { key: "outcome", label: "outcome" },
+                    { key: "hash", label: "hash" },
+                  ]);
+                  downloadBlob(`rustyhand-audit-${new Date().toISOString().slice(0,10)}.csv`, csv, "text/csv");
+                }}><I.download/> Export</button>
               </div>
             </div>
             <ActivityFeed entries={audit && audit.entries}/>
@@ -531,7 +541,7 @@ function AgentsPage({ openAgent }) {
       window.removeEventListener("rh:hotkey:refresh", onRefresh);
     };
   }, [refresh]);
-  const agents = (resp && resp.agents) ? resp.agents.map(normalizeAgent) : D.agents;
+  const agents = (resp && resp.agents) ? resp.agents.map(normalizeAgent) : [];
   const filtered = agents.filter(a => {
     if (filter !== "all" && a.state !== filter && !(filter === "running" && a.state === "running")) return false;
     if (q && !a.name.toLowerCase().includes(q.toLowerCase()) && !a.model.toLowerCase().includes(q.toLowerCase()) && !(a.group || "").toLowerCase().includes(q.toLowerCase())) return false;
@@ -2049,6 +2059,14 @@ function ChatPage() {
 
   const ws = useAgentWs(active && active.id, onWs);
 
+  useEffect(() => {
+    if (!ws.connected && sending) {
+      setSending(false);
+      setStreamingText("");
+      setStreamingTools([]);
+    }
+  }, [ws.connected]);
+
   // NOTE: the early return for `!active` lives further down, after ALL
   // hooks have been called (chatWrapRef + contextCollapsed state + the
   // two useEffects that drive the side panel). Returning here would
@@ -2207,7 +2225,18 @@ function ChatPage() {
       <div className="chat-list">
         <div className="chat-list-head row between">
           <span className="mono dim" style={{fontSize:11,letterSpacing:".12em",textTransform:"uppercase"}}>Sessions</span>
-          <button className="icon-btn"><I.plus/></button>
+          <button className="icon-btn" title="New session" onClick={async () => {
+            if (!active) return;
+            try {
+              await rhFetch(`/api/agents/${encodeURIComponent(active.id)}/sessions`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({}),
+              });
+              toastOk("New session created");
+              refreshSession();
+            } catch (e) { toastErr(`Create session failed: ${e.message || e}`); }
+          }}><I.plus/></button>
         </div>
         <div className="chat-list-body">
           {agents.slice(0, 16).map(a => (
@@ -2250,8 +2279,24 @@ function ChatPage() {
                     disabled={!ws.connected || sending}>
               <I.refresh/> Regenerate
             </button>
-            <button className="btn sm"><I.download/> Export</button>
-            <button className="icon-btn"><I.more/></button>
+            <button className="btn sm" onClick={async () => {
+              if (!session || !session.session_id) { toastWarn("No active session"); return; }
+              try {
+                const md = await rhFetch(`/api/sessions/${encodeURIComponent(session.session_id)}/export.md`);
+                downloadBlob(`session-${String(session.session_id).slice(0,8)}.md`, md, "text/markdown");
+              } catch (e) { toastErr(`Export failed: ${e.message || e}`); }
+            }}><I.download/> Export</button>
+            <button className="icon-btn" title="Session actions" onClick={async () => {
+              if (!session || !session.session_id) return;
+              if (await confirmDialog({ title: "Reset session", message: "Clear all messages in this session?", danger: true, confirmLabel: "Reset" })) {
+                try {
+                  await rhFetch(`/api/agents/${encodeURIComponent(active.id)}/session/reset`, { method: "POST" });
+                  toastOk("Session reset");
+                  setPendingMessages([]);
+                  refreshSession();
+                } catch (e) { toastErr(`Reset failed: ${e.message || e}`); }
+              }
+            }}><I.more/></button>
           </div>
         </div>
 
@@ -3934,7 +3979,28 @@ function AutomationPage() {
                       <td className="num mono">{Number(fired).toLocaleString()}</td>
                       <td className="mono muted">{last ? formatTime(last) : "—"}</td>
                       <td>{status === "active" ? <span className="badge live">active</span> : <span className="badge violet">{status}</span>}</td>
-                      <td className="right"><button className="btn sm ghost"><I.more/></button></td>
+                      <td className="right">
+                        <button className="btn sm ghost" title="Toggle enabled" onClick={async () => {
+                          try {
+                            const next = !t.enabled;
+                            await rhFetch(`/api/triggers/${encodeURIComponent(t.id)}`, {
+                              method: "PUT",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ enabled: next }),
+                            });
+                            toastOk(`Trigger ${next ? "enabled" : "disabled"}`);
+                            refreshTrig();
+                          } catch (e) { toastErr(`Toggle failed: ${e.message || e}`); }
+                        }}>{t.enabled ? "Disable" : "Enable"}</button>
+                        <button className="btn sm ghost danger" title="Delete trigger" onClick={async () => {
+                          if (!(await confirmDialog({ title: "Delete trigger", message: `Delete trigger ${t.id}?`, danger: true, confirmLabel: "Delete" }))) return;
+                          try {
+                            await rhFetch(`/api/triggers/${encodeURIComponent(t.id)}`, { method: "DELETE" });
+                            toastOk("Trigger deleted");
+                            refreshTrig();
+                          } catch (e) { toastErr(`Delete failed: ${e.message || e}`); }
+                        }}><I.close/></button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -7313,9 +7379,8 @@ function HealthPage() {
 function BindingsPage() {
   const [resp, fetchErr, refresh] = usePolling("/api/bindings", 30000);
   const bindings = (resp && resp.bindings) || [];
-  // Indices are positional and shift on each delete, so the Set tracks
-  // the raw index values from the current render. We reset on refresh.
   const [selected, setSelected] = useState(() => new Set());
+  const [showAdd, setShowAdd] = useState(false);
   React.useEffect(() => { setSelected(new Set()); }, [resp && bindings.length]);
 
   const remove = async (index) => {
@@ -7375,6 +7440,7 @@ function BindingsPage() {
         </div>
         <div className="page-actions">
           <button className="btn ghost" onClick={refresh}><I.refresh/></button>
+          <button className="btn primary" onClick={() => setShowAdd(true)}><I.plus/> Add binding</button>
         </div>
       </div>
       {selected.size > 0 && (
@@ -7427,6 +7493,71 @@ function BindingsPage() {
             })}
           </tbody>
         </table>
+      </div>
+      {showAdd && <AddBindingModal onClose={() => setShowAdd(false)} onCreated={() => { setShowAdd(false); refresh(); }}/>}
+    </div>
+  );
+}
+
+function AddBindingModal({ onClose, onCreated }) {
+  useEscapeKey(onClose);
+  const [agentsResp] = useApi("/api/agents?limit=200");
+  const agents = (agentsResp && agentsResp.agents) || [];
+  const [agent, setAgent] = useState("");
+  const [channel, setChannel] = useState("");
+  const [peerId, setPeerId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  React.useEffect(() => { if (!agent && agents.length) setAgent(agents[0].id); }, [agents.length]);
+  const submit = async () => {
+    if (!agent) { setErr("Pick an agent"); return; }
+    setBusy(true); setErr(null);
+    try {
+      const match_rule = {};
+      if (channel.trim()) match_rule.channel = channel.trim();
+      if (peerId.trim()) match_rule.peer_id = peerId.trim();
+      await rhFetch("/api/bindings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent, match_rule }),
+      });
+      toastOk("Binding added");
+      onCreated();
+    } catch (e) { setErr(String(e.message || e)); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <b className="mono">Add binding</b>
+          <button className="icon-btn" onClick={onClose}><I.close/></button>
+        </div>
+        <div className="modal-body">
+          <label className="t-row col">
+            <span className="t-lbl">Agent</span>
+            <select className="t-select" value={agent} onChange={e => setAgent(e.target.value)}>
+              {agents.length === 0 && <option value="">(loading…)</option>}
+              {agents.map(a => <option key={a.id} value={a.id}>{a.name} ({String(a.id).slice(0,8)})</option>)}
+            </select>
+          </label>
+          <label className="t-row col">
+            <span className="t-lbl">Channel <span className="dim">(optional filter)</span></span>
+            <input className="modal-field" value={channel} onChange={e => setChannel(e.target.value)} placeholder="telegram, discord, slack…"/>
+          </label>
+          <label className="t-row col">
+            <span className="t-lbl">Peer ID <span className="dim">(optional DM filter)</span></span>
+            <input className="modal-field" value={peerId} onChange={e => setPeerId(e.target.value)} placeholder="user/chat ID"/>
+          </label>
+          {err && <div className="banner" style={{borderColor:"oklch(0.66 0.18 25 / .35)"}}>
+            <span className="dot err"/><span className="banner-title">ERROR</span>
+            <span className="banner-body mono" style={{fontSize:11}}>{err}</span>
+          </div>}
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+          <button className="btn primary" onClick={submit} disabled={busy || !agent}>{busy ? "Adding…" : "Add"}</button>
+        </div>
       </div>
     </div>
   );

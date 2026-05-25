@@ -553,9 +553,7 @@ async fn test_cron_job_manual_run_system_event() {
         .unwrap();
     assert_eq!(resp.status(), 201);
     let body: serde_json::Value = resp.json().await.unwrap();
-    let create_result: serde_json::Value =
-        serde_json::from_str(body["result"].as_str().unwrap()).unwrap();
-    let job_id = create_result["job_id"].as_str().unwrap();
+    let job_id = body["job_id"].as_str().unwrap();
 
     let resp = client
         .post(format!("{}/api/cron/jobs/{job_id}/run", server.base_url))
@@ -1906,9 +1904,7 @@ async fn test_cron_manual_run_workflow_with_mock_driver() {
         .unwrap();
     assert_eq!(resp.status(), 201, "cron create returned {}", resp.status());
     let body: serde_json::Value = resp.json().await.unwrap();
-    let create_result: serde_json::Value =
-        serde_json::from_str(body["result"].as_str().unwrap()).unwrap();
-    let job_id = create_result["job_id"].as_str().unwrap().to_string();
+    let job_id = body["job_id"].as_str().unwrap().to_string();
 
     // 4. Manually fire the cron job.
     let resp = client
@@ -1988,9 +1984,7 @@ async fn test_cron_manual_run_agent_turn_with_mock_driver() {
         .unwrap();
     assert_eq!(resp.status(), 201, "cron create returned {}", resp.status());
     let body: serde_json::Value = resp.json().await.unwrap();
-    let create_result: serde_json::Value =
-        serde_json::from_str(body["result"].as_str().unwrap()).unwrap();
-    let job_id = create_result["job_id"].as_str().unwrap().to_string();
+    let job_id = body["job_id"].as_str().unwrap().to_string();
 
     // Manually trigger the run.
     let resp = client

@@ -1,6 +1,5 @@
 (function(){
 const { useState, useEffect, useMemo, useRef } = React;
-const D = window.RH_DATA;
 function OverviewPage({ go }) {
   var _a;
   const [agentsResp, , refreshAgents] = usePolling("/api/agents?limit=100", 15e3);
@@ -10,22 +9,22 @@ function OverviewPage({ go }) {
   const [onboarding] = useApi("/api/onboarding");
   const [usage] = usePolling("/api/usage/daily", 6e4);
   const [providersResp] = useApi("/api/providers");
-  const agents = agentsResp && agentsResp.agents ? agentsResp.agents.map(normalizeAgent) : D.agents;
+  const agents = agentsResp && agentsResp.agents ? agentsResp.agents.map(normalizeAgent) : [];
   const totalAgents = (_a = agentsResp && agentsResp.total) != null ? _a : agents.length;
   const live = agents.filter((a) => a.state === "running").length;
   const errors = agents.filter((a) => a.state === "error").length;
   const days = usage && usage.days || [];
-  const cost24 = usage ? usage.today_cost_usd || 0 : D.costSeries.reduce((s, v) => s + v, 0);
+  const cost24 = usage ? usage.today_cost_usd || 0 : 0;
   const ticks24 = usage && usage.ticks_today || 0;
   const refresh = () => {
     refreshAgents();
     refreshAudit();
     refreshApprovals();
   };
-  const approvalRows = approvalsResp && approvalsResp.approvals || D.approvals;
+  const approvalRows = approvalsResp && approvalsResp.approvals || [];
   const version = health && health.version || "\u2014";
   const uptime = health && health.uptime_seconds ? formatUptime(health.uptime_seconds) : null;
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(Banner, { go, onboarding }), /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Overview"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "System pulse \xB7 kernel ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v", version), uptime && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 uptime ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, uptime)), " ", "\xB7 schema ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v8"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null), " Refresh"), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(Banner, { go, onboarding }), /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Overview"), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "System pulse \xB7 kernel ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v", version), uptime && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 uptime ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, uptime)), health && health.schema_version != null && /* @__PURE__ */ React.createElement(React.Fragment, null, " \xB7 schema ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "v", health.schema_version)))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null), " Refresh"), /* @__PURE__ */ React.createElement(
     "button",
     {
       className: "btn primary",
@@ -38,7 +37,21 @@ function OverviewPage({ go }) {
     },
     /* @__PURE__ */ React.createElement(I.plus, null),
     " New agent"
-  ))), /* @__PURE__ */ React.createElement("div", { className: "tiles" }, /* @__PURE__ */ React.createElement(Tile, { label: "Agents running", value: `${live}`, foot: `of ${totalAgents} total`, spark: sparkOf(agents.map((_, i) => live + (i % 3 - 1)), 12) }), /* @__PURE__ */ React.createElement(Tile, { label: "Cost \xB7 today", value: `$${(cost24 || 0).toFixed(2)}`, foot: usage ? "from /api/usage/daily" : "loading\u2026", spark: days.slice(-12).map((d) => d.cost_usd || 0) }), /* @__PURE__ */ React.createElement(Tile, { label: "Audit entries", value: audit && audit.total != null ? audit.total.toLocaleString() : "\u2014", foot: audit && audit.tip_hash ? `tip ${String(audit.tip_hash).slice(0, 8)}` : "loading\u2026", spark: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] }), /* @__PURE__ */ React.createElement(Tile, { label: "Errors \xB7 agents", value: `${errors}`, foot: errors ? `${errors} crashed agent(s)` : "all green", spark: [0, 0, 1, 0, 0, 0, 0, 0, errors, 0, 0, 0], deltaCls: "up", warn: errors > 0 })), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 col" }, /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Live activity"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: refreshAudit }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost" }, /* @__PURE__ */ React.createElement(I.download, null), " Export"))), /* @__PURE__ */ React.createElement(ActivityFeed, { entries: audit && audit.entries })), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Approvals \xB7 waiting"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("approvals") }, "Open queue"))), approvalRows.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, "No approvals waiting.") : /* @__PURE__ */ React.createElement(ApprovalsTable, { rows: approvalRows.slice(0, 3), compact: true, onChange: refreshApprovals }))), /* @__PURE__ */ React.createElement("div", { className: "col-4 col" }, onboarding && onboarding.demo_mode && /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Demo seed"), /* @__PURE__ */ React.createElement("span", { className: "badge demo" }, /* @__PURE__ */ React.createElement("span", { className: "dot demo" }), "active")), /* @__PURE__ */ React.createElement("div", { className: "col gap-8" }, /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.agents, null), title: "rusty", sub: "welcome agent \xB7 chat-ready", onClick: () => go("chat") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.workflows, null), title: "demo-pipeline", sub: "2-step sample workflow \xB7 click to run", onClick: () => go("workflows") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.event, null), title: "sample trigger", sub: "agent-spawn on webhook", onClick: () => go("automation") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.cron, null), title: "demo-daily-ping", sub: "cron 0 9 * * * \xB7 disabled", onClick: () => go("automation") }))), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Providers"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("settings") }, "Manage")), /* @__PURE__ */ React.createElement(ProvidersList, { providers: providersResp && providersResp.providers })), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Audit chain"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("audit") }, "View")), /* @__PURE__ */ React.createElement("div", { className: "col gap-4" }, /* @__PURE__ */ React.createElement(AuditSummary, { audit }))))));
+  ))), /* @__PURE__ */ React.createElement("div", { className: "tiles" }, /* @__PURE__ */ React.createElement(Tile, { label: "Agents running", value: `${live}`, foot: `of ${totalAgents} total`, spark: sparkOf(agents.map((_, i) => live + (i % 3 - 1)), 12) }), /* @__PURE__ */ React.createElement(Tile, { label: "Cost \xB7 today", value: `$${(cost24 || 0).toFixed(2)}`, foot: usage ? "from /api/usage/daily" : "loading\u2026", spark: days.slice(-12).map((d) => d.cost_usd || 0) }), /* @__PURE__ */ React.createElement(Tile, { label: "Audit entries", value: audit && audit.total != null ? audit.total.toLocaleString() : "\u2014", foot: audit && audit.tip_hash ? `tip ${String(audit.tip_hash).slice(0, 8)}` : "loading\u2026", spark: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] }), /* @__PURE__ */ React.createElement(Tile, { label: "Errors \xB7 agents", value: `${errors}`, foot: errors ? `${errors} crashed agent(s)` : "all green", spark: [0, 0, 1, 0, 0, 0, 0, 0, errors, 0, 0, 0], deltaCls: "up", warn: errors > 0 })), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, /* @__PURE__ */ React.createElement("div", { className: "col-8 col" }, /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Live activity"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: refreshAudit }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => {
+    const entries = audit && audit.entries || [];
+    if (entries.length === 0) {
+      toastWarn("No audit entries to export");
+      return;
+    }
+    const csv = rowsToCsv(entries, [
+      { key: "timestamp", label: "timestamp" },
+      { key: "agent_name", label: "agent" },
+      { key: "action", label: "action" },
+      { key: "outcome", label: "outcome" },
+      { key: "hash", label: "hash" }
+    ]);
+    downloadBlob(`rustyhand-audit-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.csv`, csv, "text/csv");
+  } }, /* @__PURE__ */ React.createElement(I.download, null), " Export"))), /* @__PURE__ */ React.createElement(ActivityFeed, { entries: audit && audit.entries })), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Approvals \xB7 waiting"), /* @__PURE__ */ React.createElement("div", { className: "ch-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("approvals") }, "Open queue"))), approvalRows.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px 14px", fontSize: 12 } }, "No approvals waiting.") : /* @__PURE__ */ React.createElement(ApprovalsTable, { rows: approvalRows.slice(0, 3), compact: true, onChange: refreshApprovals }))), /* @__PURE__ */ React.createElement("div", { className: "col-4 col" }, onboarding && onboarding.demo_mode && /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Demo seed"), /* @__PURE__ */ React.createElement("span", { className: "badge demo" }, /* @__PURE__ */ React.createElement("span", { className: "dot demo" }), "active")), /* @__PURE__ */ React.createElement("div", { className: "col gap-8" }, /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.agents, null), title: "rusty", sub: "welcome agent \xB7 chat-ready", onClick: () => go("chat") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.workflows, null), title: "demo-pipeline", sub: "2-step sample workflow \xB7 click to run", onClick: () => go("workflows") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.event, null), title: "sample trigger", sub: "agent-spawn on webhook", onClick: () => go("automation") }), /* @__PURE__ */ React.createElement(SeedRow, { icon: /* @__PURE__ */ React.createElement(I.cron, null), title: "demo-daily-ping", sub: "cron 0 9 * * * \xB7 disabled", onClick: () => go("automation") }))), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Providers"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("settings") }, "Manage")), /* @__PURE__ */ React.createElement(ProvidersList, { providers: providersResp && providersResp.providers })), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "row between mb-12" }, /* @__PURE__ */ React.createElement("span", { className: "muted mono", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Audit chain"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("audit") }, "View")), /* @__PURE__ */ React.createElement("div", { className: "col gap-4" }, /* @__PURE__ */ React.createElement(AuditSummary, { audit }))))));
 }
 function formatUptime(s) {
   if (s == null) return null;
@@ -306,7 +319,7 @@ function AgentsPage({ openAgent }) {
       window.removeEventListener("rh:hotkey:refresh", onRefresh);
     };
   }, [refresh]);
-  const agents = resp && resp.agents ? resp.agents.map(normalizeAgent) : D.agents;
+  const agents = resp && resp.agents ? resp.agents.map(normalizeAgent) : [];
   const filtered = agents.filter((a) => {
     if (filter !== "all" && a.state !== filter && !(filter === "running" && a.state === "running")) return false;
     if (q && !a.name.toLowerCase().includes(q.toLowerCase()) && !a.model.toLowerCase().includes(q.toLowerCase()) && !(a.group || "").toLowerCase().includes(q.toLowerCase())) return false;
@@ -1211,6 +1224,13 @@ function ChatPage() {
     }
   }, [streamingText, refreshSession]);
   const ws = useAgentWs(active && active.id, onWs);
+  useEffect(() => {
+    if (!ws.connected && sending) {
+      setSending(false);
+      setStreamingText("");
+      setStreamingTools([]);
+    }
+  }, [ws.connected]);
   const items = coalesceToolTraces(
     sessionToItems(session && session.messages).concat(pendingMessages)
   );
@@ -1324,7 +1344,20 @@ function ChatPage() {
   if (!active) {
     return /* @__PURE__ */ React.createElement("div", { className: "chat-wrap", ref: chatWrapRef }, /* @__PURE__ */ React.createElement("div", { className: "chat-list" }, /* @__PURE__ */ React.createElement("div", { className: "chat-list-head row between" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Sessions")), /* @__PURE__ */ React.createElement("div", { className: "chat-list-body" }, /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "24px 14px", fontSize: 12, textAlign: "center" } }, agentsResp ? "No agents yet. Spawn one from the Agents page." : "loading agents\u2026"))), /* @__PURE__ */ React.createElement("div", { "aria-hidden": true, style: { width: 0 } }), /* @__PURE__ */ React.createElement("div", { className: "chat-panel" }), /* @__PURE__ */ React.createElement("div", { "aria-hidden": true, style: { width: 0 } }), /* @__PURE__ */ React.createElement("div", { className: "chat-side" }));
   }
-  return /* @__PURE__ */ React.createElement("div", { className: "chat-wrap", ref: chatWrapRef }, /* @__PURE__ */ React.createElement("div", { className: "chat-list" }, /* @__PURE__ */ React.createElement("div", { className: "chat-list-head row between" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Sessions"), /* @__PURE__ */ React.createElement("button", { className: "icon-btn" }, /* @__PURE__ */ React.createElement(I.plus, null))), /* @__PURE__ */ React.createElement("div", { className: "chat-list-body" }, agents.slice(0, 16).map((a) => /* @__PURE__ */ React.createElement("div", { key: a.id, className: "chat-list-item " + (active.id === a.id ? "active" : ""), onClick: () => setActiveId(a.id) }, /* @__PURE__ */ React.createElement(Avatar, { agent: a }), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { className: "row between" }, /* @__PURE__ */ React.createElement("span", { className: "name" }, a.name), /* @__PURE__ */ React.createElement("span", { className: "time" }, a.updated)), /* @__PURE__ */ React.createElement("div", { className: "last" }, a.last)))))), /* @__PURE__ */ React.createElement("div", { className: "chat-resize", onMouseDown: startResize("left"), "aria-hidden": true }), /* @__PURE__ */ React.createElement("div", { className: "chat-panel" }, /* @__PURE__ */ React.createElement("div", { className: "chat-head" }, /* @__PURE__ */ React.createElement(Avatar, { agent: active }), /* @__PURE__ */ React.createElement("div", { className: "col", style: { gap: 2 } }, /* @__PURE__ */ React.createElement("div", { className: "row gap-6" }, /* @__PURE__ */ React.createElement("b", { className: "mono" }, active.name), /* @__PURE__ */ React.createElement(StateBadge, { state: active.state }), /* @__PURE__ */ React.createElement("span", { className: "badge " + (ws.connected ? "live" : "idle"), title: ws.connected ? "WebSocket streaming" : "WebSocket disconnected (HTTP fallback)" }, ws.connected ? "WS" : "HTTP")), /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, active.model, " \xB7 ", active.provider, " \xB7 session ", session && session.session_id ? `#${String(session.session_id).slice(0, 4)}` : "\u2014")), /* @__PURE__ */ React.createElement("div", { className: "actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: refreshSession, title: "Refresh session" }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "chat-wrap", ref: chatWrapRef }, /* @__PURE__ */ React.createElement("div", { className: "chat-list" }, /* @__PURE__ */ React.createElement("div", { className: "chat-list-head row between" }, /* @__PURE__ */ React.createElement("span", { className: "mono dim", style: { fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase" } }, "Sessions"), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", title: "New session", onClick: async () => {
+    if (!active) return;
+    try {
+      await rhFetch(`/api/agents/${encodeURIComponent(active.id)}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      });
+      toastOk("New session created");
+      refreshSession();
+    } catch (e) {
+      toastErr(`Create session failed: ${e.message || e}`);
+    }
+  } }, /* @__PURE__ */ React.createElement(I.plus, null))), /* @__PURE__ */ React.createElement("div", { className: "chat-list-body" }, agents.slice(0, 16).map((a) => /* @__PURE__ */ React.createElement("div", { key: a.id, className: "chat-list-item " + (active.id === a.id ? "active" : ""), onClick: () => setActiveId(a.id) }, /* @__PURE__ */ React.createElement(Avatar, { agent: a }), /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { className: "row between" }, /* @__PURE__ */ React.createElement("span", { className: "name" }, a.name), /* @__PURE__ */ React.createElement("span", { className: "time" }, a.updated)), /* @__PURE__ */ React.createElement("div", { className: "last" }, a.last)))))), /* @__PURE__ */ React.createElement("div", { className: "chat-resize", onMouseDown: startResize("left"), "aria-hidden": true }), /* @__PURE__ */ React.createElement("div", { className: "chat-panel" }, /* @__PURE__ */ React.createElement("div", { className: "chat-head" }, /* @__PURE__ */ React.createElement(Avatar, { agent: active }), /* @__PURE__ */ React.createElement("div", { className: "col", style: { gap: 2 } }, /* @__PURE__ */ React.createElement("div", { className: "row gap-6" }, /* @__PURE__ */ React.createElement("b", { className: "mono" }, active.name), /* @__PURE__ */ React.createElement(StateBadge, { state: active.state }), /* @__PURE__ */ React.createElement("span", { className: "badge " + (ws.connected ? "live" : "idle"), title: ws.connected ? "WebSocket streaming" : "WebSocket disconnected (HTTP fallback)" }, ws.connected ? "WS" : "HTTP")), /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { fontSize: 11 } }, active.model, " \xB7 ", active.provider, " \xB7 session ", session && session.session_id ? `#${String(session.session_id).slice(0, 4)}` : "\u2014")), /* @__PURE__ */ React.createElement("div", { className: "actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: refreshSession, title: "Refresh session" }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement(
     "button",
     {
       className: "btn sm",
@@ -1341,7 +1374,30 @@ function ChatPage() {
     },
     /* @__PURE__ */ React.createElement(I.refresh, null),
     " Regenerate"
-  ), /* @__PURE__ */ React.createElement("button", { className: "btn sm" }, /* @__PURE__ */ React.createElement(I.download, null), " Export"), /* @__PURE__ */ React.createElement("button", { className: "icon-btn" }, /* @__PURE__ */ React.createElement(I.more, null)))), /* @__PURE__ */ React.createElement("div", { className: "chat-stream", ref: streamRef }, !session && !sessionErr && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { padding: "24px 6px", fontSize: 12 } }, "Loading session\u2026"), sessionErr && pendingMessages.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { padding: "24px 6px", fontSize: 12, color: "var(--crimson)" } }, "Session load failed: ", sessionErr), items.map((it, i) => {
+  ), /* @__PURE__ */ React.createElement("button", { className: "btn sm", onClick: async () => {
+    if (!session || !session.session_id) {
+      toastWarn("No active session");
+      return;
+    }
+    try {
+      const md = await rhFetch(`/api/sessions/${encodeURIComponent(session.session_id)}/export.md`);
+      downloadBlob(`session-${String(session.session_id).slice(0, 8)}.md`, md, "text/markdown");
+    } catch (e) {
+      toastErr(`Export failed: ${e.message || e}`);
+    }
+  } }, /* @__PURE__ */ React.createElement(I.download, null), " Export"), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", title: "Session actions", onClick: async () => {
+    if (!session || !session.session_id) return;
+    if (await confirmDialog({ title: "Reset session", message: "Clear all messages in this session?", danger: true, confirmLabel: "Reset" })) {
+      try {
+        await rhFetch(`/api/agents/${encodeURIComponent(active.id)}/session/reset`, { method: "POST" });
+        toastOk("Session reset");
+        setPendingMessages([]);
+        refreshSession();
+      } catch (e) {
+        toastErr(`Reset failed: ${e.message || e}`);
+      }
+    }
+  } }, /* @__PURE__ */ React.createElement(I.more, null)))), /* @__PURE__ */ React.createElement("div", { className: "chat-stream", ref: streamRef }, !session && !sessionErr && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { padding: "24px 6px", fontSize: 12 } }, "Loading session\u2026"), sessionErr && pendingMessages.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "dim mono", style: { padding: "24px 6px", fontSize: 12, color: "var(--crimson)" } }, "Session load failed: ", sessionErr), items.map((it, i) => {
     const k = it._key || `i${i}`;
     if (it.role === "user") return /* @__PURE__ */ React.createElement("div", { key: k, className: "msg user" }, /* @__PURE__ */ React.createElement(Avatar, { agent: { name: "you", hue: 22, emoji: "Y" } }), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "who", style: { textAlign: "right" } }, "operator \xB7 just now"), /* @__PURE__ */ React.createElement("div", { className: "bubble", style: { whiteSpace: "pre-wrap" } }, it.content)));
     if (it.role === "tool") return /* @__PURE__ */ React.createElement(ToolTraceCard, { key: k, tool: it });
@@ -2421,7 +2477,29 @@ function AutomationPage() {
         checked: isSel,
         onChange: () => toggleTrigSelect(t.id)
       }
-    )), /* @__PURE__ */ React.createElement("td", { className: "mono" }, t.id), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: "row gap-6", style: { color: "var(--fg-2)" } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--rust)", display: "inline-flex" } }, /* @__PURE__ */ React.createElement(ChannelIcon, { kind })), /* @__PURE__ */ React.createElement("span", { className: "mono" }, kind))), /* @__PURE__ */ React.createElement("td", { className: "mono" }, target), /* @__PURE__ */ React.createElement("td", { className: "num mono" }, Number(fired).toLocaleString()), /* @__PURE__ */ React.createElement("td", { className: "mono muted" }, last ? formatTime(last) : "\u2014"), /* @__PURE__ */ React.createElement("td", null, status === "active" ? /* @__PURE__ */ React.createElement("span", { className: "badge live" }, "active") : /* @__PURE__ */ React.createElement("span", { className: "badge violet" }, status)), /* @__PURE__ */ React.createElement("td", { className: "right" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost" }, /* @__PURE__ */ React.createElement(I.more, null))));
+    )), /* @__PURE__ */ React.createElement("td", { className: "mono" }, t.id), /* @__PURE__ */ React.createElement("td", null, /* @__PURE__ */ React.createElement("span", { className: "row gap-6", style: { color: "var(--fg-2)" } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--rust)", display: "inline-flex" } }, /* @__PURE__ */ React.createElement(ChannelIcon, { kind })), /* @__PURE__ */ React.createElement("span", { className: "mono" }, kind))), /* @__PURE__ */ React.createElement("td", { className: "mono" }, target), /* @__PURE__ */ React.createElement("td", { className: "num mono" }, Number(fired).toLocaleString()), /* @__PURE__ */ React.createElement("td", { className: "mono muted" }, last ? formatTime(last) : "\u2014"), /* @__PURE__ */ React.createElement("td", null, status === "active" ? /* @__PURE__ */ React.createElement("span", { className: "badge live" }, "active") : /* @__PURE__ */ React.createElement("span", { className: "badge violet" }, status)), /* @__PURE__ */ React.createElement("td", { className: "right" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", title: "Toggle enabled", onClick: async () => {
+      try {
+        const next = !t.enabled;
+        await rhFetch(`/api/triggers/${encodeURIComponent(t.id)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: next })
+        });
+        toastOk(`Trigger ${next ? "enabled" : "disabled"}`);
+        refreshTrig();
+      } catch (e) {
+        toastErr(`Toggle failed: ${e.message || e}`);
+      }
+    } }, t.enabled ? "Disable" : "Enable"), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost danger", title: "Delete trigger", onClick: async () => {
+      if (!await confirmDialog({ title: "Delete trigger", message: `Delete trigger ${t.id}?`, danger: true, confirmLabel: "Delete" })) return;
+      try {
+        await rhFetch(`/api/triggers/${encodeURIComponent(t.id)}`, { method: "DELETE" });
+        toastOk("Trigger deleted");
+        refreshTrig();
+      } catch (e) {
+        toastErr(`Delete failed: ${e.message || e}`);
+      }
+    } }, /* @__PURE__ */ React.createElement(I.close, null))));
   }))))), showCreate && tab === "cron" && /* @__PURE__ */ React.createElement(CronJobModal, { onClose: () => setShowCreate(false), onCreated: () => {
     setShowCreate(false);
     refreshCron();
@@ -4370,6 +4448,7 @@ function BindingsPage() {
   const [resp, fetchErr, refresh] = usePolling("/api/bindings", 3e4);
   const bindings = resp && resp.bindings || [];
   const [selected, setSelected] = useState(() => /* @__PURE__ */ new Set());
+  const [showAdd, setShowAdd] = useState(false);
   React.useEffect(() => {
     setSelected(/* @__PURE__ */ new Set());
   }, [resp && bindings.length]);
@@ -4422,7 +4501,7 @@ function BindingsPage() {
     else toastOk(`Removed ${okCount} binding(s)`);
     refresh();
   };
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Bindings ", /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 14 } }, "\xB7 ", bindings.length)), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Agent \u2192 channel/trigger bindings \xB7 live from ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/bindings"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null)))), selected.size > 0 && /* @__PURE__ */ React.createElement("div", { className: "bulk-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 12 } }, selected.size, " selected"), /* @__PURE__ */ React.createElement("button", { className: "btn sm danger", onClick: bulkRemove }, /* @__PURE__ */ React.createElement(I.trash, null), " Remove ", selected.size), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => setSelected(/* @__PURE__ */ new Set()), style: { marginLeft: "auto" } }, "Clear")), fetchErr && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "API ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, fetchErr)), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { style: { width: 28 } }, /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Bindings ", /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 14 } }, "\xB7 ", bindings.length)), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Agent \u2192 channel/trigger bindings \xB7 live from ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "/api/bindings"))), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: refresh }, /* @__PURE__ */ React.createElement(I.refresh, null)), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setShowAdd(true) }, /* @__PURE__ */ React.createElement(I.plus, null), " Add binding"))), selected.size > 0 && /* @__PURE__ */ React.createElement("div", { className: "bulk-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 12 } }, selected.size, " selected"), /* @__PURE__ */ React.createElement("button", { className: "btn sm danger", onClick: bulkRemove }, /* @__PURE__ */ React.createElement(I.trash, null), " Remove ", selected.size), /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => setSelected(/* @__PURE__ */ new Set()), style: { marginLeft: "auto" } }, "Clear")), fetchErr && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "API ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, fetchErr)), /* @__PURE__ */ React.createElement("div", { className: "card flush" }, /* @__PURE__ */ React.createElement("table", { className: "tbl" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { style: { width: 28 } }, /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "checkbox",
@@ -4443,7 +4522,48 @@ function BindingsPage() {
         onChange: () => toggle(i)
       }
     )), /* @__PURE__ */ React.createElement("td", { className: "num mono" }, i), /* @__PURE__ */ React.createElement("td", { className: "mono" }, b.agent_id || b.agent || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "mono" }, b.kind || b.type || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "mono" }, b.target || b.channel || b.trigger || "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "mono dim", style: { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" } }, b.pattern ? JSON.stringify(b.pattern) : "\u2014"), /* @__PURE__ */ React.createElement("td", { className: "right" }, /* @__PURE__ */ React.createElement("button", { className: "btn sm danger", onClick: () => remove(i), title: "Remove" }, /* @__PURE__ */ React.createElement(I.close, null))));
-  })))));
+  })))), showAdd && /* @__PURE__ */ React.createElement(AddBindingModal, { onClose: () => setShowAdd(false), onCreated: () => {
+    setShowAdd(false);
+    refresh();
+  } }));
+}
+function AddBindingModal({ onClose, onCreated }) {
+  useEscapeKey(onClose);
+  const [agentsResp] = useApi("/api/agents?limit=200");
+  const agents = agentsResp && agentsResp.agents || [];
+  const [agent, setAgent] = useState("");
+  const [channel, setChannel] = useState("");
+  const [peerId, setPeerId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  React.useEffect(() => {
+    if (!agent && agents.length) setAgent(agents[0].id);
+  }, [agents.length]);
+  const submit = async () => {
+    if (!agent) {
+      setErr("Pick an agent");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      const match_rule = {};
+      if (channel.trim()) match_rule.channel = channel.trim();
+      if (peerId.trim()) match_rule.peer_id = peerId.trim();
+      await rhFetch("/api/bindings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent, match_rule })
+      });
+      toastOk("Binding added");
+      onCreated();
+    } catch (e) {
+      setErr(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return /* @__PURE__ */ React.createElement("div", { className: "modal-back", onClick: onClose }, /* @__PURE__ */ React.createElement("div", { className: "modal", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "modal-head" }, /* @__PURE__ */ React.createElement("b", { className: "mono" }, "Add binding"), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", onClick: onClose }, /* @__PURE__ */ React.createElement(I.close, null))), /* @__PURE__ */ React.createElement("div", { className: "modal-body" }, /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Agent"), /* @__PURE__ */ React.createElement("select", { className: "t-select", value: agent, onChange: (e) => setAgent(e.target.value) }, agents.length === 0 && /* @__PURE__ */ React.createElement("option", { value: "" }, "(loading\u2026)"), agents.map((a) => /* @__PURE__ */ React.createElement("option", { key: a.id, value: a.id }, a.name, " (", String(a.id).slice(0, 8), ")")))), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Channel ", /* @__PURE__ */ React.createElement("span", { className: "dim" }, "(optional filter)")), /* @__PURE__ */ React.createElement("input", { className: "modal-field", value: channel, onChange: (e) => setChannel(e.target.value), placeholder: "telegram, discord, slack\u2026" })), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Peer ID ", /* @__PURE__ */ React.createElement("span", { className: "dim" }, "(optional DM filter)")), /* @__PURE__ */ React.createElement("input", { className: "modal-field", value: peerId, onChange: (e) => setPeerId(e.target.value), placeholder: "user/chat ID" })), err && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, err))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: onClose }, "Cancel"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: submit, disabled: busy || !agent }, busy ? "Adding\u2026" : "Add"))));
 }
 Object.assign(window, {
   OverviewPage,

@@ -242,14 +242,20 @@ impl WorkflowEngine {
                 Ok(data) => match serde_json::from_str::<Vec<Workflow>>(&data) {
                     Ok(loaded) => {
                         let count = loaded.len();
-                        // Use blocking insert here because we're in a sync
-                        // constructor; tokio::sync::RwLock supports
-                        // blocking_write() for exactly this case.
-                        let mut workflows = engine.workflows.blocking_write();
-                        for wf in loaded {
-                            workflows.insert(wf.id, wf);
+                        match engine.workflows.try_write() {
+                            Ok(mut workflows) => {
+                                for wf in loaded {
+                                    workflows.insert(wf.id, wf);
+                                }
+                                info!(count, path = %path.display(), "Loaded workflows from disk");
+                            }
+                            Err(_) => {
+                                tracing::warn!(
+                                    path = %path.display(),
+                                    "Could not acquire write lock for workflows — starting empty"
+                                );
+                            }
                         }
-                        info!(count, path = %path.display(), "Loaded workflows from disk");
                     }
                     Err(e) => {
                         tracing::warn!(

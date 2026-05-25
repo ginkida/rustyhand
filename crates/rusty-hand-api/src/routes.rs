@@ -8622,10 +8622,11 @@ pub async fn create_cron_job(
 ) -> impl IntoResponse {
     let agent_id = body["agent_id"].as_str().unwrap_or("");
     match state.kernel.cron_create(agent_id, body.clone()).await {
-        Ok(result) => (
-            StatusCode::CREATED,
-            Json(serde_json::json!({"result": result})),
-        ),
+        Ok(result) => {
+            let parsed = serde_json::from_str::<serde_json::Value>(&result)
+                .unwrap_or_else(|_| serde_json::json!({"result": result}));
+            (StatusCode::CREATED, Json(parsed))
+        }
         Err(e) => (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": e})),
@@ -8668,7 +8669,11 @@ pub async fn update_cron_job(
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     match state.kernel.cron_update(&id, body.clone()).await {
-        Ok(result) => (StatusCode::OK, Json(serde_json::json!({"result": result}))),
+        Ok(result) => {
+            let parsed = serde_json::from_str::<serde_json::Value>(&result)
+                .unwrap_or_else(|_| serde_json::json!({"result": result}));
+            (StatusCode::OK, Json(parsed))
+        }
         Err(e) => (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": e})),

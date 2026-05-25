@@ -1441,3 +1441,10 @@ code, .mono { font-family: var(--ff-mono); }
   .chat-wrap .chat-list,
   .chat-wrap > aside { display: none; }
 }
+
+/* Agent group rows in grouped table view */
+.group-row td { font-weight: 500; }
+.group-row:hover td { background: var(--surface) !important; }
+
+/* Modal title for diff/compare views */
+.modal-title { font-family: var(--ff-mono); font-size: 14px; font-weight: 600; margin: 0; }
