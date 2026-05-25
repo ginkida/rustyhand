@@ -5362,13 +5362,16 @@ impl KernelHandle for RustyHandKernel {
         Ok(serde_json::json!({
             "total_input_tokens": summary.total_input_tokens,
             "total_output_tokens": summary.total_output_tokens,
+            "total_tokens": summary.total_input_tokens + summary.total_output_tokens,
             "total_cost_usd": summary.total_cost_usd,
             "total_calls": summary.call_count,
+            "message_count": summary.call_count,
             "total_tool_calls": summary.total_tool_calls,
             "hourly_tokens": hourly_tokens,
             "hourly_tool_calls": hourly_tool_calls,
             "uptime_secs": uptime_secs,
             "last_active": last_active,
+            "last_activity": last_active,
         }))
     }
 

@@ -201,6 +201,11 @@ pub async fn list_agents(
         .memory
         .get_session_previews_batch()
         .unwrap_or_default();
+    let metadata = state
+        .kernel
+        .memory
+        .get_session_metadata_batch()
+        .unwrap_or_default();
 
     let agents: Vec<serde_json::Value> = state
         .kernel
@@ -214,6 +219,10 @@ pub async fn list_agents(
                 .get(&agent_id_str)
                 .map(|(preview, updated_at)| (preview.clone(), updated_at.clone()))
                 .unwrap_or_else(|| (String::new(), e.created_at.to_rfc3339()));
+            let message_count = metadata
+                .get(&agent_id_str)
+                .map(|(_, count, _)| *count)
+                .unwrap_or(0);
 
             serde_json::json!({
                 "id": e.id.to_string(),
@@ -238,6 +247,7 @@ pub async fn list_agents(
                     "vibe": e.identity.vibe,
                     "greeting_style": e.identity.greeting_style,
                 },
+                "message_count": message_count,
                 "last_message_preview": last_message_preview,
                 "last_activity": last_activity,
             })

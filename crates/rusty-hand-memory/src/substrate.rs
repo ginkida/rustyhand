@@ -232,6 +232,13 @@ impl MemorySubstrate {
         self.sessions.get_previews_batch()
     }
 
+    /// Batch-load session metadata (message_count) for all agents (one query).
+    pub fn get_session_metadata_batch(
+        &self,
+    ) -> RustyHandResult<std::collections::HashMap<String, (String, i64, String)>> {
+        self.sessions.get_session_metadata_batch()
+    }
+
     /// Delete a session by ID.
     pub fn delete_session(&self, session_id: SessionId) -> RustyHandResult<()> {
         self.sessions.delete_session(session_id)
