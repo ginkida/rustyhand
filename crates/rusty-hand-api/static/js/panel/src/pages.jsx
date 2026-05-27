@@ -28,7 +28,6 @@ function OverviewPage({ go }) {
   const errors = agents.filter(a => a.state === "error").length;
   const days = (usage && usage.days) || [];
   const cost24 = usage ? (usage.today_cost_usd || 0) : 0;
-  const ticks24 = (usage && usage.ticks_today) || 0;
   const refresh = () => { refreshAgents(); refreshAudit(); refreshApprovals(); };
 
   const approvalRows = (approvalsResp && approvalsResp.approvals) || [];
@@ -3720,7 +3719,7 @@ function AutomationPage() {
       });
       refreshCron();
     } catch (e) {
-      console.warn("toggle failed", e);
+      toastErr(`Toggle failed: ${e.message || e}`);
     }
   };
 
