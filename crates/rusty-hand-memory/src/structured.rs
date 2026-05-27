@@ -132,16 +132,18 @@ impl StructuredStore {
         let rows = stmt
             .query_map(rusqlite::params![agent_id.0.to_string()], |row| {
                 let key: String = row.get(0)?;
-                let val_str: String = row.get(1)?;
-                Ok((key, val_str))
+                let val_bytes: Vec<u8> = row.get(1)?;
+                Ok((key, val_bytes))
             })
             .map_err(|e| RustyHandError::Memory(e.to_string()))?;
 
         let mut pairs = Vec::new();
         for row in rows {
-            let (key, val_str) = row.map_err(|e| RustyHandError::Memory(e.to_string()))?;
+            let (key, val_bytes) = row.map_err(|e| RustyHandError::Memory(e.to_string()))?;
             let value: serde_json::Value =
-                serde_json::from_str(&val_str).unwrap_or(serde_json::Value::String(val_str));
+                serde_json::from_slice(&val_bytes).unwrap_or_else(|_| {
+                    serde_json::Value::String(String::from_utf8_lossy(&val_bytes).into_owned())
+                });
             pairs.push((key, value));
         }
         Ok(pairs)
