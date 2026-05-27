@@ -6208,7 +6208,7 @@ function AuditPage() {
                 {verify.valid
                   ? <span className="badge live"><I.check/> verified</span>
                   : <span className="badge error"><I.warn/> mismatch</span>}
-                <span className="dim mono" style={{fontSize:11}}>{(verify.entries || []).length || verify.total || 0} entries</span>
+                <span className="dim mono" style={{fontSize:11}}>{typeof verify.entries === "number" ? verify.entries : (verify.total || 0)} entries</span>
               </div>
               {lastVerifiedAt && (
                 <div className="dim mono mt-4" style={{fontSize:10.5}}>
@@ -6236,7 +6236,7 @@ function AuditPage() {
         <div className="col-3 card">
           <div className="muted mono mb-8" style={{fontSize:10.5,letterSpacing:".12em",textTransform:"uppercase"}}>Warning</div>
           <div className="mono" style={{fontSize:14, color: verify && verify.warning ? "var(--amber)" : "var(--live)"}}>
-            {verify && verify.warning ? "see below" : "none"}
+            {verify && verify.warning ? "⚠" : "none"}
           </div>
           <div className="dim mono mt-4" style={{fontSize:11}}>{verify && verify.warning ? verify.warning : "audit chain stable"}</div>
         </div>
