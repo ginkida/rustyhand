@@ -4569,7 +4569,7 @@ pub async fn get_session(
             (
                 StatusCode::OK,
                 Json(serde_json::json!({
-                    "id": session.id.0.to_string(),
+                    "session_id": session.id.0.to_string(),
                     "agent_id": session.agent_id.to_string(),
                     "label": session.label,
                     "message_count": session.messages.len(),

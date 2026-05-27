@@ -1413,7 +1413,7 @@ async fn test_get_session_returns_session_json() {
         .unwrap();
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["id"], session_id);
+    assert_eq!(body["session_id"], session_id);
     assert_eq!(body["agent_id"], agent_id);
     assert_eq!(body["message_count"], 0);
     assert!(body["messages"].as_array().is_some());
@@ -1580,7 +1580,7 @@ async fn test_restart_agent_preserves_sessions() {
         "Old session must survive restart — sessions should be preserved"
     );
     let sess: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(sess["id"], old_session_id);
+    assert_eq!(sess["session_id"], old_session_id);
 
     // New agent is live
     let resp = client
