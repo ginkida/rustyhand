@@ -8,11 +8,7 @@ const { useState, useEffect, useMemo, useRef } = React;
 //
 // Overview pulls live data from the kernel HTTP API. Each panel widget has
 // its own hook so partial failures (e.g. /api/usage/daily errors but
-// /api/agents succeeds) still render most of the page. Mock fixtures from
-// `window.RH_DATA` act as fallback only when the corresponding fetch hasn't
-// resolved yet — once data arrives, the design's mock vocabulary stays
-// (state badges, sparklines) because `normalizeAgent` maps API state names
-// to the design's vocabulary.
+// /api/agents succeeds) still render most of the page.
 function OverviewPage({ go }) {
   const [agentsResp, , refreshAgents] = usePolling("/api/agents?limit=100", 15000);
   const [health] = usePolling("/api/health/detail", 10000);
@@ -613,20 +609,8 @@ function AgentsPage({ openAgent }) {
       refresh();
     } catch (e) { toastErr(`restart failed: ${e.message || e}`); }
   };
-  const forkAgent = async (id, name) => {
-    const proposed = `${name}-fork`;
-    const ans = window.prompt(`Fork agent ${name} as:`, proposed);
-    if (!ans || !ans.trim()) return;
-    try {
-      const r = await rhFetch(`/api/agents/${encodeURIComponent(id)}/clone`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ new_name: ans.trim() }),
-      });
-      toastOk(`Forked ${name} → ${ans.trim()}`);
-      refresh();
-    } catch (e) { toastErr(`fork failed: ${e.message || e}`); }
-  };
+  const [forkTarget, setForkTarget] = useState(null);
+  const forkAgent = (id, name) => setForkTarget({ id, name });
 
   // Bulk actions: one network call per id, sequential to keep server
   // load predictable. We track partial successes so a single error
@@ -669,16 +653,13 @@ function AgentsPage({ openAgent }) {
   // Bulk move-to-group: ask once for a target group name (with autocomplete
   // sourced from existing groups), then PATCH each agent's config with the
   // new group. Empty string clears the group, putting the agent under "—".
-  const bulkMoveToGroup = async () => {
+  const [moveGroupOpen, setMoveGroupOpen] = useState(false);
+  const bulkMoveToGroup = () => {
+    if (selected.size === 0) return;
+    setMoveGroupOpen(true);
+  };
+  const executeMoveToGroup = async (targetGroup) => {
     const ids = [...selected];
-    if (ids.length === 0) return;
-    const known = [...new Set(agents.map(a => a.group).filter(Boolean))].sort();
-    const promptText = known.length > 0
-      ? `Move ${ids.length} agent(s) to group:\n\nExisting groups: ${known.join(", ")}\n(empty = ungrouped)`
-      : `Move ${ids.length} agent(s) to group:\n(empty = ungrouped)`;
-    const ans = window.prompt(promptText, known[0] || "");
-    if (ans == null) return; // user pressed Cancel
-    const targetGroup = ans.trim();
     let ok = 0, fail = 0;
     for (const id of ids) {
       try {
@@ -812,6 +793,80 @@ function AgentsPage({ openAgent }) {
           onClose={() => setShowDiff(false)}
         />
       )}
+      {forkTarget && <ForkAgentModal agent={forkTarget} onClose={() => setForkTarget(null)} onForked={() => { setForkTarget(null); refresh(); }}/>}
+      {moveGroupOpen && <MoveGroupModal
+        count={selected.size}
+        groups={[...new Set(agents.map(a => a.group).filter(g => g && g !== "—"))].sort()}
+        onClose={() => setMoveGroupOpen(false)}
+        onConfirm={(group) => { setMoveGroupOpen(false); executeMoveToGroup(group); }}
+      />}
+    </div>
+  );
+}
+
+function ForkAgentModal({ agent, onClose, onForked }) {
+  useEscapeKey(onClose);
+  const [name, setName] = useState(`${agent.name}-fork`);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const submit = async () => {
+    if (!name.trim()) { setErr("Name required"); return; }
+    setBusy(true); setErr(null);
+    try {
+      await rhFetch(`/api/agents/${encodeURIComponent(agent.id)}/clone`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ new_name: name.trim() }),
+      });
+      toastOk(`Forked ${agent.name} → ${name.trim()}`);
+      onForked();
+    } catch (e) { setErr(String(e.message || e)); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal" style={{maxWidth:440}} onClick={e => e.stopPropagation()}>
+        <div className="modal-head"><b className="mono">Fork agent</b><button className="icon-btn" onClick={onClose}><I.close/></button></div>
+        <div className="modal-body">
+          <div className="dim" style={{fontSize:12, marginBottom:10}}>Create a copy of <b className="mono">{agent.name}</b> with a new name.</div>
+          <label className="t-row col"><span className="t-lbl">New name</span>
+            <input className="modal-field" autoFocus value={name} onChange={e => setName(e.target.value)}
+                   onKeyDown={e => { if (e.key === "Enter") submit(); }}/></label>
+          {err && <div className="banner" style={{borderColor:"oklch(0.66 0.18 25 / .35)", marginTop:8}}>
+            <span className="dot err"/><span className="banner-title">ERROR</span>
+            <span className="banner-body mono" style={{fontSize:11}}>{err}</span>
+          </div>}
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+          <button className="btn primary" onClick={submit} disabled={busy || !name.trim()}>{busy ? "Forking…" : "Fork"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MoveGroupModal({ count, groups, onClose, onConfirm }) {
+  useEscapeKey(onClose);
+  const [group, setGroup] = useState(groups[0] || "");
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal" style={{maxWidth:440}} onClick={e => e.stopPropagation()}>
+        <div className="modal-head"><b className="mono">Move to group</b><button className="icon-btn" onClick={onClose}><I.close/></button></div>
+        <div className="modal-body">
+          <div className="dim" style={{fontSize:12, marginBottom:10}}>Move {count} agent(s) to a group. Empty = ungrouped.</div>
+          <label className="t-row col"><span className="t-lbl">Group name</span>
+            <input className="modal-field" autoFocus value={group} onChange={e => setGroup(e.target.value)}
+                   list="rh-groups-dl" placeholder="team-name or empty"
+                   onKeyDown={e => { if (e.key === "Enter") onConfirm(group.trim()); }}/>
+            <datalist id="rh-groups-dl">{groups.map(g => <option key={g} value={g}/>)}</datalist>
+          </label>
+        </div>
+        <div className="modal-foot">
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+          <button className="btn primary" onClick={() => onConfirm(group.trim())}>Move</button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -388,22 +388,8 @@ function AgentsPage({ openAgent }) {
       toastErr(`restart failed: ${e.message || e}`);
     }
   };
-  const forkAgent = async (id, name) => {
-    const proposed = `${name}-fork`;
-    const ans = window.prompt(`Fork agent ${name} as:`, proposed);
-    if (!ans || !ans.trim()) return;
-    try {
-      const r = await rhFetch(`/api/agents/${encodeURIComponent(id)}/clone`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ new_name: ans.trim() })
-      });
-      toastOk(`Forked ${name} \u2192 ${ans.trim()}`);
-      refresh();
-    } catch (e) {
-      toastErr(`fork failed: ${e.message || e}`);
-    }
-  };
+  const [forkTarget, setForkTarget] = useState(null);
+  const forkAgent = (id, name) => setForkTarget({ id, name });
   const bulkKill = async () => {
     const ids = [...selected];
     if (ids.length === 0) return;
@@ -439,18 +425,13 @@ function AgentsPage({ openAgent }) {
     if (ok > 0) toastOk(`Restarted ${ok} agent${ok === 1 ? "" : "s"}${fail ? ` (${fail} failed)` : ""}`);
     refresh();
   };
-  const bulkMoveToGroup = async () => {
+  const [moveGroupOpen, setMoveGroupOpen] = useState(false);
+  const bulkMoveToGroup = () => {
+    if (selected.size === 0) return;
+    setMoveGroupOpen(true);
+  };
+  const executeMoveToGroup = async (targetGroup) => {
     const ids = [...selected];
-    if (ids.length === 0) return;
-    const known = [...new Set(agents.map((a) => a.group).filter(Boolean))].sort();
-    const promptText = known.length > 0 ? `Move ${ids.length} agent(s) to group:
-
-Existing groups: ${known.join(", ")}
-(empty = ungrouped)` : `Move ${ids.length} agent(s) to group:
-(empty = ungrouped)`;
-    const ans = window.prompt(promptText, known[0] || "");
-    if (ans == null) return;
-    const targetGroup = ans.trim();
     let ok = 0, fail = 0;
     for (const id of ids) {
       try {
@@ -524,7 +505,78 @@ Existing groups: ${known.join(", ")}
       agents: [...selected].map((id) => agents.find((a) => a.id === id)).filter(Boolean),
       onClose: () => setShowDiff(false)
     }
+  ), forkTarget && /* @__PURE__ */ React.createElement(ForkAgentModal, { agent: forkTarget, onClose: () => setForkTarget(null), onForked: () => {
+    setForkTarget(null);
+    refresh();
+  } }), moveGroupOpen && /* @__PURE__ */ React.createElement(
+    MoveGroupModal,
+    {
+      count: selected.size,
+      groups: [...new Set(agents.map((a) => a.group).filter((g) => g && g !== "\u2014"))].sort(),
+      onClose: () => setMoveGroupOpen(false),
+      onConfirm: (group) => {
+        setMoveGroupOpen(false);
+        executeMoveToGroup(group);
+      }
+    }
   ));
+}
+function ForkAgentModal({ agent, onClose, onForked }) {
+  useEscapeKey(onClose);
+  const [name, setName] = useState(`${agent.name}-fork`);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const submit = async () => {
+    if (!name.trim()) {
+      setErr("Name required");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      await rhFetch(`/api/agents/${encodeURIComponent(agent.id)}/clone`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ new_name: name.trim() })
+      });
+      toastOk(`Forked ${agent.name} \u2192 ${name.trim()}`);
+      onForked();
+    } catch (e) {
+      setErr(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return /* @__PURE__ */ React.createElement("div", { className: "modal-back", onClick: onClose }, /* @__PURE__ */ React.createElement("div", { className: "modal", style: { maxWidth: 440 }, onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "modal-head" }, /* @__PURE__ */ React.createElement("b", { className: "mono" }, "Fork agent"), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", onClick: onClose }, /* @__PURE__ */ React.createElement(I.close, null))), /* @__PURE__ */ React.createElement("div", { className: "modal-body" }, /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 12, marginBottom: 10 } }, "Create a copy of ", /* @__PURE__ */ React.createElement("b", { className: "mono" }, agent.name), " with a new name."), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "New name"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      className: "modal-field",
+      autoFocus: true,
+      value: name,
+      onChange: (e) => setName(e.target.value),
+      onKeyDown: (e) => {
+        if (e.key === "Enter") submit();
+      }
+    }
+  )), err && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)", marginTop: 8 } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, err))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: onClose }, "Cancel"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: submit, disabled: busy || !name.trim() }, busy ? "Forking\u2026" : "Fork"))));
+}
+function MoveGroupModal({ count, groups, onClose, onConfirm }) {
+  useEscapeKey(onClose);
+  const [group, setGroup] = useState(groups[0] || "");
+  return /* @__PURE__ */ React.createElement("div", { className: "modal-back", onClick: onClose }, /* @__PURE__ */ React.createElement("div", { className: "modal", style: { maxWidth: 440 }, onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "modal-head" }, /* @__PURE__ */ React.createElement("b", { className: "mono" }, "Move to group"), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", onClick: onClose }, /* @__PURE__ */ React.createElement(I.close, null))), /* @__PURE__ */ React.createElement("div", { className: "modal-body" }, /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 12, marginBottom: 10 } }, "Move ", count, " agent(s) to a group. Empty = ungrouped."), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Group name"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      className: "modal-field",
+      autoFocus: true,
+      value: group,
+      onChange: (e) => setGroup(e.target.value),
+      list: "rh-groups-dl",
+      placeholder: "team-name or empty",
+      onKeyDown: (e) => {
+        if (e.key === "Enter") onConfirm(group.trim());
+      }
+    }
+  ), /* @__PURE__ */ React.createElement("datalist", { id: "rh-groups-dl" }, groups.map((g) => /* @__PURE__ */ React.createElement("option", { key: g, value: g }))))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: onClose }, "Cancel"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => onConfirm(group.trim()) }, "Move"))));
 }
 function AgentDiffModal({ agents, onClose }) {
   const [a, b] = agents;

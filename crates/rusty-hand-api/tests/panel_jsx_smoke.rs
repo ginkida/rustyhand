@@ -93,7 +93,7 @@ global.React = {{
 }};
 
 const dir = {panel:?};
-const files = ['data.js', 'api.js', 'icons.js', 'tweaks-panel.js', 'pages.js', 'app.js'];
+const files = ['api.js', 'icons.js', 'tweaks-panel.js', 'pages.js', 'app.js'];
 for (const f of files) {{
   const code = fs.readFileSync(path.join(dir, f), 'utf8');
   try {{ eval(code); }}
@@ -102,7 +102,7 @@ for (const f of files) {{
 
 // Every page + helper that webchat.rs counts on must be on window.
 const need = [
-  'RH_DATA', 'rhFetch', 'useApi', 'usePolling', 'useAgentWs', 'normalizeAgent',
+  'rhFetch', 'useApi', 'usePolling', 'useAgentWs', 'normalizeAgent',
   'renderMarkdown', 'downloadBlob', 'rowsToCsv', 'setApiKey', 'clearApiKey',
   'I', 'ChannelIcon', 'Avatar', 'StateBadge', 'Spark', 'BarRow',
   'useTweaks', 'TweaksPanel',

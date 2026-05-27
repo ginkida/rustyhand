@@ -81,7 +81,6 @@ async fn dashboard_includes_all_panel_modules() {
     // Every panel module exposes a recognizable global on `window`. If any
     // include_str path is wrong or a file is missing these strings vanish.
     let markers = [
-        ("RH_DATA", "data.js must expose window.RH_DATA"),
         ("rhFetch", "api.js must expose rhFetch"),
         ("useApi", "api.js must expose useApi"),
         ("usePolling", "api.js must expose usePolling"),

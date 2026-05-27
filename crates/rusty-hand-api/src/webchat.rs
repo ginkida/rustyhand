@@ -5,10 +5,10 @@
 //! single-binary deployment while allowing organized source files.
 //!
 //! Features:
-//! - Alpine.js SPA with hash-based routing (10 panels)
+//! - React 18 SPA with hash-based routing (18 pages)
 //! - Dark/light theme toggle with system preference detection
 //! - Responsive layout with collapsible sidebar
-//! - Markdown rendering + syntax highlighting (bundled locally)
+//! - Markdown rendering (built-in, no external deps)
 //! - WebSocket real-time chat with HTTP fallback
 //! - Agent management, workflows, memory browser, audit log, and more
 
@@ -83,13 +83,12 @@ pub async fn webchat_page() -> impl IntoResponse {
 ///
 /// Load order matters:
 /// 1. React + ReactDOM globals must exist before any panel script runs.
-/// 2. `data.js` exposes `window.RH_DATA` (mock fallback fixtures).
-/// 3. `api.js` registers `useApi` / `usePolling` / `normalizeAgent` etc.
+/// 2. `api.js` registers `useApi` / `usePolling` / `normalizeAgent` etc.
 ///    on `window` — pages call these to fetch live kernel data.
-/// 4. `icons.js` registers shared visual primitives on `window`.
-/// 5. `tweaks-panel.js` registers the tweaks helpers on `window`.
-/// 6. `pages.js` registers per-route components on `window`.
-/// 7. `app.js` is last — it mounts `<App/>` into `#root`.
+/// 3. `icons.js` registers shared visual primitives on `window`.
+/// 4. `tweaks-panel.js` registers the tweaks helpers on `window`.
+/// 5. `pages.js` registers per-route components on `window`.
+/// 6. `app.js` is last — it mounts `<App/>` into `#root`.
 const WEBCHAT_HTML: &str = concat!(
     include_str!("../static/index_head.html"),
     "<style>\n",
@@ -103,8 +102,6 @@ const WEBCHAT_HTML: &str = concat!(
     include_str!("../static/vendor/react-dom.production.min.js"),
     "\n</script>\n",
     "<script>\n",
-    include_str!("../static/js/panel/data.js"),
-    "\n",
     include_str!("../static/js/panel/api.js"),
     "\n",
     include_str!("../static/js/panel/icons.js"),
