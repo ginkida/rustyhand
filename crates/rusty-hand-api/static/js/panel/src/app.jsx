@@ -21,14 +21,14 @@ const ACCENTS = {
 const NAV = [
   { kind: "section", label: "Work" },
   { id: "overview",   label: "Overview",   icon: <I.overview/>,   count: null },
-  { id: "agents",     label: "Agents",     icon: <I.agents/>,     count: 10 },
+  { id: "agents",     label: "Agents",     icon: <I.agents/>,     count: null, liveKey: "agents" },
   { id: "chat",       label: "Chat",       icon: <I.chat/>,       count: null },
-  { id: "approvals",  label: "Approvals",  icon: <I.approvals/>,  count: 3, badge: "warn" },
+  { id: "approvals",  label: "Approvals",  icon: <I.approvals/>,  count: null, badge: null, liveKey: "approvals" },
   { kind: "section", label: "Build" },
-  { id: "workflows",  label: "Workflows",  icon: <I.workflows/>,  count: 5 },
-  { id: "automation", label: "Automation", icon: <I.automation/>, count: 9 },
-  { id: "channels",   label: "Channels",   icon: <I.channels/>,   count: 4 },
-  { id: "skills",     label: "Skills",     icon: <I.skills/>,     count: 60 },
+  { id: "workflows",  label: "Workflows",  icon: <I.workflows/>,  count: null, liveKey: "workflows" },
+  { id: "automation", label: "Automation", icon: <I.automation/>, count: null, liveKey: "automation" },
+  { id: "channels",   label: "Channels",   icon: <I.channels/>,   count: null, liveKey: "channels" },
+  { id: "skills",     label: "Skills",     icon: <I.skills/>,     count: null, liveKey: "skills" },
   { kind: "section", label: "Inspect" },
   { id: "analytics",  label: "Analytics",  icon: <I.analytics/>,  count: null },
   { id: "knowledge",  label: "Knowledge",  icon: <I.knowledge/>,  count: null },
@@ -64,11 +64,23 @@ function usePinnedNav() {
 }
 
 function Sidebar({ page, go }) {
-  // Live sidebar status: kernel uptime/version + pending approvals count.
-  // Approvals subscribe to SSE for instant badge update + toast on new
-  // requests; health/onboarding remain on a slow poll.
+  // Live sidebar counts: slow-poll lightweight endpoints so the sidebar
+  // badges reflect real state instead of hardcoded design-time numbers.
   const [health] = usePolling("/api/health/detail", 20000);
   const [onb] = usePolling("/api/onboarding", 30000);
+  const [agentsResp] = usePolling("/api/agents?limit=1", 30000);
+  const [wfResp] = usePolling("/api/workflows", 60000);
+  const [cronResp] = usePolling("/api/cron/jobs", 60000);
+  const [trigResp] = usePolling("/api/triggers", 60000);
+  const [chResp] = usePolling("/api/channels", 60000);
+  const [skillsResp] = usePolling("/api/skills", 120000);
+  const liveCounts = React.useMemo(() => ({
+    agents: agentsResp && agentsResp.total != null ? agentsResp.total : null,
+    workflows: wfResp ? (Array.isArray(wfResp) ? wfResp.length : (wfResp.total ?? (wfResp.workflows || []).length)) : null,
+    automation: (cronResp && cronResp.total != null ? cronResp.total : 0) + (Array.isArray(trigResp) ? trigResp.length : (trigResp && trigResp.total != null ? trigResp.total : 0)),
+    channels: chResp && chResp.configured_count != null ? chResp.configured_count : null,
+    skills: skillsResp && skillsResp.total != null ? skillsResp.total : null,
+  }), [agentsResp, wfResp, cronResp, trigResp, chResp, skillsResp]);
   const [pinned, togglePin] = usePinnedNav();
   const [approvalsCount, setApprovalsCount] = React.useState(null);
   const lastIdsRef = React.useRef(null);
@@ -107,7 +119,7 @@ function Sidebar({ page, go }) {
               .filter(Boolean)
               .map(it => {
                 const active = page === it.id;
-                const liveCount = it.id === "approvals" && approvalsCount != null ? approvalsCount : it.count;
+                const liveCount = it.id === "approvals" && approvalsCount != null ? approvalsCount : (it.liveKey && liveCounts[it.liveKey] != null ? liveCounts[it.liveKey] : it.count);
                 const liveBadge = it.id === "approvals" && approvalsCount > 0 ? "warn" : it.badge;
                 return (
                   <a key={`pin-${it.id}`} href={`#/${it.id}`}

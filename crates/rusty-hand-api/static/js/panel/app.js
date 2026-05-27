@@ -20,14 +20,14 @@ const ACCENTS = {
 const NAV = [
   { kind: "section", label: "Work" },
   { id: "overview", label: "Overview", icon: /* @__PURE__ */ React.createElement(I.overview, null), count: null },
-  { id: "agents", label: "Agents", icon: /* @__PURE__ */ React.createElement(I.agents, null), count: 10 },
+  { id: "agents", label: "Agents", icon: /* @__PURE__ */ React.createElement(I.agents, null), count: null, liveKey: "agents" },
   { id: "chat", label: "Chat", icon: /* @__PURE__ */ React.createElement(I.chat, null), count: null },
-  { id: "approvals", label: "Approvals", icon: /* @__PURE__ */ React.createElement(I.approvals, null), count: 3, badge: "warn" },
+  { id: "approvals", label: "Approvals", icon: /* @__PURE__ */ React.createElement(I.approvals, null), count: null, badge: null, liveKey: "approvals" },
   { kind: "section", label: "Build" },
-  { id: "workflows", label: "Workflows", icon: /* @__PURE__ */ React.createElement(I.workflows, null), count: 5 },
-  { id: "automation", label: "Automation", icon: /* @__PURE__ */ React.createElement(I.automation, null), count: 9 },
-  { id: "channels", label: "Channels", icon: /* @__PURE__ */ React.createElement(I.channels, null), count: 4 },
-  { id: "skills", label: "Skills", icon: /* @__PURE__ */ React.createElement(I.skills, null), count: 60 },
+  { id: "workflows", label: "Workflows", icon: /* @__PURE__ */ React.createElement(I.workflows, null), count: null, liveKey: "workflows" },
+  { id: "automation", label: "Automation", icon: /* @__PURE__ */ React.createElement(I.automation, null), count: null, liveKey: "automation" },
+  { id: "channels", label: "Channels", icon: /* @__PURE__ */ React.createElement(I.channels, null), count: null, liveKey: "channels" },
+  { id: "skills", label: "Skills", icon: /* @__PURE__ */ React.createElement(I.skills, null), count: null, liveKey: "skills" },
   { kind: "section", label: "Inspect" },
   { id: "analytics", label: "Analytics", icon: /* @__PURE__ */ React.createElement(I.analytics, null), count: null },
   { id: "knowledge", label: "Knowledge", icon: /* @__PURE__ */ React.createElement(I.knowledge, null), count: null },
@@ -65,6 +65,22 @@ function usePinnedNav() {
 function Sidebar({ page, go }) {
   const [health] = usePolling("/api/health/detail", 2e4);
   const [onb] = usePolling("/api/onboarding", 3e4);
+  const [agentsResp] = usePolling("/api/agents?limit=1", 3e4);
+  const [wfResp] = usePolling("/api/workflows", 6e4);
+  const [cronResp] = usePolling("/api/cron/jobs", 6e4);
+  const [trigResp] = usePolling("/api/triggers", 6e4);
+  const [chResp] = usePolling("/api/channels", 6e4);
+  const [skillsResp] = usePolling("/api/skills", 12e4);
+  const liveCounts = React.useMemo(() => {
+    var _a;
+    return {
+      agents: agentsResp && agentsResp.total != null ? agentsResp.total : null,
+      workflows: wfResp ? Array.isArray(wfResp) ? wfResp.length : (_a = wfResp.total) != null ? _a : (wfResp.workflows || []).length : null,
+      automation: (cronResp && cronResp.total != null ? cronResp.total : 0) + (Array.isArray(trigResp) ? trigResp.length : trigResp && trigResp.total != null ? trigResp.total : 0),
+      channels: chResp && chResp.configured_count != null ? chResp.configured_count : null,
+      skills: skillsResp && skillsResp.total != null ? skillsResp.total : null
+    };
+  }, [agentsResp, wfResp, cronResp, trigResp, chResp, skillsResp]);
   const [pinned, togglePin] = usePinnedNav();
   const [approvalsCount, setApprovalsCount] = React.useState(null);
   const lastIdsRef = React.useRef(null);
@@ -86,7 +102,7 @@ function Sidebar({ page, go }) {
   const uptime = health && health.uptime_seconds != null ? formatUptimeShort(health.uptime_seconds) : null;
   return /* @__PURE__ */ React.createElement("nav", { className: "sidebar" }, /* @__PURE__ */ React.createElement("div", { className: "sb-brand" }, /* @__PURE__ */ React.createElement("div", { className: "sb-mark" }, "RH"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "sb-title" }, "Rusty Hand"), /* @__PURE__ */ React.createElement("div", { className: "sb-sub" }, health && health.version ? `v${health.version}` : "\u2014", health && health.schema_version != null ? ` \xB7 schema v${health.schema_version}` : ""))), /* @__PURE__ */ React.createElement("div", { className: "sb-nav", style: { flex: 1, overflow: "auto", padding: "6px 6px" } }, pinned.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-section-label", style: { marginTop: 4 } }, "Pinned"), pinned.map((id) => NAV.find((n) => n.id === id)).filter(Boolean).map((it) => {
     const active = page === it.id;
-    const liveCount = it.id === "approvals" && approvalsCount != null ? approvalsCount : it.count;
+    const liveCount = it.id === "approvals" && approvalsCount != null ? approvalsCount : it.liveKey && liveCounts[it.liveKey] != null ? liveCounts[it.liveKey] : it.count;
     const liveBadge = it.id === "approvals" && approvalsCount > 0 ? "warn" : it.badge;
     return /* @__PURE__ */ React.createElement(
       "a",

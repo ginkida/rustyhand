@@ -5,10 +5,8 @@
 // panel stays declarative.
 //
 // Loading strategy: each hook starts with `null` data and `null` error.
-// Pages fall back to the bundled mock fixtures (window.RH_DATA) while data
-// is loading or when the kernel is unreachable — that keeps the design
-// looking right during cold-boot and lets the dashboard still render in
-// disaster scenarios.
+// Pages show empty state (skeletons / "loading…") until the first fetch
+// resolves. No mock fixtures — every number on screen is live.
 //
 // Auth: relies on cookie / localhost classification done by the API auth
 // middleware. No bearer token is attached client-side — the dashboard runs
