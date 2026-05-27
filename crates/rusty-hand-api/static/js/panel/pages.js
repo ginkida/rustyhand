@@ -1077,7 +1077,7 @@ function AgentConfigForm({ agent, detail, onSaved }) {
 function AgentKvEditor({ agent }) {
   const path = agent ? `/api/memory/agents/${agent.id}/kv` : null;
   const [resp, fetchErr, refresh] = useApi(path);
-  const pairs = resp && resp.kv || [];
+  const pairs = resp && (resp.kv_pairs || resp.kv) || [];
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
   const [editingKey, setEditingKey] = useState(null);
