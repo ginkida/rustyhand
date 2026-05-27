@@ -2509,15 +2509,22 @@ const CHAT_SLASH_COMMANDS = [
 
 function ChatInput({ typed, setTyped, sending, send, active, ws }) {
   const inputRef = React.useRef(null);
+  const [serverCmds] = useApi("/api/commands");
+  const allCommands = React.useMemo(() => {
+    const map = new Map(CHAT_SLASH_COMMANDS.map(c => [c.cmd, c]));
+    if (serverCmds && Array.isArray(serverCmds.commands)) {
+      for (const sc of serverCmds.commands) {
+        const key = sc.cmd.startsWith("/") ? sc.cmd : `/${sc.cmd}`;
+        if (!map.has(key)) map.set(key, { cmd: key, help: sc.desc || sc.description || "" });
+      }
+    }
+    return [...map.values()];
+  }, [serverCmds]);
   const open = typed.startsWith("/") && !typed.includes("\n");
-  // Filter commands by the leading token of the typed text. Once the
-  // user typed past the command (e.g. "/workflow run leadgen"), keep
-  // the matching command pinned at the top with no other suggestions
-  // so they can see which command they're invoking.
   const candidates = React.useMemo(() => {
     if (!open) return [];
     const ql = typed.toLowerCase();
-    return CHAT_SLASH_COMMANDS
+    return allCommands
       .filter((c) => c.cmd.toLowerCase().startsWith(ql) || ql.startsWith(c.cmd.toLowerCase() + " "))
       .sort((a, b) => {
         // Exact-prefix matches first.
