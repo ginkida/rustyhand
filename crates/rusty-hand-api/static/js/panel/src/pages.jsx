@@ -4600,7 +4600,7 @@ function AnalyticsPage() {
   const totalRequests7d = days.slice(-7).reduce((s, d) => s + (d.requests || 0), 0);
   const avgPerDay = days.length ? (totalRequests7d / Math.min(7, days.length)) : 0;
   const modelRows = Array.isArray(byModel) ? byModel : (byModel && byModel.models) || [];
-  const maxModelSpend = Math.max(0.0001, ...modelRows.map(m => Number(m.spend || m.cost_usd || 0)));
+  const maxModelSpend = Math.max(0.0001, ...modelRows.map(m => Number(m.spend || m.total_cost_usd || m.cost_usd || 0)));
 
   const hourSeries = dailyCosts.slice(-24);
   const seriesForChart = hourSeries.length ? hourSeries : Array(24).fill(0);
@@ -4657,13 +4657,13 @@ function AnalyticsPage() {
         <div className="col-4 card">
           <div className="row between mb-12">
             <span className="mono dim" style={{fontSize:11,letterSpacing:".12em",textTransform:"uppercase"}}>Spend by model</span>
-            <span className="mono dim" style={{fontSize:11}}>${modelRows.reduce((s, m) => s + Number(m.spend || m.cost_usd || 0), 0).toFixed(2)}</span>
+            <span className="mono dim" style={{fontSize:11}}>${modelRows.reduce((s, m) => s + Number(m.spend || m.total_cost_usd || m.cost_usd || 0), 0).toFixed(2)}</span>
           </div>
           <div className="col" style={{gap:4}}>
             {!byModel && <div className="muted mono" style={{fontSize:11, padding:"6px 0"}}>loading…</div>}
             {byModel && modelRows.length === 0 && <div className="muted mono" style={{fontSize:11, padding:"6px 0"}}>no model usage data yet.</div>}
             {modelRows.slice(0, 8).map(m => (
-              <BarRow key={m.model || m.name} label={m.model || m.name} value={Number(m.spend || m.cost_usd || 0)} max={maxModelSpend} unit="$"/>
+              <BarRow key={m.model || m.name} label={m.model || m.name} value={Number(m.spend || m.total_cost_usd || m.cost_usd || 0)} max={maxModelSpend} unit="$"/>
             ))}
           </div>
         </div>
