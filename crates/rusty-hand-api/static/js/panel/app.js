@@ -76,7 +76,7 @@ function Sidebar({ page, go }) {
     return {
       agents: agentsResp && agentsResp.total != null ? agentsResp.total : null,
       workflows: wfResp ? Array.isArray(wfResp) ? wfResp.length : (_a = wfResp.total) != null ? _a : (wfResp.workflows || []).length : null,
-      automation: (cronResp && cronResp.total != null ? cronResp.total : 0) + (Array.isArray(trigResp) ? trigResp.length : trigResp && trigResp.total != null ? trigResp.total : 0),
+      automation: cronResp || trigResp ? (cronResp && cronResp.total != null ? cronResp.total : 0) + (Array.isArray(trigResp) ? trigResp.length : trigResp && trigResp.total != null ? trigResp.total : 0) : null,
       channels: chResp && chResp.configured_count != null ? chResp.configured_count : null,
       skills: skillsResp && skillsResp.total != null ? skillsResp.total : null
     };
@@ -128,7 +128,7 @@ function Sidebar({ page, go }) {
   })), NAV.map((it, i) => {
     if (it.kind === "section") return /* @__PURE__ */ React.createElement("div", { key: i, className: "sb-section-label", style: { marginTop: i === 0 && pinned.length === 0 ? 4 : 10 } }, it.label);
     const active = page === it.id;
-    const liveCount = it.id === "approvals" && approvalsCount != null ? approvalsCount : it.count;
+    const liveCount = it.id === "approvals" && approvalsCount != null ? approvalsCount : it.liveKey && liveCounts[it.liveKey] != null ? liveCounts[it.liveKey] : it.count;
     const liveBadge = it.id === "approvals" && approvalsCount > 0 ? "warn" : it.badge;
     const isPinned = pinned.includes(it.id);
     return /* @__PURE__ */ React.createElement(
