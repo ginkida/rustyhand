@@ -240,12 +240,14 @@ pub async fn exec_in_sandbox(
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let exit_code = output.status.code().unwrap_or(-1);
 
-    // Truncate large outputs
+    // Truncate large outputs. Container stdout/stderr is frequently
+    // non-ASCII — use a char-boundary-safe truncation so byte `max_output`
+    // never splits a multi-byte char (raw `&s[..max_output]` panics).
     let max_output = 50_000;
     let stdout = if stdout.len() > max_output {
         format!(
             "{}... [truncated, {} total bytes]",
-            &stdout[..max_output],
+            rusty_hand_types::text::truncate_bytes(&stdout, max_output),
             stdout.len()
         )
     } else {
@@ -254,7 +256,7 @@ pub async fn exec_in_sandbox(
     let stderr = if stderr.len() > max_output {
         format!(
             "{}... [truncated, {} total bytes]",
-            &stderr[..max_output],
+            rusty_hand_types::text::truncate_bytes(&stderr, max_output),
             stderr.len()
         )
     } else {

@@ -1938,12 +1938,15 @@ async fn tool_shell_exec(
             let stderr = String::from_utf8_lossy(&output.stderr);
             let exit_code = output.status.code().unwrap_or(-1);
 
-            // Truncate very long outputs to prevent memory issues
+            // Truncate very long outputs to prevent memory issues.
+            // Subprocess stdout/stderr is frequently non-ASCII (Unicode
+            // filenames, localized messages) — use a char-boundary-safe
+            // truncation so byte `max_output` never splits a multi-byte char.
             let max_output = 100_000;
             let stdout_str = if stdout.len() > max_output {
                 format!(
                     "{}...\n[truncated, {} total bytes]",
-                    &stdout[..max_output],
+                    rusty_hand_types::text::truncate_bytes(&stdout, max_output),
                     stdout.len()
                 )
             } else {
@@ -1952,7 +1955,7 @@ async fn tool_shell_exec(
             let stderr_str = if stderr.len() > max_output {
                 format!(
                     "{}...\n[truncated, {} total bytes]",
-                    &stderr[..max_output],
+                    rusty_hand_types::text::truncate_bytes(&stderr, max_output),
                     stderr.len()
                 )
             } else {
