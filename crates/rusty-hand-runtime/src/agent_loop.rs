@@ -797,11 +797,9 @@ fn derive_session_label(text: &str) -> Option<String> {
         .collect();
     let words: Vec<&str> = clean.split_whitespace().collect();
     let candidate = words.iter().take(6).cloned().collect::<Vec<_>>().join(" ");
-    let truncated = if candidate.len() > 40 {
-        candidate[..40].trim_end().to_string()
-    } else {
-        candidate
-    };
+    let truncated = rusty_hand_types::text::truncate_chars(&candidate, 40)
+        .trim_end()
+        .to_string();
     if truncated.len() < 2 {
         None
     } else {
@@ -1946,6 +1944,27 @@ mod tests {
     #[test]
     fn test_label_none_for_only_specials() {
         assert!(derive_session_label("!!!???@@@").is_none());
+    }
+
+    #[test]
+    fn test_label_multibyte_does_not_panic() {
+        // Regression: `candidate[..40]` panicked when byte 40 fell inside a
+        // multi-byte char. 3-byte hiragana lands mid-char at byte 40
+        // (40 % 3 != 0), which is the worst case.
+        let input = "あいうえおかき あいうえおかき あいうえおかき";
+        let l = derive_session_label(input).expect("should produce a label");
+        assert!(l.chars().count() <= 40, "label too long: {l}");
+        // Result must be valid UTF-8 (guaranteed by String, but assert intent).
+        assert!(!l.is_empty());
+    }
+
+    #[test]
+    fn test_label_cyrillic() {
+        // Note: lowercasing is ASCII-only (`to_ascii_lowercase`), so Cyrillic
+        // keeps its original case — labels are cosmetic, this is acceptable.
+        let l = derive_session_label("Привет мир это тестовое сообщение").unwrap();
+        assert!(l.chars().count() <= 40);
+        assert_eq!(l, "Привет мир это тестовое сообщение");
     }
 
     // ----- substitute_prompt_vars tests -----

@@ -1807,7 +1807,7 @@ async fn tool_web_fetch_legacy(input: &serde_json::Value) -> Result<String, Stri
     let truncated = if body.len() > max_len {
         format!(
             "{}... [truncated, {} total bytes]",
-            &body[..max_len],
+            rusty_hand_types::text::truncate_bytes(&body, max_len),
             body.len()
         )
     } else {
