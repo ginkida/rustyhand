@@ -117,6 +117,65 @@ impl SlackAdapter {
         }
         Ok(())
     }
+
+    /// Post a single message and return its `ts` (message id) for streaming
+    /// updates via chat.update. Truncates to the 3000-char limit.
+    async fn api_send_message_returning_ts(
+        &self,
+        channel_id: &str,
+        text: &str,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let display: String = text.chars().take(SLACK_MSG_LIMIT).collect();
+        let body = serde_json::json!({ "channel": channel_id, "text": display });
+        let resp: serde_json::Value = self
+            .client
+            .post(format!("{SLACK_API_BASE}/chat.postMessage"))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.bot_token.as_str()),
+            )
+            .json(&body)
+            .send()
+            .await?
+            .json()
+            .await?;
+        if resp["ok"].as_bool() != Some(true) {
+            let err = resp["error"].as_str().unwrap_or("unknown");
+            return Err(format!("Slack chat.postMessage failed: {err}").into());
+        }
+        match resp["ts"].as_str() {
+            Some(ts) => Ok(ts.to_string()),
+            None => Err("Slack chat.postMessage: no ts in response".into()),
+        }
+    }
+
+    /// Update an existing message via chat.update (for streaming). Truncates.
+    async fn api_update_message(
+        &self,
+        channel_id: &str,
+        ts: &str,
+        text: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let display: String = text.chars().take(SLACK_MSG_LIMIT).collect();
+        let body = serde_json::json!({ "channel": channel_id, "ts": ts, "text": display });
+        let resp: serde_json::Value = self
+            .client
+            .post(format!("{SLACK_API_BASE}/chat.update"))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.bot_token.as_str()),
+            )
+            .json(&body)
+            .send()
+            .await?
+            .json()
+            .await?;
+        if resp["ok"].as_bool() != Some(true) {
+            let err = resp["error"].as_str().unwrap_or("unknown");
+            return Err(format!("Slack chat.update failed: {err}").into());
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -317,6 +376,90 @@ impl ChannelAdapter for SlackAdapter {
                     .await?;
             }
         }
+        Ok(())
+    }
+
+    fn supports_streaming(&self) -> bool {
+        true
+    }
+
+    async fn send_streaming(
+        &self,
+        user: &ChannelUser,
+        mut rx: tokio::sync::mpsc::Receiver<String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let channel_id = &user.platform_id;
+        let mut full_text = String::new();
+        let mut ts: Option<String> = None;
+        let mut last_edit = std::time::Instant::now();
+
+        // chat.update is Tier 3 (~50/min); throttle to ~1 update/sec.
+        const EDIT_INTERVAL: Duration = Duration::from_millis(1000);
+
+        while let Some(chunk) = rx.recv().await {
+            full_text.push_str(&chunk);
+
+            if ts.is_none() {
+                // Post the first chunk as a new message and capture its ts.
+                if !full_text.is_empty() {
+                    match self
+                        .api_send_message_returning_ts(channel_id, &full_text)
+                        .await
+                    {
+                        Ok(message_ts) => ts = Some(message_ts),
+                        Err(e) => {
+                            warn!("Slack streaming: failed to send initial message: {e}");
+                            break;
+                        }
+                    }
+                    last_edit = std::time::Instant::now();
+                }
+            } else if last_edit.elapsed() >= EDIT_INTERVAL {
+                // Throttled mid-stream update. Failures are recoverable (next
+                // tick retries with newer text) — log at debug, don't break.
+                if let Some(ref message_ts) = ts {
+                    if let Err(e) = self
+                        .api_update_message(channel_id, message_ts, &full_text)
+                        .await
+                    {
+                        tracing::debug!(
+                            channel_id = %channel_id, error = %e,
+                            "Slack streaming: mid-stream update failed (will retry next tick)"
+                        );
+                    }
+                    last_edit = std::time::Instant::now();
+                }
+            }
+        }
+
+        // Final flush: update the first message with the complete text, sending
+        // any overflow beyond the 3000-char limit as new messages.
+        if let Some(ref message_ts) = ts {
+            if !full_text.is_empty() {
+                let chunks = split_message(&full_text, SLACK_MSG_LIMIT);
+                if let Err(e) = self
+                    .api_update_message(channel_id, message_ts, chunks[0])
+                    .await
+                {
+                    warn!(
+                        channel_id = %channel_id, error = %e,
+                        "Slack streaming: final update failed — user view stale"
+                    );
+                }
+                for extra in &chunks[1..] {
+                    if let Err(e) = self.api_send_message(channel_id, extra).await {
+                        warn!(
+                            channel_id = %channel_id, error = %e,
+                            "Slack streaming: overflow chunk send failed — partial response lost"
+                        );
+                    }
+                }
+            }
+        } else if !full_text.is_empty() {
+            // No initial message was sent — fall back to a plain send.
+            self.api_send_message(channel_id, &full_text).await?;
+        }
+
         Ok(())
     }
 
@@ -592,6 +735,9 @@ mod tests {
         );
         assert_eq!(adapter.name(), "slack");
         assert_eq!(adapter.channel_type(), ChannelType::Slack);
+        // Streaming is implemented via chat.update — bridge picks the
+        // progressive path instead of the buffered default.
+        assert!(adapter.supports_streaming());
     }
 
     /// Regression: `api_send_message` previously logged a warn on

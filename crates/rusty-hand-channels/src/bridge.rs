@@ -1060,7 +1060,8 @@ async fn dispatch_message(
         let (chunk_tx, chunk_rx) = tokio::sync::mpsc::channel::<String>(64);
 
         // Start adapter streaming consumer in parallel — it will
-        // progressively edit the Telegram message as chunks arrive.
+        // progressively edit the live message as chunks arrive
+        // (Telegram editMessageText, Discord PATCH, Slack chat.update).
         let user_for_stream = message.sender.clone();
         let adapter_for_stream = Arc::clone(adapter_arc);
         let adapter_name = adapter.name().to_string();

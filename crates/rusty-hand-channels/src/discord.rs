@@ -129,6 +129,67 @@ impl DiscordAdapter {
         Ok(())
     }
 
+    /// Send a single message and return its Discord message ID, for streaming
+    /// edits. Truncates to the 2000-char limit (overflow is handled by the
+    /// streaming caller's final flush).
+    async fn api_send_message_returning_id(
+        &self,
+        channel_id: &str,
+        text: &str,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let url = format!("{DISCORD_API_BASE}/channels/{channel_id}/messages");
+        let display: String = text.chars().take(DISCORD_MSG_LIMIT).collect();
+        let body = serde_json::json!({ "content": display });
+        let resp = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bot {}", self.token.as_str()))
+            .json(&body)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body_text = resp
+                .text()
+                .await
+                .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
+            return Err(format!("Discord sendMessage failed: {status} — {body_text}").into());
+        }
+        let json: serde_json::Value = resp.json().await?;
+        match json["id"].as_str() {
+            Some(id) => Ok(id.to_string()),
+            None => Err("Discord sendMessage: no message id in response".into()),
+        }
+    }
+
+    /// Edit an existing message's content (for streaming). Truncates to limit.
+    async fn api_edit_message(
+        &self,
+        channel_id: &str,
+        message_id: &str,
+        text: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let url = format!("{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}");
+        let display: String = text.chars().take(DISCORD_MSG_LIMIT).collect();
+        let body = serde_json::json!({ "content": display });
+        let resp = self
+            .client
+            .patch(&url)
+            .header("Authorization", format!("Bot {}", self.token.as_str()))
+            .json(&body)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body_text = resp
+                .text()
+                .await
+                .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
+            return Err(format!("Discord editMessage failed: {status} — {body_text}").into());
+        }
+        Ok(())
+    }
+
     /// Send typing indicator to a Discord channel.
     async fn api_send_typing(&self, channel_id: &str) -> Result<(), Box<dyn std::error::Error>> {
         let url = format!("{DISCORD_API_BASE}/channels/{channel_id}/typing");
@@ -438,6 +499,86 @@ impl ChannelAdapter for DiscordAdapter {
         self.api_send_typing(&user.platform_id).await
     }
 
+    fn supports_streaming(&self) -> bool {
+        true
+    }
+
+    async fn send_streaming(
+        &self,
+        user: &ChannelUser,
+        mut rx: tokio::sync::mpsc::Receiver<String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // platform_id is the channel_id for Discord
+        let channel_id = &user.platform_id;
+        let mut full_text = String::new();
+        let mut message_id: Option<String> = None;
+        let mut last_edit = std::time::Instant::now();
+
+        // Discord's per-route edit rate limits are stricter than Telegram's;
+        // throttle to ~1 edit/sec to avoid 429s.
+        const EDIT_INTERVAL: Duration = Duration::from_millis(1000);
+
+        while let Some(chunk) = rx.recv().await {
+            full_text.push_str(&chunk);
+
+            if message_id.is_none() {
+                // Send the first chunk as a new message and capture its ID.
+                if !full_text.is_empty() {
+                    match self
+                        .api_send_message_returning_id(channel_id, &full_text)
+                        .await
+                    {
+                        Ok(mid) => message_id = Some(mid),
+                        Err(e) => {
+                            warn!("Discord streaming: failed to send initial message: {e}");
+                            break;
+                        }
+                    }
+                    last_edit = std::time::Instant::now();
+                }
+            } else if last_edit.elapsed() >= EDIT_INTERVAL {
+                // Throttled mid-stream edit. Failures are recoverable (next
+                // tick retries with newer text) — log at debug, don't break.
+                if let Some(ref mid) = message_id {
+                    if let Err(e) = self.api_edit_message(channel_id, mid, &full_text).await {
+                        tracing::debug!(
+                            channel_id = %channel_id, error = %e,
+                            "Discord streaming: mid-stream edit failed (will retry next tick)"
+                        );
+                    }
+                    last_edit = std::time::Instant::now();
+                }
+            }
+        }
+
+        // Final flush: edit the first message with the complete text, sending
+        // any overflow beyond the 2000-char limit as new messages.
+        if let Some(ref mid) = message_id {
+            if !full_text.is_empty() {
+                let chunks = split_message(&full_text, DISCORD_MSG_LIMIT);
+                if let Err(e) = self.api_edit_message(channel_id, mid, chunks[0]).await {
+                    warn!(
+                        channel_id = %channel_id, error = %e,
+                        "Discord streaming: final edit failed — user view stale"
+                    );
+                }
+                for extra in &chunks[1..] {
+                    if let Err(e) = self.api_send_message(channel_id, extra).await {
+                        warn!(
+                            channel_id = %channel_id, error = %e,
+                            "Discord streaming: overflow chunk send failed — partial response lost"
+                        );
+                    }
+                }
+            }
+        } else if !full_text.is_empty() {
+            // No initial message was sent — fall back to a plain send.
+            self.api_send_message(channel_id, &full_text).await?;
+        }
+
+        Ok(())
+    }
+
     async fn stop(&self) -> Result<(), Box<dyn std::error::Error>> {
         let _ = self.shutdown_tx.send(true);
         Ok(())
@@ -714,6 +855,9 @@ mod tests {
         let adapter = DiscordAdapter::new("test-token".to_string(), vec![123, 456], 33280);
         assert_eq!(adapter.name(), "discord");
         assert_eq!(adapter.channel_type(), ChannelType::Discord);
+        // Streaming is implemented via PATCH message edits — bridge picks the
+        // progressive path instead of the buffered default.
+        assert!(adapter.supports_streaming());
     }
 
     /// Regression: `api_send_message` previously warn-logged non-2xx
