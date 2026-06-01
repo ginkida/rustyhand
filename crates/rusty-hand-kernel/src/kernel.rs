@@ -3267,6 +3267,10 @@ impl RustyHandKernel {
     ) {
         use crate::config_reload::HotAction;
 
+        // ReloadExtensions and ReloadMcpServers both map to the same async
+        // reconnect (reload_extension_mcps) — run it at most once per reload.
+        let mut mcp_reload_spawned = false;
+
         for action in &plan.hot_actions {
             match action {
                 HotAction::UpdateApprovalPolicy => {
@@ -3282,12 +3286,47 @@ impl RustyHandKernel {
                     self.cron_scheduler
                         .set_max_total_jobs(new_config.max_cron_jobs);
                 }
+                HotAction::ReloadExtensions | HotAction::ReloadMcpServers => {
+                    // The reconnect (McpConnection::connect) is async, but
+                    // reload_config is sync and called from both async (API,
+                    // SIGHUP) and potentially sync (CLI) contexts. Spawn the
+                    // reconnect on the current runtime via the self-handle; if
+                    // there is no runtime or handle, say so honestly rather
+                    // than silently dropping the change.
+                    if mcp_reload_spawned {
+                        continue;
+                    }
+                    mcp_reload_spawned = true;
+                    let kernel = self.self_handle.get().and_then(|w| w.upgrade());
+                    match (tokio::runtime::Handle::try_current(), kernel) {
+                        (Ok(_), Some(kernel)) => {
+                            info!("Hot-reload: reconnecting extension/MCP servers");
+                            tokio::spawn(async move {
+                                match kernel.reload_extension_mcps().await {
+                                    Ok(n) => info!(
+                                        connected = n,
+                                        "Hot-reload: extension/MCP servers reconnected"
+                                    ),
+                                    Err(e) => {
+                                        warn!("Hot-reload: extension/MCP reconnect failed: {e}")
+                                    }
+                                }
+                            });
+                        }
+                        _ => {
+                            warn!(
+                                "Hot-reload: extension/MCP config changed but no async \
+                                 runtime/self-handle is available — restart the daemon to apply"
+                            );
+                        }
+                    }
+                }
                 _ => {
-                    // Other hot actions (channels, web, browser, extensions, etc.)
-                    // are logged but not applied here — they require subsystem-specific
-                    // reinitialization that should be added as those systems mature.
+                    // Channels / web / browser / webhook changes still require
+                    // subsystem-specific reinitialization that isn't wired yet.
+                    // Be honest: note it and tell the operator a restart applies it.
                     info!(
-                        "Hot-reload: action {:?} noted but not yet auto-applied",
+                        "Hot-reload: action {:?} noted but not auto-applied — restart the daemon to apply",
                         action
                     );
                 }
