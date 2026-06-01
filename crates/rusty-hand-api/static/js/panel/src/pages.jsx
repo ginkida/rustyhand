@@ -1078,7 +1078,7 @@ function SpawnAgentModal({ onClose, onSpawned }) {
   const [mode, setMode] = useState("template"); // "template" | "custom"
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [customName, setCustomName] = useState("");
-  const [customProfile, setCustomProfile] = useState("research");
+  const [customProfile, setCustomProfile] = useState("full");
   const [customProvider, setCustomProvider] = useState("");
   const [customModel, setCustomModel] = useState("");
   const [customSystemPrompt, setCustomSystemPrompt] = useState("You are a helpful agent.");
@@ -1352,15 +1352,17 @@ tools = [${toolsArray}]
                   {(() => {
                     const entry = profileList.find((p) => (p.name || p) === customProfile);
                     const tools = entry && Array.isArray(entry.tools) ? entry.tools : [];
-                    return tools.length > 0 ? (
+                    if (tools.length === 0) return null;
+                    const isAll = tools.includes("*");
+                    return (
                       <span className="dim" style={{marginLeft:6, fontSize:10.5}}>
-                        → {tools.length} tools: <span className="mono">{tools.slice(0, 5).join(", ")}{tools.length > 5 ? `, +${tools.length - 5}` : ""}</span>
+                        → {isAll ? <span className="mono">all tools</span> : <>{tools.length} tools: <span className="mono">{tools.slice(0, 5).join(", ")}{tools.length > 5 ? `, +${tools.length - 5}` : ""}</span></>}
                       </span>
-                    ) : null;
+                    );
                   })()}
                 </span>
                 <select className="t-select" value={customProfile} onChange={e => setCustomProfile(e.target.value)}>
-                  {profileList.length === 0 && <option value="research">research</option>}
+                  {profileList.length === 0 && <option value="full">full</option>}
                   {profileList.map(p => <option key={p.name || p} value={p.name || p}>{p.name || p}</option>)}
                 </select>
               </label>

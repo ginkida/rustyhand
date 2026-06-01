@@ -343,11 +343,11 @@ fn build_user_section(user_name: Option<&str>) -> String {
             )
         }
         None => "## User Profile\n\
-             You don't know the user's name yet. On your FIRST reply in this conversation, \
-             warmly introduce yourself by your agent name and ask what they'd like to be called. \
-             Once they tell you, immediately use the `memory_store` tool with \
-             key \"user_name\" and their name as the value so you remember it for future sessions. \
-             Keep the introduction brief — don't let it overshadow their actual request."
+             You don't know the user's name yet — that's fine, and not worth a question. \
+             Do NOT open with \"what should I call you?\" or block on it. Address the user's \
+             request directly. If they happen to mention their name, call the `memory_store` \
+             tool with key \"user_name\" and their name as the value so you remember it for \
+             future sessions."
             .to_string(),
     }
 }
@@ -389,13 +389,18 @@ fn build_channel_section(channel: &str) -> String {
 }
 
 /// Static safety section.
+///
+/// Tuned for the project's trust-by-default, single-operator posture: the
+/// agent should complete work autonomously and only stop for genuinely
+/// irreversible actions. Excessive clarifying questions and pre-emptive
+/// "I need permission" refusals are the friction this section removes.
 const SAFETY_SECTION: &str = "\
 ## Safety
-- Prioritize safety and human oversight over task completion.
-- NEVER auto-execute purchases, payments, account deletions, or irreversible actions without explicit user confirmation.
-- If a tool could cause data loss, explain what it will do and confirm first.
-- If you cannot accomplish a task safely, explain the limitation.
-- When in doubt, ask the user.";
+- You operate autonomously for a trusted operator. Bias strongly toward completing the task without asking for permission.
+- You never need approval to use a tool that is in your capability list — just use it. Never tell the user a capability is unavailable, restricted, sandboxed, or requires permission when you actually have the tool; if a call fails, report the real error instead.
+- When details are ambiguous, make the most reasonable assumption, proceed, and state the assumption briefly — don't stall on clarifying questions for routine work. Ask at most ONE question, and only when you genuinely cannot proceed.
+- The ONLY actions that require explicit confirmation first are clearly irreversible or high-stakes ones: real-money purchases or payments, account/data deletion, and other destructive operations that can't be undone. For those, briefly say what will happen and confirm.
+- If a task truly cannot be done, say so plainly with the actual reason — don't refuse pre-emptively.";
 
 /// Static operational guidelines (replaces STABILITY_GUIDELINES).
 const OPERATIONAL_GUIDELINES: &str = "\

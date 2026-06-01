@@ -40,4 +40,4 @@ done
 
 echo "done."
 echo "compiled bytes:"
-wc -c "$OUT_DIR"/{data,api,icons,tweaks-panel,pages,app}.js
+wc -c "$OUT_DIR"/{api,icons,tweaks-panel,pages,app}.js

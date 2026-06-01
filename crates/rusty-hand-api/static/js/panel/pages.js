@@ -717,7 +717,7 @@ function SpawnAgentModal({ onClose, onSpawned }) {
   const [mode, setMode] = useState("template");
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [customName, setCustomName] = useState("");
-  const [customProfile, setCustomProfile] = useState("research");
+  const [customProfile, setCustomProfile] = useState("full");
   const [customProvider, setCustomProvider] = useState("");
   const [customModel, setCustomModel] = useState("");
   const [customSystemPrompt, setCustomSystemPrompt] = useState("You are a helpful agent.");
@@ -871,8 +871,10 @@ tools = [${toolsArray}]
   )), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Tool profile", (() => {
     const entry = profileList.find((p) => (p.name || p) === customProfile);
     const tools = entry && Array.isArray(entry.tools) ? entry.tools : [];
-    return tools.length > 0 ? /* @__PURE__ */ React.createElement("span", { className: "dim", style: { marginLeft: 6, fontSize: 10.5 } }, "\u2192 ", tools.length, " tools: ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, tools.slice(0, 5).join(", "), tools.length > 5 ? `, +${tools.length - 5}` : "")) : null;
-  })()), /* @__PURE__ */ React.createElement("select", { className: "t-select", value: customProfile, onChange: (e) => setCustomProfile(e.target.value) }, profileList.length === 0 && /* @__PURE__ */ React.createElement("option", { value: "research" }, "research"), profileList.map((p) => /* @__PURE__ */ React.createElement("option", { key: p.name || p, value: p.name || p }, p.name || p)))), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "System prompt"), /* @__PURE__ */ React.createElement(
+    if (tools.length === 0) return null;
+    const isAll = tools.includes("*");
+    return /* @__PURE__ */ React.createElement("span", { className: "dim", style: { marginLeft: 6, fontSize: 10.5 } }, "\u2192 ", isAll ? /* @__PURE__ */ React.createElement("span", { className: "mono" }, "all tools") : /* @__PURE__ */ React.createElement(React.Fragment, null, tools.length, " tools: ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, tools.slice(0, 5).join(", "), tools.length > 5 ? `, +${tools.length - 5}` : "")));
+  })()), /* @__PURE__ */ React.createElement("select", { className: "t-select", value: customProfile, onChange: (e) => setCustomProfile(e.target.value) }, profileList.length === 0 && /* @__PURE__ */ React.createElement("option", { value: "full" }, "full"), profileList.map((p) => /* @__PURE__ */ React.createElement("option", { key: p.name || p, value: p.name || p }, p.name || p)))), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "System prompt"), /* @__PURE__ */ React.createElement(
     "textarea",
     {
       className: "modal-field",
