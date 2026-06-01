@@ -4916,6 +4916,8 @@ pub async fn update_agent(
 
 /// GET /api/security — Security feature status for the dashboard.
 pub async fn security_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    use rusty_hand_types::config::ExecSecurityMode;
+
     let auth_mode = if state.kernel.config.api_key.is_empty() {
         "localhost_only"
     } else {
@@ -4923,6 +4925,44 @@ pub async fn security_status(State(state): State<Arc<AppState>>) -> impl IntoRes
     };
 
     let audit_count = state.kernel.audit_log.len();
+
+    // Actual runtime guardrail posture (not static feature flags). These are
+    // the levers that genuinely change what an agent can do, surfaced so the
+    // operator can SEE the posture instead of guessing — trust-by-default
+    // (v0.7.75+) is permissive, and pretending otherwise would be the lie.
+    let exec_mode = match state.kernel.config.exec_policy.mode {
+        ExecSecurityMode::Deny => "deny",
+        ExecSecurityMode::Allowlist => "allowlist",
+        ExecSecurityMode::Full => "full",
+    };
+    let taint_on = state.kernel.config.exec_policy.taint_check_enabled;
+    let approval = &state.kernel.config.approval;
+    let channels = &state.kernel.config.channels;
+    let tg_gate = channels.telegram.as_ref().map(|c| {
+        serde_json::json!({
+            "allowlist_size": c.allowed_users.len(),
+            "open_to_anyone": c.allowed_users.is_empty(),
+        })
+    });
+    let dc_gate = channels.discord.as_ref().map(|c| {
+        serde_json::json!({
+            "allowlist_size": c.allowed_guilds.len(),
+            "open_to_anyone": c.allowed_guilds.is_empty(),
+        })
+    });
+    let sl_gate = channels.slack.as_ref().map(|c| {
+        serde_json::json!({
+            "allowlist_size": c.allowed_channels.len(),
+            "open_to_anyone": c.allowed_channels.is_empty(),
+        })
+    });
+    // Overall summary: the v0.7.75+ single-operator default is permissive and
+    // leans on the channel allowlist as the real gate.
+    let trust_posture = if exec_mode == "full" && approval.auto_approve_autonomous && !taint_on {
+        "trust-by-default (single-operator; channel allowlist is the real gate)"
+    } else {
+        "restricted (one or more guardrails tightened from defaults)"
+    };
 
     Json(serde_json::json!({
         "core_protections": {
@@ -4965,7 +5005,7 @@ pub async fn security_status(State(state): State<Arc<AppState>>) -> impl IntoRes
                 "entry_count": audit_count
             },
             "taint_tracking": {
-                "enabled": true,
+                "enabled": taint_on,
                 "tracked_labels": [
                     "ExternalNetwork",
                     "UserInput",
@@ -4977,6 +5017,21 @@ pub async fn security_status(State(state): State<Arc<AppState>>) -> impl IntoRes
             "manifest_signing": {
                 "algorithm": "Ed25519",
                 "available": true
+            }
+        },
+        "runtime_posture": {
+            "summary": trust_posture,
+            "exec_mode": exec_mode,
+            "taint_check_enabled": taint_on,
+            "approval": {
+                "auto_approve_autonomous": approval.auto_approve_autonomous,
+                "require_approval": approval.require_approval,
+                "timeout_secs": approval.timeout_secs,
+            },
+            "channel_gating": {
+                "telegram": tg_gate,
+                "discord": dc_gate,
+                "slack": sl_gate,
             }
         },
         "secret_zeroization": true,

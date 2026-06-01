@@ -1079,3 +1079,38 @@ async fn agent_budget_envelope() {
         "/api/budget/agents/:id.hourly",
     );
 }
+
+/// `GET /api/security` must surface the REAL runtime guardrail posture, not
+/// just static feature flags. With the default (trust-by-default) config the
+/// summary should reflect exec_mode=full, taint off, autonomous auto-approve.
+#[tokio::test]
+async fn security_endpoint_exposes_runtime_posture() {
+    let server = require_server!(start_test_server());
+    let body = get_json(&server.base_url, "/api/security").await;
+    require_keys(&body, &["runtime_posture"], "/api/security");
+    let posture = &body["runtime_posture"];
+    require_keys(
+        posture,
+        &[
+            "summary",
+            "exec_mode",
+            "taint_check_enabled",
+            "approval",
+            "channel_gating",
+        ],
+        "/api/security.runtime_posture",
+    );
+    // Defaults are trust-by-default (v0.7.75+).
+    assert_eq!(posture["exec_mode"].as_str(), Some("full"));
+    assert_eq!(posture["taint_check_enabled"].as_bool(), Some(false));
+    assert_eq!(
+        posture["approval"]["auto_approve_autonomous"].as_bool(),
+        Some(true)
+    );
+    // The monitoring taint flag must mirror the real config, not a hardcoded true.
+    assert_eq!(
+        body["monitoring"]["taint_tracking"]["enabled"].as_bool(),
+        Some(false),
+        "taint_tracking.enabled must reflect the real (off-by-default) config"
+    );
+}
