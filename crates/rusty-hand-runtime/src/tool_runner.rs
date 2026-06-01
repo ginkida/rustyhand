@@ -223,6 +223,11 @@ pub async fn execute_tool(
         "file_read" => tool_file_read(input, workspace_root).await,
         "file_write" => tool_file_write(input, workspace_root).await,
         "file_list" => tool_file_list(input, workspace_root).await,
+        "file_stat" => tool_file_stat(input, workspace_root).await,
+        "file_delete" => tool_file_delete(input, workspace_root).await,
+        "file_move" => tool_file_move(input, workspace_root).await,
+        "file_copy" => tool_file_copy(input, workspace_root).await,
+        "file_mkdir" => tool_file_mkdir(input, workspace_root).await,
         "apply_patch" => tool_apply_patch(input, workspace_root).await,
 
         // Web tools (upgraded: multi-provider search, SSRF-protected fetch)
@@ -337,6 +342,8 @@ pub async fn execute_tool(
         "knowledge_add_entity" => tool_knowledge_add_entity(input, kernel).await,
         "knowledge_add_relation" => tool_knowledge_add_relation(input, kernel).await,
         "knowledge_query" => tool_knowledge_query(input, kernel).await,
+        "knowledge_delete_entity" => tool_knowledge_delete_entity(input, kernel).await,
+        "knowledge_delete_relation" => tool_knowledge_delete_relation(input, kernel).await,
 
         // Image analysis tool
         "image_analyze" => tool_image_analyze(input).await,
@@ -599,6 +606,64 @@ pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
                 "type": "object",
                 "properties": {
                     "path": { "type": "string", "description": "The directory path to list" }
+                },
+                "required": ["path"]
+            }),
+        },
+        ToolDefinition {
+            name: "file_stat".to_string(),
+            description: "Get metadata about a file or directory (existence, type, byte size, modified time, read-only flag). Paths are relative to the agent workspace.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "The file or directory path to inspect" }
+                },
+                "required": ["path"]
+            }),
+        },
+        ToolDefinition {
+            name: "file_delete".to_string(),
+            description: "Delete a file or directory within the agent workspace. Set recursive=true to delete a non-empty directory and its contents. Use this instead of shelling out to rm.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "The file or directory path to delete" },
+                    "recursive": { "type": "boolean", "description": "Delete directories and their contents recursively (default: false)" }
+                },
+                "required": ["path"]
+            }),
+        },
+        ToolDefinition {
+            name: "file_move".to_string(),
+            description: "Move or rename a file or directory within the agent workspace. Creates missing destination parent directories. Use this instead of shelling out to mv.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "source": { "type": "string", "description": "The source path to move from" },
+                    "dest": { "type": "string", "description": "The destination path to move to" }
+                },
+                "required": ["source", "dest"]
+            }),
+        },
+        ToolDefinition {
+            name: "file_copy".to_string(),
+            description: "Copy a file (or a directory tree) within the agent workspace. Creates missing destination parent directories. Use this instead of shelling out to cp.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "source": { "type": "string", "description": "The source path to copy from" },
+                    "dest": { "type": "string", "description": "The destination path to copy to" }
+                },
+                "required": ["source", "dest"]
+            }),
+        },
+        ToolDefinition {
+            name: "file_mkdir".to_string(),
+            description: "Create a directory (and any missing parent directories) within the agent workspace. Use this instead of shelling out to mkdir -p.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "The directory path to create" }
                 },
                 "required": ["path"]
             }),
@@ -978,6 +1043,28 @@ pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
                     "target": { "type": "string", "description": "Filter by target entity name or ID (optional)" },
                     "max_depth": { "type": "integer", "description": "Maximum traversal depth (default: 1)" }
                 }
+            }),
+        },
+        ToolDefinition {
+            name: "knowledge_delete_entity".to_string(),
+            description: "Delete an entity from the knowledge graph by its ID. Returns whether an entity was removed. Use knowledge_query first to find the entity ID.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "The entity ID to delete" }
+                },
+                "required": ["id"]
+            }),
+        },
+        ToolDefinition {
+            name: "knowledge_delete_relation".to_string(),
+            description: "Delete a relation from the knowledge graph by its ID. Returns whether a relation was removed.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "The relation ID to delete" }
+                },
+                "required": ["id"]
             }),
         },
         // --- Image analysis tool ---
@@ -1422,6 +1509,21 @@ fn resolve_file_path(raw_path: &str, workspace_root: Option<&Path>) -> Result<Pa
     }
 }
 
+/// Resolve a path that may not exist yet — for `file_mkdir`, `file_stat`, and
+/// the destinations of `file_move` / `file_copy` (which create nested parents).
+/// Tolerates arbitrarily-deep missing tails while still enforcing containment.
+fn resolve_file_path_allow_missing(
+    raw_path: &str,
+    workspace_root: Option<&Path>,
+) -> Result<PathBuf, String> {
+    if let Some(root) = workspace_root {
+        crate::workspace_sandbox::resolve_sandbox_path_allow_missing(raw_path, root)
+    } else {
+        let _ = validate_path(raw_path)?;
+        Ok(PathBuf::from(raw_path))
+    }
+}
+
 async fn tool_file_read(
     input: &serde_json::Value,
     workspace_root: Option<&Path>,
@@ -1482,6 +1584,180 @@ async fn tool_file_list(
     }
     files.sort();
     Ok(files.join("\n"))
+}
+
+async fn tool_file_stat(
+    input: &serde_json::Value,
+    workspace_root: Option<&Path>,
+) -> Result<String, String> {
+    let raw_path = input["path"].as_str().ok_or("Missing 'path' parameter")?;
+    let resolved = resolve_file_path_allow_missing(raw_path, workspace_root)?;
+    match tokio::fs::metadata(&resolved).await {
+        Ok(meta) => {
+            let kind = if meta.is_dir() { "directory" } else { "file" };
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs());
+            Ok(serde_json::json!({
+                "path": resolved.display().to_string(),
+                "exists": true,
+                "type": kind,
+                "size_bytes": meta.len(),
+                "modified_unix": modified,
+                "readonly": meta.permissions().readonly(),
+            })
+            .to_string())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(serde_json::json!({
+            "path": resolved.display().to_string(),
+            "exists": false,
+        })
+        .to_string()),
+        Err(e) => Err(format!("Failed to stat path: {e}")),
+    }
+}
+
+async fn tool_file_delete(
+    input: &serde_json::Value,
+    workspace_root: Option<&Path>,
+) -> Result<String, String> {
+    let raw_path = input["path"].as_str().ok_or("Missing 'path' parameter")?;
+    let recursive = input["recursive"].as_bool().unwrap_or(false);
+    let resolved = resolve_file_path(raw_path, workspace_root)?;
+    // Never let an agent wipe its own workspace root.
+    if let Some(root) = workspace_root {
+        if let Ok(canon_root) = root.canonicalize() {
+            if resolved == canon_root {
+                return Err("Refusing to delete the workspace root directory".to_string());
+            }
+        }
+    }
+    let meta = tokio::fs::symlink_metadata(&resolved)
+        .await
+        .map_err(|e| format!("Failed to stat path: {e}"))?;
+    if meta.is_dir() {
+        if recursive {
+            tokio::fs::remove_dir_all(&resolved)
+                .await
+                .map_err(|e| format!("Failed to delete directory: {e}"))?;
+            Ok(format!(
+                "Deleted directory (recursive): {}",
+                resolved.display()
+            ))
+        } else {
+            tokio::fs::remove_dir(&resolved).await.map_err(|e| {
+                format!("Failed to delete directory (use recursive=true for non-empty): {e}")
+            })?;
+            Ok(format!("Deleted empty directory: {}", resolved.display()))
+        }
+    } else {
+        tokio::fs::remove_file(&resolved)
+            .await
+            .map_err(|e| format!("Failed to delete file: {e}"))?;
+        Ok(format!("Deleted file: {}", resolved.display()))
+    }
+}
+
+async fn tool_file_move(
+    input: &serde_json::Value,
+    workspace_root: Option<&Path>,
+) -> Result<String, String> {
+    let src = input["source"]
+        .as_str()
+        .ok_or("Missing 'source' parameter")?;
+    let dst = input["dest"].as_str().ok_or("Missing 'dest' parameter")?;
+    let src_resolved = resolve_file_path(src, workspace_root)?;
+    let dst_resolved = resolve_file_path_allow_missing(dst, workspace_root)?;
+    if let Some(parent) = dst_resolved.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| format!("Failed to create destination directories: {e}"))?;
+    }
+    tokio::fs::rename(&src_resolved, &dst_resolved)
+        .await
+        .map_err(|e| format!("Failed to move: {e}"))?;
+    Ok(format!(
+        "Moved {} -> {}",
+        src_resolved.display(),
+        dst_resolved.display()
+    ))
+}
+
+/// Recursively copy a directory tree. Returns the number of files copied.
+async fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<u64> {
+    let mut count = 0u64;
+    let mut stack = vec![(src.to_path_buf(), dst.to_path_buf())];
+    while let Some((s, d)) = stack.pop() {
+        let meta = tokio::fs::symlink_metadata(&s).await?;
+        if meta.is_dir() {
+            tokio::fs::create_dir_all(&d).await?;
+            let mut entries = tokio::fs::read_dir(&s).await?;
+            while let Some(entry) = entries.next_entry().await? {
+                let name = entry.file_name();
+                stack.push((s.join(&name), d.join(&name)));
+            }
+        } else {
+            if let Some(parent) = d.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+            tokio::fs::copy(&s, &d).await?;
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+async fn tool_file_copy(
+    input: &serde_json::Value,
+    workspace_root: Option<&Path>,
+) -> Result<String, String> {
+    let src = input["source"]
+        .as_str()
+        .ok_or("Missing 'source' parameter")?;
+    let dst = input["dest"].as_str().ok_or("Missing 'dest' parameter")?;
+    let src_resolved = resolve_file_path(src, workspace_root)?;
+    let dst_resolved = resolve_file_path_allow_missing(dst, workspace_root)?;
+    let meta = tokio::fs::symlink_metadata(&src_resolved)
+        .await
+        .map_err(|e| format!("Failed to stat source: {e}"))?;
+    if meta.is_dir() {
+        let count = copy_dir_recursive(&src_resolved, &dst_resolved)
+            .await
+            .map_err(|e| format!("Failed to copy directory: {e}"))?;
+        Ok(format!(
+            "Copied directory {} -> {} ({count} file(s))",
+            src_resolved.display(),
+            dst_resolved.display()
+        ))
+    } else {
+        if let Some(parent) = dst_resolved.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| format!("Failed to create destination directories: {e}"))?;
+        }
+        let bytes = tokio::fs::copy(&src_resolved, &dst_resolved)
+            .await
+            .map_err(|e| format!("Failed to copy file: {e}"))?;
+        Ok(format!(
+            "Copied {} -> {} ({bytes} bytes)",
+            src_resolved.display(),
+            dst_resolved.display()
+        ))
+    }
+}
+
+async fn tool_file_mkdir(
+    input: &serde_json::Value,
+    workspace_root: Option<&Path>,
+) -> Result<String, String> {
+    let raw_path = input["path"].as_str().ok_or("Missing 'path' parameter")?;
+    let resolved = resolve_file_path_allow_missing(raw_path, workspace_root)?;
+    tokio::fs::create_dir_all(&resolved)
+        .await
+        .map_err(|e| format!("Failed to create directory: {e}"))?;
+    Ok(format!("Created directory: {}", resolved.display()))
 }
 
 // ---------------------------------------------------------------------------
@@ -2562,6 +2838,32 @@ async fn tool_knowledge_query(
         ));
     }
     Ok(output)
+}
+
+async fn tool_knowledge_delete_entity(
+    input: &serde_json::Value,
+    kernel: Option<&Arc<dyn KernelHandle>>,
+) -> Result<String, String> {
+    let kh = require_kernel(kernel)?;
+    let id = input["id"].as_str().ok_or("Missing 'id' parameter")?;
+    if kh.knowledge_delete_entity(id.to_string()).await? {
+        Ok(format!("Entity '{id}' deleted."))
+    } else {
+        Ok(format!("No entity with ID '{id}' found."))
+    }
+}
+
+async fn tool_knowledge_delete_relation(
+    input: &serde_json::Value,
+    kernel: Option<&Arc<dyn KernelHandle>>,
+) -> Result<String, String> {
+    let kh = require_kernel(kernel)?;
+    let id = input["id"].as_str().ok_or("Missing 'id' parameter")?;
+    if kh.knowledge_delete_relation(id.to_string()).await? {
+        Ok(format!("Relation '{id}' deleted."))
+    } else {
+        Ok(format!("No relation with ID '{id}' found."))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4358,6 +4660,113 @@ mod tests {
         assert!(names.contains(&"docker_exec"));
         // Canvas tool
         assert!(names.contains(&"canvas_present"));
+        // Phase 1b: file workspace tools
+        assert!(names.contains(&"file_stat"));
+        assert!(names.contains(&"file_delete"));
+        assert!(names.contains(&"file_move"));
+        assert!(names.contains(&"file_copy"));
+        assert!(names.contains(&"file_mkdir"));
+        // Phase 1b: knowledge graph deletion
+        assert!(names.contains(&"knowledge_delete_entity"));
+        assert!(names.contains(&"knowledge_delete_relation"));
+    }
+
+    #[tokio::test]
+    async fn file_workspace_tools_roundtrip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = Some(tmp.path());
+
+        // mkdir creates nested dirs.
+        tool_file_mkdir(&serde_json::json!({"path": "a/b/c"}), root)
+            .await
+            .unwrap();
+        assert!(tmp.path().join("a/b/c").is_dir());
+
+        // write + stat.
+        tool_file_write(
+            &serde_json::json!({"path": "a/b/c/data.txt", "content": "hello"}),
+            root,
+        )
+        .await
+        .unwrap();
+        let stat = tool_file_stat(&serde_json::json!({"path": "a/b/c/data.txt"}), root)
+            .await
+            .unwrap();
+        let stat: serde_json::Value = serde_json::from_str(&stat).unwrap();
+        assert_eq!(stat["exists"], true);
+        assert_eq!(stat["type"], "file");
+        assert_eq!(stat["size_bytes"], 5);
+
+        // stat of a missing path reports exists:false, not an error.
+        let missing = tool_file_stat(&serde_json::json!({"path": "nope.txt"}), root)
+            .await
+            .unwrap();
+        let missing: serde_json::Value = serde_json::from_str(&missing).unwrap();
+        assert_eq!(missing["exists"], false);
+
+        // copy into a new (missing) destination directory.
+        tool_file_copy(
+            &serde_json::json!({"source": "a/b/c/data.txt", "dest": "copy/data.txt"}),
+            root,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("copy/data.txt")).unwrap(),
+            "hello"
+        );
+
+        // move (rename) the copy.
+        tool_file_move(
+            &serde_json::json!({"source": "copy/data.txt", "dest": "moved.txt"}),
+            root,
+        )
+        .await
+        .unwrap();
+        assert!(!tmp.path().join("copy/data.txt").exists());
+        assert!(tmp.path().join("moved.txt").exists());
+
+        // delete the file.
+        tool_file_delete(&serde_json::json!({"path": "moved.txt"}), root)
+            .await
+            .unwrap();
+        assert!(!tmp.path().join("moved.txt").exists());
+
+        // non-recursive delete of a non-empty dir fails; recursive succeeds.
+        assert!(tool_file_delete(&serde_json::json!({"path": "a"}), root)
+            .await
+            .is_err());
+        tool_file_delete(&serde_json::json!({"path": "a", "recursive": true}), root)
+            .await
+            .unwrap();
+        assert!(!tmp.path().join("a").exists());
+    }
+
+    #[tokio::test]
+    async fn file_delete_refuses_workspace_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = tool_file_delete(&serde_json::json!({"path": "."}), Some(tmp.path()))
+            .await
+            .unwrap_err();
+        assert!(err.contains("workspace root"));
+        assert!(tmp.path().exists());
+    }
+
+    #[tokio::test]
+    async fn file_tools_block_traversal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = Some(tmp.path());
+        assert!(
+            tool_file_mkdir(&serde_json::json!({"path": "../escape"}), root)
+                .await
+                .is_err()
+        );
+        assert!(tool_file_move(
+            &serde_json::json!({"source": "x", "dest": "../escape"}),
+            root
+        )
+        .await
+        .is_err());
     }
 
     #[test]

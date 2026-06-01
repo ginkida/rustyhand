@@ -5566,6 +5566,20 @@ impl KernelHandle for RustyHandKernel {
             .map_err(|e| format!("Knowledge query failed: {e}"))
     }
 
+    async fn knowledge_delete_entity(&self, id: String) -> Result<bool, String> {
+        self.memory
+            .remove_entity(id)
+            .await
+            .map_err(|e| format!("Knowledge delete entity failed: {e}"))
+    }
+
+    async fn knowledge_delete_relation(&self, id: String) -> Result<bool, String> {
+        self.memory
+            .remove_relation(id)
+            .await
+            .map_err(|e| format!("Knowledge delete relation failed: {e}"))
+    }
+
     /// Spawn with capability inheritance enforcement.
     /// Parses the child manifest, extracts its capabilities, and verifies
     /// every child capability is covered by the parent's grants.

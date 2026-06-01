@@ -1291,6 +1291,7 @@ impl McpServerConfig {
             // Read-only filesystem
             "file_read",
             "file_list",
+            "file_stat",
             // Search & fetch — already SSRF-protected
             "web_search",
             "web_fetch",

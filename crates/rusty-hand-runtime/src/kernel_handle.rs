@@ -94,6 +94,12 @@ pub trait KernelHandle: Send + Sync {
         pattern: rusty_hand_types::memory::GraphPattern,
     ) -> Result<Vec<rusty_hand_types::memory::GraphMatch>, String>;
 
+    /// Delete an entity from the knowledge graph by ID. Returns whether a row was removed.
+    async fn knowledge_delete_entity(&self, id: String) -> Result<bool, String>;
+
+    /// Delete a relation from the knowledge graph by ID. Returns whether a row was removed.
+    async fn knowledge_delete_relation(&self, id: String) -> Result<bool, String>;
+
     /// Create a cron job for the calling agent.
     async fn cron_create(
         &self,

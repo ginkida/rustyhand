@@ -64,6 +64,76 @@ pub fn resolve_sandbox_path(user_path: &str, workspace_root: &Path) -> Result<Pa
     Ok(canon_candidate)
 }
 
+/// Like [`resolve_sandbox_path`] but tolerates the target *and any number of its
+/// leading ancestors* not yet existing (for `mkdir -p` / move / copy
+/// destinations that create nested directories).
+///
+/// It finds the deepest *existing* ancestor, canonicalizes it (resolving any
+/// symlinks along the real prefix), asserts that prefix is inside the sandbox,
+/// then re-appends the non-existent tail. The tail components cannot be
+/// symlinks — they don't exist yet — so no traversal can escape through them.
+pub fn resolve_sandbox_path_allow_missing(
+    user_path: &str,
+    workspace_root: &Path,
+) -> Result<PathBuf, String> {
+    let path = Path::new(user_path);
+
+    // Reject any `..` components (same as the strict resolver).
+    for component in path.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err("Path traversal denied: '..' components are forbidden".to_string());
+        }
+    }
+
+    let candidate = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        workspace_root.join(path)
+    };
+
+    let canon_root = workspace_root
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve workspace root: {e}"))?;
+
+    // Walk up to the deepest ancestor that actually exists on disk.
+    let mut existing = candidate.as_path();
+    loop {
+        if existing.exists() {
+            break;
+        }
+        match existing.parent() {
+            Some(parent) => existing = parent,
+            None => return Err("Invalid path: no existing ancestor".to_string()),
+        }
+    }
+
+    let canon_existing = existing
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve path: {e}"))?;
+
+    // The non-existent remainder after the deepest existing ancestor.
+    let tail = candidate
+        .strip_prefix(existing)
+        .map_err(|_| "Invalid path: failed to derive non-existent tail".to_string())?;
+    // When the whole path already exists the tail is empty; joining it would
+    // append a trailing separator (`/foo/data.txt/`) and make the OS reject a
+    // regular file with ENOTDIR. Return the canonical path unchanged instead.
+    let resolved = if tail.as_os_str().is_empty() {
+        canon_existing
+    } else {
+        canon_existing.join(tail)
+    };
+
+    if !resolved.starts_with(&canon_root) {
+        return Err(format!(
+            "Access denied: path '{}' resolves outside workspace",
+            user_path
+        ));
+    }
+
+    Ok(resolved)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,6 +194,57 @@ mod tests {
         let resolved = result.unwrap();
         assert!(resolved.starts_with(dir.path().canonicalize().unwrap()));
         assert!(resolved.ends_with("new_file.txt"));
+    }
+
+    #[test]
+    fn test_allow_missing_nested_dirs() {
+        let dir = TempDir::new().unwrap();
+        let result = resolve_sandbox_path_allow_missing("a/b/c/d", dir.path());
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert!(resolved.starts_with(dir.path().canonicalize().unwrap()));
+        assert!(resolved.ends_with("a/b/c/d"));
+    }
+
+    #[test]
+    fn test_allow_missing_existing_path() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("present.txt"), "ok").unwrap();
+        let result = resolve_sandbox_path_allow_missing("present.txt", dir.path());
+        assert!(result.is_ok());
+        assert!(result.unwrap().ends_with("present.txt"));
+    }
+
+    #[test]
+    fn test_allow_missing_dotdot_blocked() {
+        let dir = TempDir::new().unwrap();
+        let result = resolve_sandbox_path_allow_missing("../../etc/passwd", dir.path());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Path traversal denied"));
+    }
+
+    #[test]
+    fn test_allow_missing_absolute_outside_blocked() {
+        let dir = TempDir::new().unwrap();
+        let outside = std::env::temp_dir().join("rh_allow_missing_outside/new");
+        let result = resolve_sandbox_path_allow_missing(outside.to_str().unwrap(), dir.path());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Access denied"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_allow_missing_symlink_prefix_escape_blocked() {
+        let dir = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        // A symlink inside the workspace that points outside it.
+        let link_path = dir.path().join("escape");
+        std::os::unix::fs::symlink(outside.path(), &link_path).unwrap();
+        // Creating a new dir *under* the symlink must be rejected because the
+        // canonical existing prefix (the symlink target) is outside the root.
+        let result = resolve_sandbox_path_allow_missing("escape/new/dir", dir.path());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Access denied"));
     }
 
     #[cfg(unix)]

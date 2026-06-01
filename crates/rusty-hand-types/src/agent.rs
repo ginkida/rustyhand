@@ -306,11 +306,16 @@ impl ToolProfile {
     /// Expand profile to tool name list.
     pub fn tools(&self) -> Vec<String> {
         match self {
-            Self::Minimal => vec!["file_read", "file_list"],
+            Self::Minimal => vec!["file_read", "file_list", "file_stat"],
             Self::Coding => vec![
                 "file_read",
                 "file_write",
                 "file_list",
+                "file_stat",
+                "file_delete",
+                "file_move",
+                "file_copy",
+                "file_mkdir",
                 "shell_exec",
                 "web_fetch",
             ],
@@ -320,6 +325,11 @@ impl ToolProfile {
                 "file_read",
                 "file_write",
                 "file_list",
+                "file_stat",
+                "file_delete",
+                "file_move",
+                "file_copy",
+                "file_mkdir",
                 "shell_exec",
                 "web_fetch",
                 "web_search",
@@ -845,16 +855,18 @@ mod tests {
     #[test]
     fn test_tool_profile_minimal() {
         let tools = ToolProfile::Minimal.tools();
-        assert_eq!(tools, vec!["file_read", "file_list"]);
+        assert_eq!(tools, vec!["file_read", "file_list", "file_stat"]);
     }
 
     #[test]
     fn test_tool_profile_coding() {
         let tools = ToolProfile::Coding.tools();
         assert!(tools.contains(&"file_read".to_string()));
+        assert!(tools.contains(&"file_delete".to_string()));
+        assert!(tools.contains(&"file_move".to_string()));
         assert!(tools.contains(&"shell_exec".to_string()));
         assert!(tools.contains(&"web_fetch".to_string()));
-        assert_eq!(tools.len(), 5);
+        assert_eq!(tools.len(), 10);
     }
 
     #[test]
@@ -876,7 +888,8 @@ mod tests {
     #[test]
     fn test_tool_profile_automation() {
         let tools = ToolProfile::Automation.tools();
-        assert_eq!(tools.len(), 10);
+        assert!(tools.contains(&"file_mkdir".to_string()));
+        assert_eq!(tools.len(), 15);
     }
 
     #[test]
