@@ -560,6 +560,9 @@ function OnboardingWizard({ onClose }) {
   const [savingKey, setSavingKey] = useState(false);
   const [keyErr, setKeyErr] = useState(null);
   const [keySaved, setKeySaved] = useState(false);
+  // Verification state after save: null = not yet, "ok" = provider confirmed,
+  // "warn:<msg>" = saved but the live connectivity test failed.
+  const [keyTest, setKeyTest] = useState(null);
 
   const [agentName, setAgentName] = useState("my-agent");
   const [spawning, setSpawning] = useState(false);
@@ -572,7 +575,7 @@ function OnboardingWizard({ onClose }) {
 
   const saveKey = async () => {
     if (!apiKey.trim()) { setKeyErr("Key required"); return; }
-    setSavingKey(true); setKeyErr(null);
+    setSavingKey(true); setKeyErr(null); setKeyTest(null);
     try {
       await rhFetch(`/api/providers/${encodeURIComponent(providerName)}/key`, {
         method: "POST",
@@ -580,8 +583,24 @@ function OnboardingWizard({ onClose }) {
         body: JSON.stringify({ key: apiKey }),
       });
       setKeySaved(true);
-      toastOk(`${providerName} key saved`);
-      setStep(2);
+      // Verify the key actually works before declaring success. Saving an
+      // invalid key and showing a green check is the worst first-run footgun —
+      // the user only discovers the failure when an agent's first reply errors.
+      // set_provider_key sets the env var in-process, so /test sees it now.
+      try {
+        const t = await rhFetch(`/api/providers/${encodeURIComponent(providerName)}/test`, { method: "POST" });
+        if (t && t.status === "ok") {
+          setKeyTest("ok");
+          toastOk(`${providerName} key verified`);
+          setStep(2);
+        } else {
+          setKeyTest("warn:" + ((t && (t.error || t.message)) || "provider did not confirm"));
+          toastWarn(`${providerName} key saved but could not be verified`);
+        }
+      } catch (te) {
+        setKeyTest("warn:" + String((te && te.message) || te));
+        toastWarn(`${providerName} key saved but could not be verified`);
+      }
     } catch (e) { setKeyErr(String(e.message || e)); }
     finally { setSavingKey(false); }
   };
@@ -686,9 +705,17 @@ tools = ["web_search", "web_fetch", "memory_recall"]
                 <span className="dot err"/><span className="banner-title">ERROR</span>
                 <span className="banner-body mono" style={{fontSize:11}}>{keyErr}</span>
               </div>}
-              {keySaved && <div className="banner" style={{borderColor:"oklch(0.74 0.135 150 / .35)"}}>
+              {keySaved && keyTest === null && <div className="banner" style={{borderColor:"oklch(0.74 0.135 150 / .35)"}}>
                 <span className="dot live"/><span className="banner-title">SAVED</span>
-                <span className="banner-body" style={{fontSize:11.5}}>{providerName} key stored. Continuing…</span>
+                <span className="banner-body" style={{fontSize:11.5}}>{providerName} key stored. Verifying with {providerName}…</span>
+              </div>}
+              {keyTest === "ok" && <div className="banner" style={{borderColor:"oklch(0.74 0.135 150 / .35)"}}>
+                <span className="dot live"/><span className="banner-title">VERIFIED</span>
+                <span className="banner-body" style={{fontSize:11.5}}>{providerName} key works — continuing…</span>
+              </div>}
+              {typeof keyTest === "string" && keyTest.startsWith("warn:") && <div className="banner" style={{borderColor:"oklch(0.8 0.13 80 / .45)"}}>
+                <span className="dot warn"/><span className="banner-title">SAVED · NOT VERIFIED</span>
+                <span className="banner-body" style={{fontSize:11}}>Key stored but the test call failed: <span className="mono">{keyTest.slice(5)}</span>. The key may still be valid (network/transient), or it may be wrong. You can continue and check later.</span>
               </div>}
               <div className="dim" style={{fontSize:11.5}}>
                 Don't have a key? <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">Get one from Anthropic</a> · skip this step to stay in demo mode.
@@ -726,8 +753,11 @@ max_tokens = 2048`}
           {step === 1 && (
             <>
               <button className="btn" onClick={skipKey}>Stay in demo mode</button>
+              {typeof keyTest === "string" && keyTest.startsWith("warn:") && (
+                <button className="btn" onClick={() => setStep(2)}>Continue anyway</button>
+              )}
               <button className="btn primary" onClick={saveKey} disabled={savingKey || !apiKey.trim()}>
-                {savingKey ? "Saving…" : "Save key"}
+                {savingKey ? "Verifying…" : "Save & verify"}
               </button>
             </>
           )}

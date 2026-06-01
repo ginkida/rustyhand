@@ -213,7 +213,15 @@ impl AgentSelectState {
         if let Ok(resp) = client.get(format!("{base_url}/api/agents")).send() {
             if let Ok(body) = resp.json::<serde_json::Value>() {
                 self.daemon_agents.clear();
-                if let Some(arr) = body.as_array() {
+                // GET /api/agents returns the {agents,total,offset,limit} envelope
+                // (breaking change since v0.6.0). Read .agents; fall back to a bare
+                // array for older daemons. Pre-fix this used body.as_array(), so the
+                // TUI showed ZERO agents against any current daemon.
+                let items = body
+                    .get("agents")
+                    .and_then(|v| v.as_array())
+                    .or_else(|| body.as_array());
+                if let Some(arr) = items {
                     for a in arr {
                         self.daemon_agents.push(DaemonAgent {
                             id: a["id"].as_str().unwrap_or("?").to_string(),

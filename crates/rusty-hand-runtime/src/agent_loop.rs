@@ -309,8 +309,14 @@ pub async fn run_agent_loop(
 
         // Call LLM with retry, error classification, and circuit breaker
         let provider_name = manifest.model.provider.as_str();
-        let mut response =
-            call_with_retry(&*driver, request, Some(provider_name), None, None).await?;
+        let mut response = call_with_retry(
+            &*driver,
+            request,
+            Some(provider_name),
+            Some(crate::auth_cooldown::shared()),
+            None,
+        )
+        .await?;
 
         total_usage.input_tokens = total_usage
             .input_tokens
@@ -1287,7 +1293,7 @@ pub async fn run_agent_loop_streaming(
             request,
             stream_tx.clone(),
             Some(provider_name),
-            None,
+            Some(crate::auth_cooldown::shared()),
         )
         .await?;
 

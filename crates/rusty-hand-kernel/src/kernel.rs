@@ -1796,7 +1796,7 @@ impl RustyHandKernel {
             .await;
 
             match result {
-                Ok(result) => {
+                Ok(mut result) => {
                     // Append new messages to canonical session for cross-channel memory
                     if session.messages.len() > messages_before {
                         let new_messages = session.messages[messages_before..].to_vec();
@@ -1822,6 +1822,45 @@ impl RustyHandKernel {
                     let _ = kernel_clone
                         .registry
                         .set_state(agent_id, AgentState::Running);
+
+                    // Record usage in the metering engine so STREAMED turns count
+                    // toward analytics/budget. The non-streaming path does this at
+                    // send_message_with_handle; without it here, every streamed
+                    // conversation (Telegram streaming, dashboard chat) was invisible
+                    // to usage stats and global budget enforcement.
+                    let model = manifest.model.model.clone();
+                    let cost = MeteringEngine::estimate_cost_with_catalog(
+                        &kernel_clone
+                            .model_catalog
+                            .read()
+                            .unwrap_or_else(|e| e.into_inner()),
+                        &model,
+                        result.total_usage.input_tokens,
+                        result.total_usage.output_tokens,
+                    );
+                    let _ = kernel_clone
+                        .metering
+                        .record(&rusty_hand_memory::usage::UsageRecord {
+                            agent_id,
+                            model: model.clone(),
+                            input_tokens: result.total_usage.input_tokens,
+                            output_tokens: result.total_usage.output_tokens,
+                            cost_usd: cost,
+                            tool_calls: result.iterations.saturating_sub(1),
+                        });
+                    // Surface cost on the result per usage_footer mode (mirrors the
+                    // non-streaming path so streamed footers can show cost).
+                    result.cost_usd = match kernel_clone.config.usage_footer {
+                        rusty_hand_types::config::UsageFooterMode::Cost
+                        | rusty_hand_types::config::UsageFooterMode::Full => {
+                            if cost > 0.0 {
+                                Some(cost)
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    };
 
                     // Post-loop compaction check: if session now exceeds token threshold,
                     // trigger compaction in background for the next call.

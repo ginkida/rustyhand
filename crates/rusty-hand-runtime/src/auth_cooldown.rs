@@ -169,6 +169,22 @@ pub struct ProviderCooldown {
     states: DashMap<String, ProviderState>,
 }
 
+/// Process-global circuit breaker shared across every agent.
+///
+/// Provider health (a provider being down, rate-limited, or out of credit) is
+/// a process-wide property, not a per-agent one — if Anthropic is 402-ing for
+/// one agent it is for all of them. A single shared instance lets the breaker
+/// actually do its job: the moment one agent exhausts its retries against a
+/// dead provider, every other agent fails fast instead of mounting its own
+/// retry storm. Mirrors `http_client::shared()`.
+///
+/// Wired into `call_with_retry` / `stream_with_retry`; before this the loop
+/// passed `None` and the entire 400-LOC breaker was inert.
+pub fn shared() -> &'static ProviderCooldown {
+    static SHARED: std::sync::OnceLock<ProviderCooldown> = std::sync::OnceLock::new();
+    SHARED.get_or_init(|| ProviderCooldown::new(CooldownConfig::default()))
+}
+
 impl ProviderCooldown {
     /// Create a new circuit breaker with the given configuration.
     pub fn new(config: CooldownConfig) -> Self {

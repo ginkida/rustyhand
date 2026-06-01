@@ -1,6 +1,6 @@
 //! Compile-time embedded agent templates.
 //!
-//! All 30 bundled agent templates are embedded into the binary via `include_str!`.
+//! All 40 bundled agent templates are embedded into the binary via `include_str!`.
 //! This ensures `rustyhand agent new` works immediately after install — no filesystem
 //! discovery needed.
 
@@ -127,6 +127,37 @@ pub fn bundled_agents() -> Vec<(&'static str, &'static str)> {
         ),
         ("tutor", include_str!("../../../agents/tutor/agent.toml")),
         ("writer", include_str!("../../../agents/writer/agent.toml")),
+        // Monitoring/automation templates that existed on disk but were never
+        // embedded — so `rustyhand agent new <name>` failed offline for them.
+        // The bundled_manifests_match_disk test below guards against re-drift.
+        (
+            "api-monitor",
+            include_str!("../../../agents/api-monitor/agent.toml"),
+        ),
+        (
+            "ci-monitor",
+            include_str!("../../../agents/ci-monitor/agent.toml"),
+        ),
+        (
+            "dag-monitor",
+            include_str!("../../../agents/dag-monitor/agent.toml"),
+        ),
+        (
+            "db-reporter",
+            include_str!("../../../agents/db-reporter/agent.toml"),
+        ),
+        (
+            "log-analyzer",
+            include_str!("../../../agents/log-analyzer/agent.toml"),
+        ),
+        (
+            "slack-notifier",
+            include_str!("../../../agents/slack-notifier/agent.toml"),
+        ),
+        (
+            "weekly-digest",
+            include_str!("../../../agents/weekly-digest/agent.toml"),
+        ),
     ]
 }
 
@@ -378,5 +409,41 @@ mod tests {
             .tools
             .iter()
             .any(|t| t == "cron_cancel"));
+    }
+
+    /// Drift guard: every `agents/<name>/agent.toml` on disk must be embedded
+    /// via `include_str!` in `bundled_agents()`. Pre-fix, 7 templates
+    /// (api-monitor, ci-monitor, dag-monitor, db-reporter, log-analyzer,
+    /// slack-notifier, weekly-digest) existed on disk but were never embedded,
+    /// so `rustyhand agent new <name>` failed offline for them.
+    #[test]
+    fn bundled_agents_cover_every_on_disk_template() {
+        let agents_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../agents");
+        let embedded: std::collections::HashSet<String> = bundled_agents()
+            .into_iter()
+            .map(|(n, _)| n.to_string())
+            .collect();
+        let mut missing: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir(&agents_dir)
+            .unwrap_or_else(|e| panic!("read agents dir {}: {e}", agents_dir.display()))
+        {
+            let entry = entry.unwrap();
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            if !entry.path().join("agent.toml").is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !embedded.contains(&name) {
+                missing.push(name);
+            }
+        }
+        missing.sort();
+        assert!(
+            missing.is_empty(),
+            "agent.toml templates exist on disk but are not embedded via include_str! in \
+             bundled_agents(): {missing:?}. Add them so offline `rustyhand agent new` works."
+        );
     }
 }

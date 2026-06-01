@@ -408,6 +408,7 @@ function OnboardingWizard({ onClose }) {
   const [savingKey, setSavingKey] = useState(false);
   const [keyErr, setKeyErr] = useState(null);
   const [keySaved, setKeySaved] = useState(false);
+  const [keyTest, setKeyTest] = useState(null);
   const [agentName, setAgentName] = useState("my-agent");
   const [spawning, setSpawning] = useState(false);
   const [spawnErr, setSpawnErr] = useState(null);
@@ -425,6 +426,7 @@ function OnboardingWizard({ onClose }) {
     }
     setSavingKey(true);
     setKeyErr(null);
+    setKeyTest(null);
     try {
       await rhFetch(`/api/providers/${encodeURIComponent(providerName)}/key`, {
         method: "POST",
@@ -432,8 +434,20 @@ function OnboardingWizard({ onClose }) {
         body: JSON.stringify({ key: apiKey })
       });
       setKeySaved(true);
-      toastOk(`${providerName} key saved`);
-      setStep(2);
+      try {
+        const t = await rhFetch(`/api/providers/${encodeURIComponent(providerName)}/test`, { method: "POST" });
+        if (t && t.status === "ok") {
+          setKeyTest("ok");
+          toastOk(`${providerName} key verified`);
+          setStep(2);
+        } else {
+          setKeyTest("warn:" + (t && (t.error || t.message) || "provider did not confirm"));
+          toastWarn(`${providerName} key saved but could not be verified`);
+        }
+      } catch (te) {
+        setKeyTest("warn:" + String(te && te.message || te));
+        toastWarn(`${providerName} key saved but could not be verified`);
+      }
     } catch (e) {
       setKeyErr(String(e.message || e));
     } finally {
@@ -497,11 +511,11 @@ tools = ["web_search", "web_fetch", "memory_recall"]
       },
       autoFocus: true
     }
-  )), keyErr && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, keyErr)), keySaved && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.74 0.135 150 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot live" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "SAVED"), /* @__PURE__ */ React.createElement("span", { className: "banner-body", style: { fontSize: 11.5 } }, providerName, " key stored. Continuing\u2026")), /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 11.5 } }, "Don't have a key? ", /* @__PURE__ */ React.createElement("a", { href: "https://console.anthropic.com/settings/keys", target: "_blank", rel: "noreferrer" }, "Get one from Anthropic"), " \xB7 skip this step to stay in demo mode.")), step === 2 && /* @__PURE__ */ React.createElement("div", { className: "col gap-12" }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13 } }, "Spawn an agent that uses the provider you just configured. You can rename it, change the system prompt, swap models \u2014 everything is editable in the agent's drawer after spawn."), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Agent name"), /* @__PURE__ */ React.createElement("input", { className: "modal-field", value: agentName, onChange: (e) => setAgentName(e.target.value), autoFocus: true })), /* @__PURE__ */ React.createElement("pre", { className: "codebox", style: { maxHeight: 160 } }, `name = "${agentName || "my-agent"}"
+  )), keyErr && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, keyErr)), keySaved && keyTest === null && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.74 0.135 150 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot live" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "SAVED"), /* @__PURE__ */ React.createElement("span", { className: "banner-body", style: { fontSize: 11.5 } }, providerName, " key stored. Verifying with ", providerName, "\u2026")), keyTest === "ok" && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.74 0.135 150 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot live" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "VERIFIED"), /* @__PURE__ */ React.createElement("span", { className: "banner-body", style: { fontSize: 11.5 } }, providerName, " key works \u2014 continuing\u2026")), typeof keyTest === "string" && keyTest.startsWith("warn:") && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.8 0.13 80 / .45)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot warn" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "SAVED \xB7 NOT VERIFIED"), /* @__PURE__ */ React.createElement("span", { className: "banner-body", style: { fontSize: 11 } }, "Key stored but the test call failed: ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, keyTest.slice(5)), ". The key may still be valid (network/transient), or it may be wrong. You can continue and check later.")), /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 11.5 } }, "Don't have a key? ", /* @__PURE__ */ React.createElement("a", { href: "https://console.anthropic.com/settings/keys", target: "_blank", rel: "noreferrer" }, "Get one from Anthropic"), " \xB7 skip this step to stay in demo mode.")), step === 2 && /* @__PURE__ */ React.createElement("div", { className: "col gap-12" }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13 } }, "Spawn an agent that uses the provider you just configured. You can rename it, change the system prompt, swap models \u2014 everything is editable in the agent's drawer after spawn."), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Agent name"), /* @__PURE__ */ React.createElement("input", { className: "modal-field", value: agentName, onChange: (e) => setAgentName(e.target.value), autoFocus: true })), /* @__PURE__ */ React.createElement("pre", { className: "codebox", style: { maxHeight: 160 } }, `name = "${agentName || "my-agent"}"
 provider = "${providerName}"
 tools = ["web_search", "web_fetch", "memory_recall"]
 temperature = 0.4
-max_tokens = 2048`), spawnErr && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, spawnErr)))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: dismiss, style: { marginRight: "auto" } }, "Skip setup"), step > 0 && /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => setStep(step - 1) }, "Back"), step === 0 && /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setStep(1) }, "Get started"), step === 1 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: skipKey }, "Stay in demo mode"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: saveKey, disabled: savingKey || !apiKey.trim() }, savingKey ? "Saving\u2026" : "Save key")), step === 2 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: skipSpawn }, "Skip"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: spawn, disabled: spawning || !agentName.trim() }, spawning ? "Spawning\u2026" : "Spawn agent")))));
+max_tokens = 2048`), spawnErr && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, spawnErr)))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: dismiss, style: { marginRight: "auto" } }, "Skip setup"), step > 0 && /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: () => setStep(step - 1) }, "Back"), step === 0 && /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: () => setStep(1) }, "Get started"), step === 1 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: skipKey }, "Stay in demo mode"), typeof keyTest === "string" && keyTest.startsWith("warn:") && /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: () => setStep(2) }, "Continue anyway"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: saveKey, disabled: savingKey || !apiKey.trim() }, savingKey ? "Verifying\u2026" : "Save & verify")), step === 2 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { className: "btn", onClick: skipSpawn }, "Skip"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: spawn, disabled: spawning || !agentName.trim() }, spawning ? "Spawning\u2026" : "Spawn agent")))));
 }
 function HelpOverlay({ open, onClose }) {
   useEscapeKey(open ? onClose : null);
