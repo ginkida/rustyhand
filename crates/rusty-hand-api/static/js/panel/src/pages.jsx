@@ -2095,6 +2095,15 @@ function ChatPage() {
           ? { ...t, running: false, result: msg.result, is_error: !!msg.is_error }
           : t));
         break;
+      case "tool_progress":
+        // Heartbeat while a tool executes — keep the last not-yet-finished tool
+        // marked running and show elapsed seconds so the bubble isn't a dead
+        // spinner during slow tools (verbose On/Full emits tool_end first, so
+        // re-mark running rather than gating on the current running flag).
+        setStreamingTools((prev) => prev.map((t, i, arr) => i === arr.length - 1 && t.result == null
+          ? { ...t, running: true, elapsed_secs: msg.elapsed_secs }
+          : t));
+        break;
       case "response":
         // Final assistant message; flush to pending buffer + clear stream.
         setPendingMessages((prev) => prev.concat([{ _key: nextPendingKey(), role: "assistant", content: msg.content || streamingText, _local: true }]));
@@ -2660,7 +2669,8 @@ function ToolTraceCard({ tool }) {
   const argStr = String(typeof t.input === "string" ? t.input : (t.input ? JSON.stringify(t.input) : "")).slice(0, 240);
   const resultStr = t.result ? String(t.result).slice(0, 2000) : "";
   const elapsed = t.elapsed || (t.duration_ms != null ? `${(Number(t.duration_ms) / 1000).toFixed(2)}s` : null);
-  const status = running ? "…" : (isError ? "err" : (elapsed || "ok"));
+  const liveElapsed = Number(t.elapsed_secs) > 0 ? `${t.elapsed_secs}s` : "…";
+  const status = running ? liveElapsed : (isError ? "err" : (elapsed || "ok"));
   return (
     <div className={"tool-trace " + (running ? "" : (isError ? "fail" : "done"))}>
       <button

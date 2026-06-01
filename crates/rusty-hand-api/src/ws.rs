@@ -1399,6 +1399,11 @@ fn map_stream_event(event: &StreamEvent, verbose: VerboseLevel) -> Option<serde_
             "phase": phase,
             "detail": detail,
         })),
+        StreamEvent::ToolExecutionProgress { name, elapsed_secs } => Some(serde_json::json!({
+            "type": "tool_progress",
+            "name": name,
+            "elapsed_secs": elapsed_secs,
+        })),
         StreamEvent::SessionLabeled { session_id, label } => Some(serde_json::json!({
             "type": "session_labeled",
             "session_id": session_id,

@@ -176,6 +176,16 @@ impl ChatState {
         self.active_tool = None;
     }
 
+    /// Heartbeat while a tool executes — revive the spinner (cleared by
+    /// `tool_use_end`) and show elapsed seconds for slow tools.
+    pub fn tool_progress(&mut self, name: &str, elapsed_secs: u64) {
+        self.active_tool = Some(if elapsed_secs == 0 {
+            name.to_string()
+        } else {
+            format!("{name} ({elapsed_secs}s)")
+        });
+    }
+
     /// Fill in the result for the most recent matching tool message.
     pub fn tool_result(&mut self, name: &str, result: &str, is_error: bool) {
         // Walk backwards to find the last Tool message matching this name

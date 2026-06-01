@@ -1077,6 +1077,9 @@ impl App {
                 self.chat.thinking = true;
                 self.chat.append_stream(&text);
             }
+            StreamEvent::ToolExecutionProgress { name, elapsed_secs } => {
+                self.chat.tool_progress(&name, elapsed_secs);
+            }
             StreamEvent::ToolExecutionResult {
                 name,
                 result_preview,

@@ -1271,6 +1271,9 @@ function ChatPage() {
       case "tool_result":
         setStreamingTools((prev) => prev.map((t, i, arr) => i === arr.length - 1 && t.running ? { ...t, running: false, result: msg.result, is_error: !!msg.is_error } : t));
         break;
+      case "tool_progress":
+        setStreamingTools((prev) => prev.map((t, i, arr) => i === arr.length - 1 && t.result == null ? { ...t, running: true, elapsed_secs: msg.elapsed_secs } : t));
+        break;
       case "response":
         setPendingMessages((prev) => prev.concat([{ _key: nextPendingKey(), role: "assistant", content: msg.content || streamingText, _local: true }]));
         setStreamingText("");
@@ -1667,7 +1670,8 @@ function ToolTraceCard({ tool }) {
   const argStr = String(typeof t.input === "string" ? t.input : t.input ? JSON.stringify(t.input) : "").slice(0, 240);
   const resultStr = t.result ? String(t.result).slice(0, 2e3) : "";
   const elapsed = t.elapsed || (t.duration_ms != null ? `${(Number(t.duration_ms) / 1e3).toFixed(2)}s` : null);
-  const status = running ? "\u2026" : isError ? "err" : elapsed || "ok";
+  const liveElapsed = Number(t.elapsed_secs) > 0 ? `${t.elapsed_secs}s` : "\u2026";
+  const status = running ? liveElapsed : isError ? "err" : elapsed || "ok";
   return /* @__PURE__ */ React.createElement("div", { className: "tool-trace " + (running ? "" : isError ? "fail" : "done") }, /* @__PURE__ */ React.createElement(
     "button",
     {

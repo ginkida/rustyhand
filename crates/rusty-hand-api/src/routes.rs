@@ -1725,6 +1725,10 @@ pub async fn send_message_stream(
                         .event("tool_input_delta")
                         .json_data(serde_json::json!({"content": text}))
                         .unwrap_or_else(|_| Event::default().data("error")),
+                    StreamEvent::ToolExecutionProgress { name, elapsed_secs } => Event::default()
+                        .event("tool_progress")
+                        .json_data(serde_json::json!({"tool": name, "elapsed_secs": elapsed_secs}))
+                        .unwrap_or_else(|_| Event::default().data("error")),
                     _ => Event::default().comment("skip"),
                 });
                 Some((sse_event, rx))

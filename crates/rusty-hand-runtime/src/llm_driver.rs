@@ -118,6 +118,11 @@ pub enum StreamEvent {
         phase: String,
         detail: Option<String>,
     },
+    /// Periodic heartbeat while a tool is executing (emitted by the agent loop,
+    /// not the LLM driver). Fires once immediately with `elapsed_secs == 0` to
+    /// mark execution start, then every few seconds for slow tools so clients
+    /// aren't left in a dead gap (up to the 120s tool timeout).
+    ToolExecutionProgress { name: String, elapsed_secs: u64 },
     /// Tool execution completed with result (emitted by agent loop, not LLM driver).
     ToolExecutionResult {
         name: String,

@@ -57,6 +57,10 @@ fn retry_delay_with_jitter(retry_after_ms: u64, attempt: u32) -> u64 {
 /// Raised from 60s to 120s for browser automation and long-running builds.
 const TOOL_TIMEOUT_SECS: u64 = 120;
 
+/// Heartbeat interval for `ToolExecutionProgress` events while a tool runs.
+/// Keeps streaming clients alive and informed during slow tools (no UI gap).
+const TOOL_PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
+
 /// Maximum consecutive MaxTokens continuations before returning partial response.
 /// Raised from 3 to 5 to allow longer-form generation.
 const MAX_CONTINUATIONS: u32 = 5;
@@ -1602,10 +1606,20 @@ pub async fn run_agent_loop_streaming(
                     let effective_exec_policy =
                         manifest.exec_policy.as_ref().or(global_exec_policy);
 
-                    // Timeout-wrapped execution
-                    let result = match tokio::time::timeout(
-                        Duration::from_secs(TOOL_TIMEOUT_SECS),
-                        tool_runner::execute_tool(
+                    // Execute the tool with the 120s timeout, but emit periodic
+                    // ToolExecutionProgress heartbeats so streaming clients
+                    // aren't left in a dead gap during slow tools. The first
+                    // heartbeat (elapsed 0) fires immediately to mark the
+                    // transition from "LLM emitted the tool call" to "tool is
+                    // actually running".
+                    let _ = stream_tx
+                        .send(StreamEvent::ToolExecutionProgress {
+                            name: tool_call.name.clone(),
+                            elapsed_secs: 0,
+                        })
+                        .await;
+                    let result = {
+                        let exec_fut = tool_runner::execute_tool(
                             &tool_call.id,
                             &tool_call.name,
                             &tool_call.input,
@@ -1627,20 +1641,38 @@ pub async fn run_agent_loop_streaming(
                             tts_engine,
                             docker_config,
                             process_manager,
-                        ),
-                    )
-                    .await
-                    {
-                        Ok(result) => result,
-                        Err(_) => {
-                            warn!(tool = %tool_call.name, "Tool execution timed out after {}s (streaming)", TOOL_TIMEOUT_SECS);
-                            rusty_hand_types::tool::ToolResult {
-                                tool_use_id: tool_call.id.clone(),
-                                content: format!(
-                                    "Tool '{}' timed out after {}s.",
-                                    tool_call.name, TOOL_TIMEOUT_SECS
-                                ),
-                                is_error: true,
+                        );
+                        tokio::pin!(exec_fut);
+                        let started = tokio::time::Instant::now();
+                        let deadline = tokio::time::sleep(Duration::from_secs(TOOL_TIMEOUT_SECS));
+                        tokio::pin!(deadline);
+                        let mut ticker = tokio::time::interval(TOOL_PROGRESS_INTERVAL);
+                        ticker.tick().await; // consume the immediate first tick
+                        loop {
+                            tokio::select! {
+                                biased;
+                                r = &mut exec_fut => break r,
+                                _ = &mut deadline => {
+                                    warn!(tool = %tool_call.name, "Tool execution timed out after {}s (streaming)", TOOL_TIMEOUT_SECS);
+                                    break rusty_hand_types::tool::ToolResult {
+                                        tool_use_id: tool_call.id.clone(),
+                                        content: format!(
+                                            "Tool '{}' timed out after {}s.",
+                                            tool_call.name, TOOL_TIMEOUT_SECS
+                                        ),
+                                        is_error: true,
+                                    };
+                                }
+                                _ = ticker.tick() => {
+                                    // Best-effort heartbeat; a dropped consumer
+                                    // doesn't stop execution (it's handled below).
+                                    let _ = stream_tx
+                                        .send(StreamEvent::ToolExecutionProgress {
+                                            name: tool_call.name.clone(),
+                                            elapsed_secs: started.elapsed().as_secs(),
+                                        })
+                                        .await;
+                                }
                             }
                         }
                     };
@@ -3235,6 +3267,21 @@ mod tests {
             events.push(ev);
         }
         assert!(!events.is_empty(), "Should have received stream events");
+
+        // Phase 1c: a tool was executed, so the streaming loop must emit at
+        // least one ToolExecutionProgress heartbeat — the immediate elapsed=0
+        // marker — that fills the dead gap between the tool call and its result.
+        let progress: Vec<u64> = events
+            .iter()
+            .filter_map(|ev| match ev {
+                StreamEvent::ToolExecutionProgress { elapsed_secs, .. } => Some(*elapsed_secs),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            progress.contains(&0),
+            "expected an immediate ToolExecutionProgress(elapsed=0) before tool exec, got: {progress:?}"
+        );
     }
 
     // ─── Live end-to-end tests (DeepSeek V4) ─────────────────────────────
