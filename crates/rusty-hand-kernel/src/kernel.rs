@@ -2788,6 +2788,30 @@ impl RustyHandKernel {
         Ok(())
     }
 
+    /// Replace an agent's tool capability list and re-grant capabilities so the
+    /// change takes effect on the next message — no respawn needed. Pass
+    /// `["*"]` to grant every builtin tool (the fix for agents spawned with a
+    /// narrow profile that left "everything unavailable"). Persisted to the
+    /// agent store so it survives restart.
+    pub fn set_agent_tools(&self, agent_id: AgentId, tools: Vec<String>) -> KernelResult<()> {
+        self.registry
+            .update_tools(agent_id, tools.clone())
+            .map_err(KernelError::RustyHand)?;
+
+        // `available_tools` reads the granted capability set fresh on every
+        // turn, so re-granting here makes the new tools live immediately.
+        if let Some(entry) = self.registry.get(agent_id) {
+            let caps = manifest_to_capabilities(&entry.manifest);
+            self.capabilities.grant(agent_id, caps);
+            if let Err(e) = self.memory.save_agent(&entry) {
+                warn!(agent_id = %agent_id, error = %e, "Failed to persist agent after tools update");
+            }
+        }
+
+        info!(agent_id = %agent_id, tools = ?tools, "Agent tools updated");
+        Ok(())
+    }
+
     /// Update an agent's MCP server allowlist. Empty = all servers (backward compat).
     pub fn set_agent_mcp_servers(
         &self,

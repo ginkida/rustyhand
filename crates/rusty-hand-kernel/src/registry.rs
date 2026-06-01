@@ -225,6 +225,48 @@ impl AgentRegistry {
         Ok(())
     }
 
+    /// Replace an agent's tool capability list (hot-swap, takes effect on the
+    /// next message once the kernel re-grants capabilities).
+    ///
+    /// Use `["*"]` to grant every builtin tool. Implied capabilities derived
+    /// from the new tool list (network / shell / agent / memory) are only ever
+    /// *widened*, never narrowed — this is the "grant more tools to an existing
+    /// agent" path, so it must not silently strip a host allowlist the operator
+    /// configured by hand. `manifest.profile` is cleared to `None` so the
+    /// explicit tool list is authoritative.
+    pub fn update_tools(&self, id: AgentId, tools: Vec<String>) -> RustyHandResult<()> {
+        let mut entry = self
+            .agents
+            .get_mut(&id)
+            .ok_or_else(|| RustyHandError::AgentNotFound(id.to_string()))?;
+        let caps = &mut entry.manifest.capabilities;
+        let has = |pred: &dyn Fn(&str) -> bool| tools.iter().any(|t| t == "*" || pred(t));
+        let needs_net = has(&|t: &str| t.starts_with("web_"));
+        let needs_shell = has(&|t: &str| t == "shell_exec");
+        let needs_agent = has(&|t: &str| t.starts_with("agent_"));
+        let needs_memory = has(&|t: &str| t.starts_with("memory_"));
+        caps.tools = tools;
+        if needs_net && caps.network.is_empty() {
+            caps.network = vec!["*".to_string()];
+        }
+        if needs_shell && caps.shell.is_empty() {
+            caps.shell = vec!["*".to_string()];
+        }
+        if needs_agent {
+            caps.agent_spawn = true;
+            if caps.agent_message.is_empty() {
+                caps.agent_message = vec!["*".to_string()];
+            }
+        }
+        if needs_memory && caps.memory_read.is_empty() {
+            caps.memory_read = vec!["*".to_string()];
+        }
+        // Explicit tools override any profile expansion.
+        entry.manifest.profile = None;
+        entry.last_active = chrono::Utc::now();
+        Ok(())
+    }
+
     /// Update an agent's MCP server allowlist.
     pub fn update_mcp_servers(&self, id: AgentId, servers: Vec<String>) -> RustyHandResult<()> {
         let mut entry = self
@@ -466,5 +508,76 @@ mod tests {
         entry.id = AgentId::new();
         registry.register(entry).unwrap();
         assert!(registry.find_by_name("ghost").is_some());
+    }
+
+    #[test]
+    fn test_update_tools_grant_all_widens_implied_caps() {
+        let registry = AgentRegistry::new();
+        let mut entry = test_entry("limited");
+        let id = entry.id;
+        // Start like a dashboard "research" agent: 4 tools, no shell/agent caps.
+        entry.manifest.capabilities.tools =
+            vec!["web_fetch".into(), "web_search".into(), "file_read".into()];
+        entry.manifest.profile = Some(ToolProfile::Research);
+        registry.register(entry).unwrap();
+
+        registry.update_tools(id, vec!["*".to_string()]).unwrap();
+
+        let e = registry.get(id).unwrap();
+        let caps = &e.manifest.capabilities;
+        assert_eq!(caps.tools, vec!["*".to_string()]);
+        // "*" implies every category — all widened to permissive.
+        assert_eq!(caps.network, vec!["*".to_string()]);
+        assert_eq!(caps.shell, vec!["*".to_string()]);
+        assert!(caps.agent_spawn);
+        assert_eq!(caps.agent_message, vec!["*".to_string()]);
+        assert_eq!(caps.memory_read, vec!["*".to_string()]);
+        // Explicit tools override the profile.
+        assert_eq!(e.manifest.profile, None);
+    }
+
+    #[test]
+    fn test_update_tools_specific_list_only_widens_relevant_caps() {
+        let registry = AgentRegistry::new();
+        let mut entry = test_entry("filey");
+        let id = entry.id;
+        registry
+            .register({
+                entry.manifest.capabilities.tools = vec!["file_read".into()];
+                entry
+            })
+            .unwrap();
+
+        // Add shell only — network must stay empty (not implied by file/shell).
+        registry
+            .update_tools(id, vec!["file_read".into(), "shell_exec".into()])
+            .unwrap();
+
+        let e = registry.get(id).unwrap();
+        assert_eq!(e.manifest.capabilities.shell, vec!["*".to_string()]);
+        assert!(e.manifest.capabilities.network.is_empty());
+        assert!(!e.manifest.capabilities.agent_spawn);
+    }
+
+    #[test]
+    fn test_update_tools_does_not_narrow_existing_network() {
+        let registry = AgentRegistry::new();
+        let mut entry = test_entry("scoped");
+        let id = entry.id;
+        registry
+            .register({
+                entry.manifest.capabilities.network = vec!["example.com".into()];
+                entry
+            })
+            .unwrap();
+
+        // Adding a web tool must NOT replace the hand-set host allowlist.
+        registry.update_tools(id, vec!["web_fetch".into()]).unwrap();
+
+        let e = registry.get(id).unwrap();
+        assert_eq!(
+            e.manifest.capabilities.network,
+            vec!["example.com".to_string()]
+        );
     }
 }

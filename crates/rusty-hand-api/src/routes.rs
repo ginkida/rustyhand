@@ -7027,6 +7027,9 @@ pub struct PatchAgentConfigRequest {
     pub max_tokens: Option<u32>,
     /// Enable or disable extended thinking.
     pub thinking_enabled: Option<bool>,
+    /// Replace the agent's tool list. `["*"]` grants every builtin tool.
+    /// Takes effect on the next message without respawn.
+    pub tools: Option<Vec<String>>,
 }
 
 /// PATCH /api/agents/{id}/config — Hot-update agent name, description, system prompt, and identity.
@@ -7233,6 +7236,18 @@ pub async fn patch_agent_config(
             return (
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "Agent not found"})),
+            );
+        }
+        did_update = true;
+    }
+
+    // Tool list — replace and re-grant capabilities live (e.g. ["*"] = all tools).
+    // set_agent_tools persists itself; did_update is set for a consistent response.
+    if let Some(tools) = req.tools {
+        if let Err(e) = state.kernel.set_agent_tools(agent_id, tools) {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": format!("{e}")})),
             );
         }
         did_update = true;

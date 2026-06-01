@@ -1676,6 +1676,7 @@ function AgentConfigForm({ agent, detail, onSaved }) {
     max_tokens: model.max_tokens != null ? String(model.max_tokens) : "2048",
     thinking_enabled: !!model.thinking,
     model: model.model || agent.model,
+    tools: ((current.capabilities && current.capabilities.tools) || []).join(", "),
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [agent && agent.id, detail]);
   const [name, setName] = useState(initial.name);
@@ -1686,6 +1687,7 @@ function AgentConfigForm({ agent, detail, onSaved }) {
   const [maxTokens, setMaxTokens] = useState(initial.max_tokens);
   const [thinkingEnabled, setThinkingEnabled] = useState(initial.thinking_enabled);
   const [modelName, setModelName] = useState(initial.model);
+  const [toolsStr, setToolsStr] = useState(initial.tools);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [ok, setOk] = useState(false);
@@ -1718,8 +1720,9 @@ function AgentConfigForm({ agent, detail, onSaved }) {
     push("max_tokens", initial.max_tokens, maxTokens);
     push("thinking_enabled", initial.thinking_enabled, thinkingEnabled);
     push("model", initial.model, modelName);
+    push("tools", initial.tools, toolsStr);
     return rows;
-  }, [initial, name, group, description, systemPrompt, temperature, maxTokens, thinkingEnabled, modelName]);
+  }, [initial, name, group, description, systemPrompt, temperature, maxTokens, thinkingEnabled, modelName, toolsStr]);
 
   const save = async () => {
     if (diff.length === 0) { setOk(true); return; }
@@ -1733,6 +1736,7 @@ function AgentConfigForm({ agent, detail, onSaved }) {
         else if (r.label === "max_tokens") patch.max_tokens = Number(r.newV);
         else if (r.label === "thinking_enabled") patch.thinking_enabled = !!r.newV;
         else if (r.label === "system_prompt") patch.system_prompt = r.newV;
+        else if (r.label === "tools") patch.tools = String(r.newV).split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
         else if (r.label !== "model") patch[r.label] = r.newV;
       }
       if (Object.keys(patch).length > 0) {
@@ -1767,6 +1771,15 @@ function AgentConfigForm({ agent, detail, onSaved }) {
         <textarea className="modal-field modal-textarea" style={{minHeight:60}} value={description} onChange={e => setDescription(e.target.value)}/></label>
       <label className="t-row col"><span className="t-lbl">System prompt</span>
         <textarea className="modal-field modal-textarea" style={{minHeight:120}} value={systemPrompt} onChange={e => setSystemPrompt(e.target.value)}/></label>
+      <label className="t-row col">
+        <span className="t-lbl row" style={{alignItems:"center", gap:8}}>
+          Tools
+          <button type="button" className="btn-ghost" style={{fontSize:10.5, padding:"1px 7px"}}
+            onClick={() => setToolsStr("*")} title="Grant every builtin tool">All tools (*)</button>
+          <span className="dim" style={{fontSize:10}}>comma/space separated · <span className="mono">*</span> = all · live, no respawn</span>
+        </span>
+        <input className="modal-field mono" value={toolsStr} placeholder="e.g. * or file_read, shell_exec, web_search"
+          onChange={e => setToolsStr(e.target.value)}/></label>
       <label className="t-row col">
         <span className="t-lbl">
           Model
