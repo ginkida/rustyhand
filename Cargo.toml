@@ -118,6 +118,15 @@ tar = "0.4"
 tokio-test = "0.4"
 tempfile = "3"
 
+[profile.dev]
+# debuginfo is the lion's share of target/debug. line-tables-only keeps
+# file:line in panic backtraces (this project debugs via panics — see the
+# UTF-8 panic fixes) while dropping heavy variable-level debuginfo, which
+# shrinks target/debug substantially. The `test` profile inherits this.
+# The agent's harness also sets CARGO_INCREMENTAL=0 for its automated runs
+# so the incremental cache doesn't balloon target/debug on repeated builds.
+debug = "line-tables-only"
+
 [profile.release]
 lto = true
 codegen-units = 1
