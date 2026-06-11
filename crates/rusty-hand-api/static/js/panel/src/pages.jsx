@@ -169,10 +169,13 @@ const Banner = ({ go, onboarding }) => {
       <span className="banner-title">DEMO MODE</span>
       <span className="banner-body">
         Provider <span className="mono">{onboarding.provider || "mock"}</span>
-        {onboarding.api_key_set === false && <> — no API key set</>}
-        {" "}· {onboarding.agent_count || 0} agent(s) loaded.
+        {onboarding.api_key_set === false && <> — LLM replies are stubbed</>}
+        {" "}· {onboarding.agent_count || 0} agent(s) loaded. Everything but the LLM is real —
+        run <span className="mono">demo-pipeline</span> or message <span className="mono">rusty</span> to
+        see the agent loop. Add a key for real responses.
       </span>
       <span className="banner-cta">
+        <button className="btn sm ghost" onClick={() => go("chat")}>Try chat</button>
         <button className="btn sm ghost" onClick={() => go("settings")}>Add API key</button>
       </span>
     </div>
@@ -2034,7 +2037,7 @@ function AgentIdentityForm({ agent, detail, onSaved }) {
 // hits POST /api/agents/{id}/message. Streaming (WS / SSE) is on the
 // roadmap but the round-trip endpoint already renders the design's bubble
 // + tool-trace layout once the agent's response lands.
-function ChatPage() {
+function ChatPage({ go }) {
   const [agentsResp] = usePolling("/api/agents?limit=200", 20000);
   // Never fall back to D.agents (demo fixtures) here — those have
   // human-readable string ids like "rusty" that the kernel rejects as
@@ -2284,9 +2287,18 @@ function ChatPage() {
             <span className="mono dim" style={{fontSize:11,letterSpacing:".12em",textTransform:"uppercase"}}>Sessions</span>
           </div>
           <div className="chat-list-body">
-            <div className="muted mono" style={{padding:"24px 14px", fontSize:12, textAlign:"center"}}>
-              {agentsResp ? "No agents yet. Spawn one from the Agents page." : "loading agents…"}
-            </div>
+            {agentsResp ? (
+              <div className="col gap-12" style={{padding:"24px 16px", textAlign:"center"}}>
+                <div className="muted" style={{fontSize:12.5, lineHeight:1.5}}>
+                  No agents yet. Spawn one to start chatting — it takes a few seconds.
+                </div>
+                {go && <button className="btn primary" style={{alignSelf:"center"}} onClick={() => go("agents")}>
+                  <I.plus/> Spawn your first agent
+                </button>}
+              </div>
+            ) : (
+              <div className="muted mono" style={{padding:"24px 14px", fontSize:12, textAlign:"center"}}>loading agents…</div>
+            )}
           </div>
         </div>
         <div aria-hidden style={{width:0}}/>
@@ -7075,7 +7087,7 @@ function MemoryPage() {
           </tr></thead>
           <tbody>
             {!resp && <tr><td colSpan={8} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>loading…</td></tr>}
-            {resp && sessions.length === 0 && <tr><td colSpan={8} className="muted mono" style={{padding:"12px 14px", fontSize:12, textAlign:"center"}}>No sessions yet.</td></tr>}
+            {resp && sessions.length === 0 && <tr><td colSpan={8} className="muted" style={{padding:"24px 14px", fontSize:12.5, textAlign:"center"}}>No sessions yet — they appear here automatically once you chat with an agent.</td></tr>}
             {sessions.map(s => (
               <tr key={s.session_id} style={selected.has(s.session_id) ? {background:"var(--bg-2)"} : null}>
                 <td>

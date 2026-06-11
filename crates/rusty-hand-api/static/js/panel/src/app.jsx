@@ -718,7 +718,23 @@ tools = ["web_search", "web_fetch", "memory_recall"]
                 <span className="banner-body" style={{fontSize:11}}>Key stored but the test call failed: <span className="mono">{keyTest.slice(5)}</span>. The key may still be valid (network/transient), or it may be wrong. You can continue and check later.</span>
               </div>}
               <div className="dim" style={{fontSize:11.5}}>
-                Don't have a key? <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">Get one from Anthropic</a> · skip this step to stay in demo mode.
+                {(() => {
+                  const urls = {
+                    anthropic: "https://console.anthropic.com/settings/keys",
+                    kimi: "https://platform.moonshot.ai/console/code",
+                    deepseek: "https://platform.deepseek.com/api_keys",
+                    minimax: "https://www.minimax.io/platform",
+                    zhipu: "https://open.bigmodel.cn/usercenter/apikeys",
+                    glm: "https://open.bigmodel.cn/usercenter/apikeys",
+                    openrouter: "https://openrouter.ai/keys",
+                  };
+                  const sel = providers.find(p => p.id === providerName);
+                  const name = (sel && (sel.display_name || sel.id)) || providerName || "your provider";
+                  const url = urls[providerName];
+                  return <span>Don't have a key? {url
+                    ? <a href={url} target="_blank" rel="noreferrer">Get one from {name}</a>
+                    : <span>Get one from the {name} console</span>} · skip this step to stay in demo mode.</span>;
+                })()}
               </div>
             </div>
           )}
@@ -996,7 +1012,7 @@ function App() {
   let pageEl;
   if (page === "overview") pageEl = <OverviewPage go={setPage}/>;
   else if (page === "agents") pageEl = <AgentsPage openAgent={openAgent}/>;
-  else if (page === "chat") pageEl = <ChatPage/>;
+  else if (page === "chat") pageEl = <ChatPage go={setPage}/>;
   else if (page === "workflows") pageEl = <WorkflowsPage/>;
   else if (page === "automation") pageEl = <AutomationPage/>;
   else if (page === "channels") pageEl = <ChannelsPage/>;
