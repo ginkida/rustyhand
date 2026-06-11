@@ -3485,6 +3485,9 @@ async fn tool_media_describe(
     let engine = media_engine.ok_or("Media engine not available. Check media configuration.")?;
     let path = input["path"].as_str().ok_or("Missing 'path' parameter")?;
     let _ = validate_path(path)?;
+    // Optional caller-supplied instruction (e.g. "Extract all text"). The tool
+    // schema advertises this; honor it instead of silently discarding it.
+    let prompt = input["prompt"].as_str();
 
     // Read image file
     let data = tokio::fs::read(path)
@@ -3517,7 +3520,9 @@ async fn tool_media_describe(
         size_bytes: data.len() as u64,
     };
 
-    let understanding = engine.describe_image(&attachment).await?;
+    let understanding = engine
+        .describe_image_with_prompt(&attachment, prompt)
+        .await?;
     serde_json::to_string_pretty(&understanding).map_err(|e| format!("Serialize error: {e}"))
 }
 

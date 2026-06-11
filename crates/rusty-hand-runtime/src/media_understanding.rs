@@ -38,6 +38,19 @@ impl MediaEngine {
         &self,
         attachment: &MediaAttachment,
     ) -> Result<MediaUnderstanding, String> {
+        self.describe_image_with_prompt(attachment, None).await
+    }
+
+    /// Like [`describe_image`](Self::describe_image), but lets the caller steer
+    /// the description with a custom instruction (e.g. "Extract all text" or
+    /// "What's the error in this screenshot?"). `None` uses the default
+    /// general-purpose describe prompt. This is what the `media_describe` tool
+    /// passes its optional `prompt` argument through to.
+    pub async fn describe_image_with_prompt(
+        &self,
+        attachment: &MediaAttachment,
+        prompt: Option<&str>,
+    ) -> Result<MediaUnderstanding, String> {
         attachment.validate()?;
         if attachment.media_type != MediaType::Image {
             return Err("Expected image attachment".into());
@@ -90,9 +103,7 @@ impl MediaEngine {
                         data: data_base64,
                     },
                     rusty_hand_types::message::ContentBlock::Text {
-                        text: "Describe this image in detail. Note any text, people, objects, \
-                               charts, UI elements, and notable context. Be concise but complete."
-                            .to_string(),
+                        text: describe_prompt(prompt).to_string(),
                     },
                 ]),
             }],
@@ -319,6 +330,19 @@ impl MediaEngine {
     }
 }
 
+/// Default describe instruction when the caller doesn't supply one.
+const DEFAULT_DESCRIBE_PROMPT: &str = "Describe this image in detail. Note any text, people, \
+    objects, charts, UI elements, and notable context. Be concise but complete.";
+
+/// Pick the user-facing describe instruction: a non-blank caller prompt, else
+/// the default. Trims so a whitespace-only prompt doesn't blank the request.
+fn describe_prompt(custom: Option<&str>) -> &str {
+    custom
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .unwrap_or(DEFAULT_DESCRIBE_PROMPT)
+}
+
 /// Detect which vision provider is available based on environment variables.
 ///
 /// Returns provider IDs that are also valid for `create_driver()`. Pre-v0.7.0
@@ -433,6 +457,24 @@ mod tests {
         let config = MediaConfig::default();
         let engine = MediaEngine::new(config);
         assert_eq!(engine.config.max_concurrency, 2);
+    }
+
+    #[test]
+    fn describe_prompt_honors_custom_and_falls_back() {
+        // A real instruction is used verbatim (the media_describe `prompt`
+        // argument used to be silently discarded — this guards the fix).
+        assert_eq!(
+            describe_prompt(Some("Extract all text")),
+            "Extract all text"
+        );
+        // None and whitespace-only fall back to the default describe prompt.
+        assert_eq!(describe_prompt(None), DEFAULT_DESCRIBE_PROMPT);
+        assert_eq!(describe_prompt(Some("   ")), DEFAULT_DESCRIBE_PROMPT);
+        // Surrounding whitespace is trimmed.
+        assert_eq!(
+            describe_prompt(Some("  read the chart  ")),
+            "read the chart"
+        );
     }
 
     #[test]
