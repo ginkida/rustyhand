@@ -111,6 +111,10 @@ async fn start_test_server_with_provider(
             axum::routing::post(routes::restart_agent),
         )
         .route(
+            "/api/agents/{id}/update",
+            axum::routing::put(routes::update_agent),
+        )
+        .route(
             "/api/sessions/{id}",
             axum::routing::get(routes::get_session).delete(routes::delete_session),
         )
@@ -359,6 +363,102 @@ async fn test_spawn_list_kill_agent() {
     let body: serde_json::Value = resp.json().await.unwrap();
     let agents = body["agents"].as_array().unwrap();
     assert_eq!(agents.len(), 0);
+}
+
+/// PUT /api/agents/{id}/update must actually APPLY the manifest's mutable
+/// fields live (it used to return 200 "acknowledged" and do nothing — a
+/// fake-success landmine). Spawn, PUT an edited manifest, then GET and
+/// confirm every field changed.
+#[tokio::test]
+async fn test_update_agent_applies_manifest_fields() {
+    let server = require_server!(start_test_server());
+    let client = reqwest::Client::new();
+
+    // Spawn a baseline mock agent.
+    let resp = client
+        .post(format!("{}/api/agents", server.base_url))
+        .json(&serde_json::json!({"manifest_toml": MOCK_MANIFEST}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 201);
+    let agent_id = resp.json::<serde_json::Value>().await.unwrap()["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // PUT a fully edited manifest.
+    let updated = r#"
+name = "renamed-agent"
+version = "0.1.0"
+description = "Updated via PUT"
+author = "test"
+module = "builtin:chat"
+
+[model]
+provider = "mock"
+model = "mock-model"
+system_prompt = "Updated system prompt."
+temperature = 0.25
+max_tokens = 2048
+
+[capabilities]
+tools = ["file_read", "web_search"]
+"#;
+    let resp = client
+        .put(format!(
+            "{}/api/agents/{}/update",
+            server.base_url, agent_id
+        ))
+        .json(&serde_json::json!({"manifest_toml": updated}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["status"], "ok");
+    let applied: Vec<&str> = body["applied"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    for f in [
+        "name",
+        "description",
+        "system_prompt",
+        "temperature",
+        "max_tokens",
+        "tools",
+    ] {
+        assert!(
+            applied.contains(&f),
+            "expected '{f}' in applied, got {applied:?}"
+        );
+    }
+
+    // GET the agent and confirm the changes actually landed.
+    let resp = client
+        .get(format!("{}/api/agents/{}", server.base_url, agent_id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let g: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(g["name"], "renamed-agent");
+    assert_eq!(g["description"], "Updated via PUT");
+    assert_eq!(g["model"]["temperature"].as_f64().unwrap(), 0.25);
+    assert_eq!(g["model"]["max_tokens"].as_u64().unwrap(), 2048);
+    let tools: Vec<&str> = g["capabilities"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(
+        tools.contains(&"file_read") && tools.contains(&"web_search"),
+        "tools = {tools:?}"
+    );
 }
 
 #[tokio::test]

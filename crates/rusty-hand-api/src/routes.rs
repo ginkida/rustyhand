@@ -4884,8 +4884,12 @@ pub async fn update_agent(
         );
     }
 
-    // Parse the new manifest
-    let _manifest: AgentManifest = match toml::from_str(&req.manifest_toml) {
+    // Parse the new manifest and apply its mutable fields live via the same
+    // setters the config-PATCH path uses, so a full-manifest PUT actually
+    // takes effect on the next turn (no respawn) instead of silently
+    // acknowledging. Fields without a live setter (provider wire change,
+    // skills, mcp_servers) are left to their dedicated endpoints.
+    let manifest: AgentManifest = match toml::from_str(&req.manifest_toml) {
         Ok(m) => m,
         Err(e) => {
             return (
@@ -4895,13 +4899,96 @@ pub async fn update_agent(
         }
     };
 
-    // Note: Full manifest update requires kill + respawn. For now, acknowledge receipt.
+    if !(0.0..=2.0).contains(&manifest.model.temperature) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "model.temperature must be 0.0–2.0"})),
+        );
+    }
+
+    let reg = &state.kernel.registry;
+    let mut applied: Vec<&str> = Vec::new();
+
+    if !manifest.name.trim().is_empty() && reg.update_name(agent_id, manifest.name.clone()).is_ok()
+    {
+        applied.push("name");
+    }
+    if reg
+        .update_description(agent_id, manifest.description.clone())
+        .is_ok()
+    {
+        applied.push("description");
+    }
+    if !manifest.model.system_prompt.trim().is_empty()
+        && reg
+            .update_system_prompt(agent_id, manifest.model.system_prompt.clone())
+            .is_ok()
+    {
+        applied.push("system_prompt");
+    }
+    if reg
+        .update_temperature(agent_id, manifest.model.temperature)
+        .is_ok()
+    {
+        applied.push("temperature");
+    }
+    if manifest.model.max_tokens > 0
+        && reg
+            .update_max_tokens(agent_id, manifest.model.max_tokens)
+            .is_ok()
+    {
+        applied.push("max_tokens");
+    }
+
+    // Model is validated against the catalog by the kernel — surface a bad id.
+    if !manifest.model.model.trim().is_empty() {
+        if let Err(e) = state
+            .kernel
+            .set_agent_model(agent_id, &manifest.model.model)
+        {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(
+                    serde_json::json!({"error": format!("Invalid model '{}': {e}", manifest.model.model)}),
+                ),
+            );
+        }
+        applied.push("model");
+    }
+
+    // Tools re-grant capabilities live (e.g. ["*"] = all tools).
+    if !manifest.capabilities.tools.is_empty() {
+        if let Err(e) = state
+            .kernel
+            .set_agent_tools(agent_id, manifest.capabilities.tools.clone())
+        {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("{e}")})),
+            );
+        }
+        applied.push("tools");
+    }
+
+    // Persist the registry-only field updates (set_agent_model/tools persist
+    // themselves; this covers name/description/temperature/max_tokens).
+    if let Some(entry) = reg.get(agent_id) {
+        if let Err(e) = state.kernel.memory.save_agent(&entry) {
+            tracing::warn!(agent_id = %id, "Failed to persist updated agent: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Agent updated but could not be persisted"})),
+            );
+        }
+    }
+
     (
         StatusCode::OK,
         Json(serde_json::json!({
-            "status": "acknowledged",
+            "status": "ok",
             "agent_id": id,
-            "note": "Full manifest update requires agent restart. Use DELETE + POST to apply.",
+            "applied": applied,
+            "note": "Applied live (next turn, no respawn). Provider/skills/MCP changes use their dedicated endpoints.",
         })),
     )
 }
