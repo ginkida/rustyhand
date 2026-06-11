@@ -50,9 +50,10 @@ impl MediaEngine {
             .as_deref()
             .or_else(|| detect_vision_provider())
             .ok_or(
-                "No vision-capable LLM provider configured. Set ANTHROPIC_API_KEY \
-                    (or use OpenRouter to reach OpenAI/Gemini vision models, both of \
-                    which were removed as direct providers in v0.7.0)",
+                "No vision-capable LLM provider configured. Set ANTHROPIC_API_KEY, \
+                    or set OPENROUTER_API_KEY to reach Anthropic/OpenAI/Gemini vision \
+                    models via OpenRouter (OpenAI/Gemini were removed as direct \
+                    providers in v0.7.0)",
             )?;
 
         // Bound concurrent media calls (the engine's whole purpose).
@@ -329,6 +330,12 @@ impl MediaEngine {
 fn detect_vision_provider() -> Option<&'static str> {
     if std::env::var("ANTHROPIC_API_KEY").is_ok() {
         return Some("anthropic");
+    }
+    // OpenRouter reaches Anthropic/OpenAI/Gemini vision models over the
+    // OpenAI-compatible wire; default_vision_model("openrouter") is wired,
+    // so a user whose only key is OPENROUTER_API_KEY can still use vision.
+    if std::env::var("OPENROUTER_API_KEY").is_ok() {
+        return Some("openrouter");
     }
     None
 }

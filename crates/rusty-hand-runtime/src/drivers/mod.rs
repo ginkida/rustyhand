@@ -141,7 +141,10 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
     // Anthropic uses its own API format — special case.
     if provider == "anthropic" {
         let api_key = pick_api_key(&config.api_key, "ANTHROPIC_API_KEY").ok_or_else(|| {
-            LlmError::MissingApiKey("Set ANTHROPIC_API_KEY environment variable".to_string())
+            LlmError::MissingApiKey(
+                "Set ANTHROPIC_API_KEY environment variable (get one at https://console.anthropic.com/settings/keys)"
+                    .to_string(),
+            )
         })?;
         let base_url = config
             .base_url
@@ -172,10 +175,16 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
         let api_key = pick_api_key(&config.api_key, defaults.api_key_env).unwrap_or_default();
 
         if defaults.key_required && api_key.is_empty() {
-            return Err(LlmError::MissingApiKey(format!(
-                "Set {} environment variable for provider '{}'",
-                defaults.api_key_env, provider
-            )));
+            return Err(LlmError::MissingApiKey(match provider_key_url(provider) {
+                Some(url) => format!(
+                    "Set {} environment variable for provider '{}' (get one at {})",
+                    defaults.api_key_env, provider, url
+                ),
+                None => format!(
+                    "Set {} environment variable for provider '{}'",
+                    defaults.api_key_env, provider
+                ),
+            }));
         }
 
         let base_url = config
@@ -204,6 +213,21 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
             provider
         ),
     })
+}
+
+/// Where to obtain an API key for a known provider, so "missing key" errors can
+/// point the user at the exact console page. Returns `None` for providers that
+/// don't need a key (e.g. `ollama`, `mock`) or aren't recognized.
+pub fn provider_key_url(provider: &str) -> Option<&'static str> {
+    match provider {
+        "anthropic" => Some("https://console.anthropic.com/settings/keys"),
+        "kimi" => Some("https://platform.moonshot.ai/console/code"),
+        "deepseek" => Some("https://platform.deepseek.com/api_keys"),
+        "minimax" => Some("https://www.minimax.io/platform"),
+        "zhipu" | "glm" => Some("https://open.bigmodel.cn/usercenter/apikeys"),
+        "openrouter" => Some("https://openrouter.ai/keys"),
+        _ => None,
+    }
 }
 
 /// Hard-fail placeholder driver, opt-in via `RUSTYHAND_DISABLE_DEMO_MODE=1`.

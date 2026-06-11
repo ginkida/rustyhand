@@ -2469,9 +2469,9 @@ fn cmd_doctor(json: bool, repair: bool) {
 api_listen = "127.0.0.1:4200"
 
 [default_model]
-provider = "groq"
-model = "llama-3.3-70b-versatile"
-api_key_env = "GROQ_API_KEY"
+provider = "anthropic"
+model = "claude-sonnet-4-6"
+api_key_env = "ANTHROPIC_API_KEY"
 
 [memory]
 decay_rate = 0.05

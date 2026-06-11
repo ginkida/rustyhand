@@ -6,7 +6,7 @@
 <h3 align="center">The Agent Operating System</h3>
 
 <p align="center">
-  Open-source Agent OS built in Rust. 124K LOC. 10 crates. 1,577 tests. Zero clippy warnings.<br/>
+  Open-source Agent OS built in Rust. 134K LOC. 10 crates. 1,720 tests. Zero clippy warnings.<br/>
   <strong>One binary. Autonomous Telegram agent. Agents that actually work for you.</strong>
 </p>
 
@@ -19,16 +19,16 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT" />
-  <img src="https://img.shields.io/badge/version-0.7.41-green?style=flat-square" alt="v0.7.41" />
-  <img src="https://img.shields.io/badge/tests-1,577%20passing-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/version-0.7.83-green?style=flat-square" alt="v0.7.83" />
+  <img src="https://img.shields.io/badge/tests-1,720%20passing-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/clippy-0%20warnings-brightgreen?style=flat-square" alt="Clippy" />
 </p>
 
 ---
 
-> **v0.7.33–v0.7.41 — Demo Mode + persistence + product polish (May 2026)**
+> **v0.7.83 — React dashboard, autonomous agents, 72 tools, visible guardrails (June 2026)**
 >
-> Clone → `cargo run --release start` → open the dashboard → talk to an agent.
+> Clone → `cargo run --release -- start` → open the dashboard → talk to an agent.
 > **No API key required.** When no provider key is found in the environment,
 > RustyHand falls back to a deterministic mock driver and seeds four sample
 > resources so every major dashboard page is interactive on first visit:
@@ -41,23 +41,23 @@
 > A welcome modal on first visit lists all four with one-click navigation.
 > The CLI startup banner and Docker entrypoint both announce demo mode
 > as a feature instead of a missing-key warning. Set `ANTHROPIC_API_KEY`
-> (or any of 26 other supported providers' env vars) and restart for real
-> LLM responses, or `RUSTYHAND_DISABLE_DEMO_MODE=1` to force a hard fail.
+> (or a Kimi / DeepSeek / Zhipu / MiniMax / OpenRouter / Ollama key) and
+> restart for real LLM responses, or `RUSTYHAND_DISABLE_DEMO_MODE=1` to
+> force a hard fail.
 >
-> Also new since v0.7.27:
-> - **Audit log persists** — Merkle hash chain at `~/.rustyhand/data/audit.jsonl`,
->   replayed and validated on boot.
-> - **Triggers and workflows persist** — webhook triggers and pipeline
->   definitions survive daemon restart, including subtle state like
->   `max_fires` auto-disable and trigger fire-counts.
-> - **31 API response-shape contract tests** — every endpoint the dashboard
->   or CLI reads is pinned to its JSON shape, so a server-side rename fails
->   CI loudly instead of producing a silently-empty widget.
-> - **6 mock-driver e2e tests** — full HTTP → kernel → driver → result
->   pipeline runs in CI without burning real LLM credits, covering agent
->   message round-trip, workflow run, all three CronAction variants, and
->   the demo-mode auto-spawn flow.
-> - **wasmtime 42 → 44** for [RUSTSEC-2026-0114](https://rustsec.org/advisories/RUSTSEC-2026-0114).
+> Highlights since v0.7.41:
+> - **React dashboard** — every subsystem is a page: agents, chat, workflows,
+>   automation (cron + triggers), channels, analytics, knowledge graph, skills,
+>   approvals, audit, and a full `config.toml` editor.
+> - **Autonomous-by-default agents** — tuned to act without asking; grant any
+>   agent all 72 tools live via `PATCH /api/agents/{id}/config` (no respawn).
+> - **72 built-in tools** — shell, web/news search, browser automation, RAG,
+>   knowledge-graph CRUD, file ops, image vision, and config management.
+> - **Trust-by-default security with visible guardrails** — `GET /api/security`
+>   reports the real runtime posture (exec mode, approval policy, per-channel
+>   gating); flip to allowlist/deny with `RUSTYHAND_EXEC_MODE`.
+> - **Everything persists** — audit log (Merkle hash chain), workflows, and
+>   triggers all survive daemon restart and are replayed/validated on boot.
 
 ---
 
@@ -110,7 +110,7 @@ Telegram is the primary interface for RustyHand agents. Your agent can:
 | **Ask permission** | Inline keyboard buttons (Approve/Reject) pushed automatically |
 | **Show progress** | Real-time tool-use updates: "⚙️ web_search..." → "✅ Done" |
 | **Report autonomously** | Background tasks push results to your chat without prompting |
-| **61 built-in tools** | Shell, web/news search, browser (wait, JS exec, scroll, download), RAG, knowledge graph |
+| **72 built-in tools** | Shell, web/news search, browser (wait, JS exec, scroll, download), RAG, knowledge graph, file ops, image vision |
 | **Markdown formatting** | Bold, italic, code blocks render natively in Telegram |
 | **Reply threading** | Responses reply to the user's message for clean conversation flow |
 | **Sticker/GIF/Location** | Agent understands stickers, animations, and shared locations |

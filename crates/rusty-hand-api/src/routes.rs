@@ -157,7 +157,7 @@ pub async fn spawn_agent(
             tracing::warn!("Invalid manifest TOML: {e}");
             return (
                 StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "Invalid manifest format"})),
+                Json(serde_json::json!({"error": format!("Invalid manifest format: {e}")})),
             );
         }
     };
@@ -184,7 +184,7 @@ pub async fn spawn_agent(
             tracing::warn!("Spawn failed: {e}");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Agent spawn failed"})),
+                Json(serde_json::json!({"error": format!("Agent spawn failed: {e}")})),
             )
         }
     }

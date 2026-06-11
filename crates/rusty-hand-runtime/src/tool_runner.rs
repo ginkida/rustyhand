@@ -149,7 +149,10 @@ pub async fn execute_tool(
             return ToolResult {
                 tool_use_id: tool_use_id.to_string(),
                 content: format!(
-                    "Permission denied: agent does not have capability to use tool '{tool_name}'"
+                    "Permission denied: agent does not have capability to use tool '{tool_name}'. \
+                     Grant it with PATCH /api/agents/{{id}}/config and a JSON body like \
+                     {{\"tools\":[\"{tool_name}\"]}} (or {{\"tools\":[\"*\"]}} for all tools) — \
+                     takes effect on the next message, no respawn needed."
                 ),
                 is_error: true,
             };
@@ -1210,7 +1213,7 @@ pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
         // --- Media understanding tools ---
         ToolDefinition {
             name: "media_describe".to_string(),
-            description: "Describe an image using a vision-capable LLM. NOT YET IMPLEMENTED in this build — the vision Messages-API path is on the roadmap; calling this tool currently returns an explicit `not implemented` error so the agent doesn't act on a fabricated description. Audio transcription via `media_transcribe` is fully implemented and works today via Groq/OpenAI Whisper.".to_string(),
+            description: "Describe (or extract text / answer a question about) an image using a vision-capable LLM. Requires a vision provider key: ANTHROPIC_API_KEY for direct Anthropic vision, or OPENROUTER_API_KEY for OpenAI/Gemini vision via OpenRouter. Pass `path` (image in the workspace) and an optional `prompt` to focus the description.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
