@@ -35,7 +35,8 @@ const NAV = [
   { id: "memory", label: "Memory", icon: /* @__PURE__ */ React.createElement(I.audit, null), count: null },
   { id: "audit", label: "Audit log", icon: /* @__PURE__ */ React.createElement(I.audit, null), count: null },
   { kind: "section", label: "System" },
-  { id: "health", label: "Health", icon: /* @__PURE__ */ React.createElement(I.shield, null), count: null },
+  { id: "security", label: "Security", icon: /* @__PURE__ */ React.createElement(I.shield, null), count: null },
+  { id: "health", label: "Health", icon: /* @__PURE__ */ React.createElement(I.check, null), count: null },
   { id: "mcp", label: "MCP servers", icon: /* @__PURE__ */ React.createElement(I.cpu, null), count: null },
   { id: "network", label: "Network", icon: /* @__PURE__ */ React.createElement(I.link, null), count: null },
   { id: "bindings", label: "Bindings", icon: /* @__PURE__ */ React.createElement(I.link, null), count: null },
@@ -170,6 +171,7 @@ const CRUMBS = {
   skills: ["RustyHand", "Skills"],
   approvals: ["RustyHand", "Approvals"],
   audit: ["RustyHand", "Audit log"],
+  security: ["RustyHand", "Security"],
   health: ["RustyHand", "Health"],
   mcp: ["RustyHand", "MCP servers"],
   network: ["RustyHand", "Network"],
@@ -690,6 +692,7 @@ function App() {
   else if (page === "analytics") pageEl = /* @__PURE__ */ React.createElement(AnalyticsPage, null);
   else if (page === "knowledge") pageEl = /* @__PURE__ */ React.createElement(KnowledgePage, null);
   else if (page === "memory") pageEl = /* @__PURE__ */ React.createElement(MemoryPage, null);
+  else if (page === "security") pageEl = /* @__PURE__ */ React.createElement(SecurityPage, null);
   else if (page === "health") pageEl = /* @__PURE__ */ React.createElement(HealthPage, null);
   else if (page === "mcp") pageEl = /* @__PURE__ */ React.createElement(McpPage, null);
   else if (page === "network") pageEl = /* @__PURE__ */ React.createElement(NetworkPage, null);

@@ -36,7 +36,8 @@ const NAV = [
   { id: "memory",     label: "Memory",     icon: <I.audit/>,      count: null },
   { id: "audit",      label: "Audit log",  icon: <I.audit/>,      count: null },
   { kind: "section", label: "System" },
-  { id: "health",     label: "Health",     icon: <I.shield/>,     count: null },
+  { id: "security",   label: "Security",   icon: <I.shield/>,     count: null },
+  { id: "health",     label: "Health",     icon: <I.check/>,      count: null },
   { id: "mcp",        label: "MCP servers",icon: <I.cpu/>,        count: null },
   { id: "network",    label: "Network",    icon: <I.link/>,       count: null },
   { id: "bindings",   label: "Bindings",   icon: <I.link/>,       count: null },
@@ -209,6 +210,7 @@ const CRUMBS = {
   skills:     ["RustyHand", "Skills"],
   approvals:  ["RustyHand", "Approvals"],
   audit:      ["RustyHand", "Audit log"],
+  security:   ["RustyHand", "Security"],
   health:     ["RustyHand", "Health"],
   mcp:        ["RustyHand", "MCP servers"],
   network:    ["RustyHand", "Network"],
@@ -1022,6 +1024,7 @@ function App() {
   else if (page === "analytics") pageEl = <AnalyticsPage/>;
   else if (page === "knowledge") pageEl = <KnowledgePage/>;
   else if (page === "memory") pageEl = <MemoryPage/>;
+  else if (page === "security") pageEl = <SecurityPage/>;
   else if (page === "health") pageEl = <HealthPage/>;
   else if (page === "mcp") pageEl = <McpPage/>;
   else if (page === "network") pageEl = <NetworkPage/>;

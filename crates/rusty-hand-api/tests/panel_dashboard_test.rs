@@ -105,6 +105,7 @@ async fn dashboard_includes_all_panel_modules() {
         ("BindingsPage", "pages.js must expose BindingsPage"),
         ("HealthPage", "pages.js must expose HealthPage"),
         ("CapabilitiesPage", "pages.js must expose CapabilitiesPage"),
+        ("SecurityPage", "pages.js must expose SecurityPage"),
         ("ToastHost", "api.js must expose ToastHost"),
         ("ErrorBoundary", "api.js must expose ErrorBoundary"),
         ("usePagination", "api.js must expose usePagination"),
@@ -264,6 +265,7 @@ async fn dashboard_wires_every_kernel_endpoint_it_uses() {
         "/api/config",
         "/api/audit/verify",
         // System pages (iter 20)
+        "/api/security",
         "/api/mcp/servers",
         "/api/network/status",
         "/api/peers",

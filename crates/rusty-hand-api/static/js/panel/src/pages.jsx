@@ -7781,9 +7781,139 @@ function CapabilitiesPage({ go }) {
   );
 }
 
+// ── Security page ───────────────────────────────────────────────────────
+// Renders GET /api/security with the live RUNTIME POSTURE front and center —
+// the guardrails that actually change what an agent can do (exec mode,
+// approvals, per-channel gating). Trust-by-default (v0.7.75+) is permissive;
+// this surfaces that HONESTLY (e.g. "open to anyone", "full exec mode" flagged
+// amber) instead of implying a lockdown that isn't there.
+function SecRow({ label, children }) {
+  return (
+    <div className="row between" style={{ padding: "7px 0", borderBottom: "1px solid var(--border)" }}>
+      <span className="dim" style={{ fontSize: 12 }}>{label}</span>
+      <span style={{ fontSize: 12.5, textAlign: "right" }}>{children}</span>
+    </div>
+  );
+}
+
+function SecurityPage() {
+  const [resp, fetchErr, refresh] = usePolling("/api/security", 30000);
+  const rp = (resp && resp.runtime_posture) || null;
+  const core = (resp && resp.core_protections) || {};
+  const mon = (resp && resp.monitoring) || {};
+  const cfg = (resp && resp.configurable) || {};
+  const gating = (rp && rp.channel_gating) || {};
+  const permissive = !!(rp && typeof rp.summary === "string" && rp.summary.startsWith("trust"));
+
+  const humanize = (k) => k.replace(/_/g, " ");
+  const channelGate = (name, g) =>
+    !g ? (
+      <SecRow label={name} key={name}><span className="dim mono">not configured</span></SecRow>
+    ) : (
+      <SecRow label={name} key={name}>
+        {g.open_to_anyone ? (
+          <span className="mono" style={{ color: "var(--amber)" }}>⚠ open to anyone</span>
+        ) : (
+          <span className="mono">{g.allowlist_size} allowed</span>
+        )}
+      </SecRow>
+    );
+
+  return (
+    <div>
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">
+            Security <span className="dim mono" style={{ fontSize: 14 }}>· {rp ? `${rp.exec_mode} exec mode` : "…"}</span>
+          </h1>
+          <p className="page-sub">Live runtime guardrail posture · from <span className="mono">/api/security</span></p>
+        </div>
+        <div className="page-actions">
+          <button className="btn ghost" onClick={refresh}><I.refresh/></button>
+        </div>
+      </div>
+
+      {fetchErr && <div className="banner" style={{ borderColor: "oklch(0.66 0.18 25 / .35)" }}>
+        <span className="dot err"/><span className="banner-title">API ERROR</span>
+        <span className="banner-body mono" style={{ fontSize: 11 }}>{fetchErr}</span>
+      </div>}
+      {!resp && <div className="muted mono" style={{ padding: "24px", fontSize: 12 }}>loading…</div>}
+
+      {rp && (
+        <div className="card">
+          <div className="card-head">
+            <span>Runtime posture</span>
+            <span className={"badge " + (permissive ? "warn" : "live")}>{permissive ? "trust-by-default" : "restricted"}</span>
+          </div>
+          <div style={{ padding: "4px 14px 12px" }}>
+            <div className="dim" style={{ fontSize: 11.5, marginBottom: 8 }}>{rp.summary}</div>
+            <SecRow label="Exec mode">
+              <span className="mono" style={{ color: rp.exec_mode === "full" ? "var(--amber)" : "var(--live)" }}>{rp.exec_mode}</span>
+              <span className="dim" style={{ fontSize: 11, marginLeft: 6 }}>
+                {rp.exec_mode === "full" ? "(any shell command)" : rp.exec_mode === "allowlist" ? "(allowlisted bins only)" : "(no shell exec)"}
+              </span>
+            </SecRow>
+            <SecRow label="Taint checking">{rp.taint_check_enabled ? "on" : <span className="dim">off</span>}</SecRow>
+            <SecRow label="Auto-approve autonomous">{rp.approval.auto_approve_autonomous ? "yes — no prompts" : "no — prompts on gated tools"}</SecRow>
+            <SecRow label="Require approval for">
+              {rp.approval.require_approval && rp.approval.require_approval.length
+                ? <span className="mono">{rp.approval.require_approval.join(", ")}</span>
+                : <span className="dim">nothing</span>}
+            </SecRow>
+            <div className="mono dim" style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", margin: "12px 0 4px" }}>Channel gating</div>
+            {channelGate("Telegram", gating.telegram)}
+            {channelGate("Discord", gating.discord)}
+            {channelGate("Slack", gating.slack)}
+          </div>
+        </div>
+      )}
+
+      {resp && (
+        <div className="grid-12" style={{ marginTop: 16 }}>
+          <div className="col-6 card">
+            <div className="card-head"><span>Always-on protections</span><span className="mono dim">{Object.keys(core).length}</span></div>
+            <div style={{ padding: "8px 14px 12px" }}>
+              {Object.entries(core).map(([k, v]) => (
+                <div key={k} className="row gap-6" style={{ padding: "3px 0", fontSize: 12.5 }}>
+                  <span className={"dot " + (v ? "live" : "idle")}/>
+                  <span style={{ textTransform: "capitalize" }}>{humanize(k)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="col-6 col" style={{ gap: 16 }}>
+            <div className="card">
+              <div className="card-head"><span>Monitoring</span></div>
+              <div style={{ padding: "4px 14px 12px" }}>
+                <SecRow label="Audit trail">
+                  {mon.audit_trail ? <span className="mono">{mon.audit_trail.entry_count} entries · {mon.audit_trail.algorithm}</span> : "—"}
+                </SecRow>
+                <SecRow label="Taint tracking">{mon.taint_tracking && mon.taint_tracking.enabled ? "on" : <span className="dim">off</span>}</SecRow>
+                <SecRow label="Manifest signing">{mon.manifest_signing ? <span className="mono">{mon.manifest_signing.algorithm}</span> : "—"}</SecRow>
+              </div>
+            </div>
+            <div className="card">
+              <div className="card-head"><span>Limits &amp; auth</span></div>
+              <div style={{ padding: "4px 14px 12px" }}>
+                <SecRow label="Auth mode">
+                  {cfg.auth ? <span className="mono" style={{ color: cfg.auth.api_key_set ? "var(--live)" : "var(--amber)" }}>{cfg.auth.mode}</span> : "—"}
+                </SecRow>
+                <SecRow label="Rate limiter">{cfg.rate_limiter ? <span className="mono">{cfg.rate_limiter.tokens_per_minute}/min · {cfg.rate_limiter.algorithm}</span> : "—"}</SecRow>
+                <SecRow label="WebSocket / IP">{cfg.websocket_limits ? <span className="mono">{cfg.websocket_limits.max_per_ip} conns · {cfg.websocket_limits.max_messages_per_minute} msg/min</span> : "—"}</SecRow>
+                <SecRow label="WASM sandbox">{cfg.wasm_sandbox ? <span className="mono">{cfg.wasm_sandbox.default_timeout_secs}s · fuel-metered</span> : "—"}</SecRow>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 Object.assign(window, {
   OverviewPage, AgentsPage, AgentDrawer, ChatPage, WorkflowsPage,
   AutomationPage, ChannelsPage, AnalyticsPage, KnowledgePage,
   SkillsPage, ApprovalsPage, AuditPage, SettingsPage, MemoryPage,
   McpPage, NetworkPage, BindingsPage, HealthPage, CapabilitiesPage,
+  SecurityPage,
 });
