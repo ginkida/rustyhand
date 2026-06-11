@@ -443,6 +443,7 @@ rustyhand config test-key kimi                     # Verify connectivity
 | `rustyhand status [--json]` | Show kernel status |
 | `rustyhand health [--json]` | Quick daemon health check |
 | `rustyhand doctor [--repair]` | Run diagnostic checks |
+| `rustyhand tools [--json]` | List all 72 built-in tools, grouped by category (offline) |
 | `rustyhand tui` | Launch interactive TUI dashboard |
 | `rustyhand dashboard` | Open web dashboard in browser |
 | `rustyhand chat [agent]` | Quick chat with an agent |
@@ -455,6 +456,7 @@ rustyhand config test-key kimi                     # Verify connectivity
 | Command | Description |
 |---------|-------------|
 | `rustyhand agent new [template]` | Spawn from a template (interactive picker if omitted) |
+| `rustyhand agent templates [--json]` | List the bundled agent templates (offline) |
 | `rustyhand agent spawn <manifest.toml>` | Spawn from a manifest file |
 | `rustyhand agent list [--json]` | List running agents |
 | `rustyhand agent chat <id>` | Interactive chat with an agent by ID |

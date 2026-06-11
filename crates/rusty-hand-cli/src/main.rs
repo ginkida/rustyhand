@@ -157,6 +157,12 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// List the built-in tools agents can use, grouped by category (works offline).
+    Tools {
+        /// Output as JSON for scripting.
+        #[arg(long)]
+        json: bool,
+    },
     /// Run diagnostic health checks.
     Doctor {
         /// Output as JSON for scripting.
@@ -415,6 +421,12 @@ enum AgentCommands {
     New {
         /// Template name (e.g., "coder", "assistant"). Interactive picker if omitted.
         template: Option<String>,
+    },
+    /// List the bundled agent templates you can spawn with `agent new` (works offline).
+    Templates {
+        /// Output as JSON for scripting.
+        #[arg(long)]
+        json: bool,
     },
     /// Spawn a new agent from a manifest file.
     Spawn {
@@ -883,6 +895,7 @@ fn main() {
         Some(Commands::Stop) => cmd_stop(),
         Some(Commands::Agent(sub)) => match sub {
             AgentCommands::New { template } => cmd_agent_new(cli.config, template),
+            AgentCommands::Templates { json } => cmd_agent_templates(json),
             AgentCommands::Spawn { manifest } => cmd_agent_spawn(cli.config, manifest),
             AgentCommands::List { json } => cmd_agent_list(cli.config, json),
             AgentCommands::Chat { agent_id } => cmd_agent_chat(cli.config, &agent_id),
@@ -934,6 +947,7 @@ fn main() {
         },
         Some(Commands::Chat { agent }) => cmd_quick_chat(cli.config, agent),
         Some(Commands::Status { json }) => cmd_status(cli.config, json),
+        Some(Commands::Tools { json }) => cmd_tools(json),
         Some(Commands::Doctor { json, repair }) => cmd_doctor(json, repair),
         Some(Commands::Dashboard) => cmd_dashboard(),
         Some(Commands::Completion { shell }) => cmd_completion(shell),
@@ -2232,6 +2246,139 @@ fn spawn_template_agent(config: Option<PathBuf>, template: &templates::AgentTemp
             }
         }
     }
+}
+
+/// One-line, length-bounded description for list output (UTF-8 safe — never
+/// slices inside a multi-byte char).
+fn short_desc(desc: &str, max_chars: usize) -> String {
+    let one_line = desc.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one_line.chars().count() > max_chars {
+        let head = rusty_hand_types::text::truncate_chars(&one_line, max_chars.saturating_sub(1));
+        format!("{head}…")
+    } else {
+        one_line
+    }
+}
+
+/// Bucket a built-in tool into a human-facing category by name prefix. Keeps
+/// the `tools` overview scannable. Every current builtin maps to a real
+/// category; the `_` arm is a forward-compat catch-all.
+fn tool_category(name: &str) -> &'static str {
+    match name {
+        n if n.starts_with("file_") || n == "apply_patch" => "Files & editing",
+        n if n.starts_with("browser_") => "Browser automation",
+        n if n.starts_with("web_") || n.starts_with("doc_") => "Web & retrieval",
+        n if n.starts_with("memory_") || n.starts_with("knowledge_") => "Memory & knowledge",
+        n if n.starts_with("agent_") || n.starts_with("a2a_") || n.starts_with("task_") => {
+            "Agents & coordination"
+        }
+        n if n.starts_with("cron_") || n.starts_with("schedule_") || n == "event_publish" => {
+            "Scheduling & events"
+        }
+        n if n.starts_with("image_")
+            || n.starts_with("media_")
+            || n == "speech_to_text"
+            || n == "text_to_speech"
+            || n == "canvas_present"
+            || n == "location_get" =>
+        {
+            "Media & devices"
+        }
+        n if n.starts_with("process_") || n == "shell_exec" || n == "docker_exec" => {
+            "System & processes"
+        }
+        n if n.starts_with("config_") || n.starts_with("self_") || n == "skill_install" => {
+            "Config & self-management"
+        }
+        _ => "Other",
+    }
+}
+
+/// `rustyhand tools` — list every built-in tool grouped by category. Reads the
+/// compile-time tool registry directly, so it works offline with no daemon.
+fn cmd_tools(json: bool) {
+    use std::collections::BTreeMap;
+    let defs = rusty_hand_runtime::tool_runner::builtin_tool_definitions();
+
+    let mut by_cat: BTreeMap<&'static str, Vec<&rusty_hand_types::tool::ToolDefinition>> =
+        BTreeMap::new();
+    for d in &defs {
+        by_cat.entry(tool_category(&d.name)).or_default().push(d);
+    }
+    for tools in by_cat.values_mut() {
+        tools.sort_by(|a, b| a.name.cmp(&b.name));
+    }
+
+    if json {
+        let mut cats = serde_json::Map::new();
+        for (cat, tools) in &by_cat {
+            let arr: Vec<serde_json::Value> = tools
+                .iter()
+                .map(|t| serde_json::json!({"name": t.name, "description": t.description}))
+                .collect();
+            cats.insert((*cat).to_string(), serde_json::Value::Array(arr));
+        }
+        let out = serde_json::json!({"total": defs.len(), "categories": cats});
+        println!("{}", serde_json::to_string_pretty(&out).unwrap());
+        return;
+    }
+
+    ui::blank();
+    println!("  {} built-in tools your agents can use:", defs.len());
+    ui::blank();
+    for (cat, tools) in &by_cat {
+        ui::section(cat);
+        for t in tools {
+            let desc = short_desc(&t.description, 72);
+            println!("    {:<26}{}", t.name, desc.as_str().dimmed());
+        }
+        ui::blank();
+    }
+    ui::hint(
+        "Grant tools to an agent: PATCH /api/agents/{id}/config with tools:[\"*\"] (or a subset).",
+    );
+}
+
+/// `rustyhand agent templates` — list the bundled agent templates spawnable via
+/// `agent new`. Reuses load_all_templates() (disk + compile-time fallback), so
+/// it works offline and reflects any custom templates on disk too.
+fn cmd_agent_templates(json: bool) {
+    let all = templates::load_all_templates();
+    const META: [&str; 3] = ["coordinator", "capability-builder", "diagnostic"];
+
+    if json {
+        let arr: Vec<serde_json::Value> = all
+            .iter()
+            .map(|t| {
+                serde_json::json!({
+                    "name": t.name,
+                    "description": t.description,
+                    "meta": META.contains(&t.name.as_str()),
+                })
+            })
+            .collect();
+        let out = serde_json::json!({"templates": arr, "total": all.len()});
+        println!("{}", serde_json::to_string_pretty(&out).unwrap());
+        return;
+    }
+
+    ui::blank();
+    println!(
+        "  {} agent templates — spawn one with `rustyhand agent new <name>`:",
+        all.len()
+    );
+    ui::blank();
+    for t in &all {
+        let tag = if META.contains(&t.name.as_str()) {
+            " [meta]"
+        } else {
+            ""
+        };
+        let desc = short_desc(&t.description, 60);
+        println!("    {:<22}{:<8}{}", t.name, tag, desc.as_str().dimmed());
+    }
+    ui::blank();
+    ui::hint("Meta-agents (coordinator/capability-builder/diagnostic) extend the system itself.");
 }
 
 fn cmd_status(config: Option<PathBuf>, json: bool) {
@@ -6403,6 +6550,36 @@ fn cmd_reset(confirm: bool) {
 
 #[cfg(test)]
 mod tests {
+
+    // --- Capabilities surface (`tools` / `agent templates`) ---
+
+    #[test]
+    fn every_builtin_tool_has_a_category() {
+        // Drift guard: a new builtin tool must be assigned a real category in
+        // tool_category(), or `rustyhand tools` silently buckets it as "Other".
+        for d in rusty_hand_runtime::tool_runner::builtin_tool_definitions() {
+            assert_ne!(
+                super::tool_category(&d.name),
+                "Other",
+                "tool '{}' is uncategorized — add it to tool_category()",
+                d.name
+            );
+        }
+    }
+
+    #[test]
+    fn short_desc_is_utf8_safe_and_bounded() {
+        // Multi-byte input must not panic and the result must respect the cap.
+        let s = "Привет мир ".repeat(20);
+        let out = super::short_desc(&s, 10);
+        assert!(
+            out.chars().count() <= 10,
+            "got {} chars: {out}",
+            out.chars().count()
+        );
+        // Collapses runs of whitespace/newlines into single spaces.
+        assert_eq!(super::short_desc("a   b\n c", 100), "a b c");
+    }
 
     // --- Doctor command unit tests ---
 
