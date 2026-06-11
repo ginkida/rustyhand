@@ -262,23 +262,23 @@ impl MediaEngine {
         }
 
         if !self.config.video_description {
-            return Err("Video description is disabled in configuration".into());
+            return Err(
+                "Video description is disabled in configuration (set [media] \
+                 video_description = true to attempt it)"
+                    .into(),
+            );
         }
 
-        if std::env::var("GEMINI_API_KEY").is_err() && std::env::var("GOOGLE_API_KEY").is_err() {
-            return Err("Video description requires GEMINI_API_KEY or GOOGLE_API_KEY".into());
-        }
-
-        // Same shape as describe_image — Gemini was removed as a direct
-        // provider in v0.7.0 and this path was never reimplemented. Return
-        // an honest error instead of the previous placeholder string so
-        // downstream consumers (channel adapters, the media_describe tool)
-        // see a failure they can report cleanly rather than pretending the
-        // video was understood.
+        // Video understanding has no working backend in this build: the direct
+        // video model (Gemini) was removed in v0.7.0 and the path was never
+        // rewired. Fail fast with ONE honest message — don't gate on a
+        // GEMINI/GOOGLE key first (setting one wouldn't help, which only sends
+        // the user on a wild goose chase), and don't pretend the video was
+        // understood. Point at the working alternative.
         Err(
-            "Video description is not yet implemented in this build. Gemini was removed as a \
-             direct provider in v0.7.0; reach a vision-capable model via OpenRouter once the \
-             vision Messages-API path is wired up."
+            "Video description is not yet implemented in this build (the video model backend \
+             was removed in v0.7.0 and not rewired). Extract a keyframe and use media_describe \
+             (image vision via ANTHROPIC_API_KEY or OPENROUTER_API_KEY) instead."
                 .into(),
         )
     }
@@ -666,22 +666,16 @@ mod tests {
         );
     }
 
-    /// Companion regression for `describe_video` — same placeholder
-    /// shape, same fix. The branch only reaches the fake-success path
-    /// when `video_description` is on AND a Gemini-shaped env key is
-    /// present, so we set one for the duration of the test.
+    /// Companion regression for `describe_video` — when the feature is enabled
+    /// it must fail fast with an honest "not implemented" error (no fake
+    /// success), and it must NOT gate on a Gemini key first (a key wouldn't
+    /// help, so demanding one would just send the user on a wild goose chase).
     #[tokio::test]
     async fn describe_video_returns_not_implemented_error_when_enabled() {
         let engine = MediaEngine::new(MediaConfig {
             video_description: true,
             ..Default::default()
         });
-        // SAFETY: tests run with `--test-threads=1` discipline isn't
-        // guaranteed here, but no other test in this file reads
-        // GEMINI_API_KEY, so the race window is benign.
-        unsafe {
-            std::env::set_var("GEMINI_API_KEY", "test-key-for-regression");
-        }
         let attachment = MediaAttachment {
             media_type: MediaType::Video,
             mime_type: "video/mp4".into(),
@@ -691,9 +685,6 @@ mod tests {
             size_bytes: 1024,
         };
         let result = engine.describe_video(&attachment).await;
-        unsafe {
-            std::env::remove_var("GEMINI_API_KEY");
-        }
         assert!(
             result.is_err(),
             "describe_video must error, not return a fake stub"
@@ -702,6 +693,11 @@ mod tests {
         assert!(
             err.contains("not yet implemented"),
             "error must clearly say video is unimplemented, got: {err}"
+        );
+        // No false-hope key requirement, and no leaked old placeholder.
+        assert!(
+            !err.contains("requires GEMINI_API_KEY"),
+            "must not imply a key would help, got: {err}"
         );
         assert!(
             !err.contains("would be generated"),

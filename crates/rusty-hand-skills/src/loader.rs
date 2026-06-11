@@ -28,8 +28,12 @@ pub async fn execute_skill_tool(
         SkillRuntime::Node => {
             execute_node(skill_dir, &manifest.runtime.entry, tool_name, input).await
         }
+        // Unreachable in practice: the registry refuses WASM skills at load
+        // time (see registry::load_skill), so a WASM skill never registers a
+        // callable tool. Kept as a defensive fallback with the same guidance.
         SkillRuntime::Wasm => Err(SkillError::RuntimeNotAvailable(
-            "WASM skill runtime not yet implemented".to_string(),
+            "WASM skills are not supported in this build — reimplement as a Python or Node skill"
+                .to_string(),
         )),
         SkillRuntime::Builtin => Err(SkillError::RuntimeNotAvailable(
             "Builtin skills are handled by the kernel directly".to_string(),

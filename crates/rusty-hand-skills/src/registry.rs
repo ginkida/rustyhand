@@ -218,7 +218,7 @@ impl SkillRegistry {
         // only surfaces on first invocation, long after registration.
         // PromptOnly / Builtin skills have no entry file to check.
         match manifest.runtime.runtime_type {
-            crate::SkillRuntime::Python | crate::SkillRuntime::Node | crate::SkillRuntime::Wasm => {
+            crate::SkillRuntime::Python | crate::SkillRuntime::Node => {
                 let entry_path = skill_dir.join(&manifest.runtime.entry);
                 if !entry_path.exists() {
                     return Err(SkillError::InvalidManifest(format!(
@@ -228,6 +228,18 @@ impl SkillRegistry {
                         entry_path.display()
                     )));
                 }
+            }
+            // The WASM runtime isn't executable yet, so refuse it at LOAD time
+            // rather than registering a skill whose tools always fail when
+            // called — a "looks available but never works" trap. Fail fast
+            // with an actionable fix instead.
+            crate::SkillRuntime::Wasm => {
+                return Err(SkillError::RuntimeNotAvailable(format!(
+                    "Skill '{}' uses the WASM runtime, which is not supported in this build. \
+                     Reimplement it as a Python or Node skill (set runtime_type = \"python\" or \
+                     \"node\" in skill.toml).",
+                    manifest.skill.name
+                )));
             }
             crate::SkillRuntime::PromptOnly | crate::SkillRuntime::Builtin => {}
         }
@@ -495,6 +507,51 @@ input_schema = { type = "object" }
             .expect_err("load must reject skill with missing entry file");
         assert!(format!("{err}").contains("does not exist"));
         assert!(registry.get("broken").is_none());
+    }
+
+    #[test]
+    fn test_load_rejects_wasm_runtime_at_load_time() {
+        // The WASM runtime isn't executable, so a WASM skill must be refused
+        // at load time (with an actionable message) rather than registered as
+        // a tool that always fails when invoked.
+        let dir = TempDir::new().unwrap();
+        let skill_dir = dir.path().join("wasm-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("mod.wasm"), b"\0asm").unwrap();
+        std::fs::write(
+            skill_dir.join("skill.toml"),
+            r#"
+[skill]
+name = "wasm-skill"
+version = "0.1.0"
+description = "Uses the unsupported WASM runtime"
+
+[runtime]
+type = "wasm"
+entry = "mod.wasm"
+
+[[tools.provided]]
+name = "wasm_tool"
+description = "n/a"
+input_schema = { type = "object" }
+"#,
+        )
+        .unwrap();
+
+        let mut registry = SkillRegistry::new(dir.path().to_path_buf());
+        let err = registry
+            .load_skill(&skill_dir)
+            .expect_err("load must reject WASM skills");
+        let msg = format!("{err}");
+        assert!(msg.contains("WASM"), "error should name WASM, got: {msg}");
+        assert!(
+            msg.contains("Python or Node"),
+            "error should point at the fix, got: {msg}"
+        );
+        assert!(
+            registry.get("wasm-skill").is_none(),
+            "rejected WASM skill must not register"
+        );
     }
 
     #[test]
