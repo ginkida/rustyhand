@@ -20,6 +20,7 @@ const ACCENTS = {
 const NAV = [
   { kind: "section", label: "Work" },
   { id: "overview", label: "Overview", icon: /* @__PURE__ */ React.createElement(I.overview, null), count: null },
+  { id: "capabilities", label: "Capabilities", icon: /* @__PURE__ */ React.createElement(I.zap, null), count: null },
   { id: "agents", label: "Agents", icon: /* @__PURE__ */ React.createElement(I.agents, null), count: null, liveKey: "agents" },
   { id: "chat", label: "Chat", icon: /* @__PURE__ */ React.createElement(I.chat, null), count: null },
   { id: "approvals", label: "Approvals", icon: /* @__PURE__ */ React.createElement(I.approvals, null), count: null, badge: null, liveKey: "approvals" },
@@ -157,6 +158,7 @@ function Sidebar({ page, go }) {
 }
 const CRUMBS = {
   overview: ["RustyHand", "Overview"],
+  capabilities: ["RustyHand", "Capabilities"],
   agents: ["RustyHand", "Agents"],
   chat: ["RustyHand", "Chat"],
   workflows: ["RustyHand", "Workflows"],
@@ -679,6 +681,7 @@ function App() {
   }, [setPage, page]);
   let pageEl;
   if (page === "overview") pageEl = /* @__PURE__ */ React.createElement(OverviewPage, { go: setPage });
+  else if (page === "capabilities") pageEl = /* @__PURE__ */ React.createElement(CapabilitiesPage, { go: setPage });
   else if (page === "agents") pageEl = /* @__PURE__ */ React.createElement(AgentsPage, { openAgent });
   else if (page === "chat") pageEl = /* @__PURE__ */ React.createElement(ChatPage, { go: setPage });
   else if (page === "workflows") pageEl = /* @__PURE__ */ React.createElement(WorkflowsPage, null);

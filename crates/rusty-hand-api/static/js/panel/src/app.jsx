@@ -21,6 +21,7 @@ const ACCENTS = {
 const NAV = [
   { kind: "section", label: "Work" },
   { id: "overview",   label: "Overview",   icon: <I.overview/>,   count: null },
+  { id: "capabilities", label: "Capabilities", icon: <I.zap/>,    count: null },
   { id: "agents",     label: "Agents",     icon: <I.agents/>,     count: null, liveKey: "agents" },
   { id: "chat",       label: "Chat",       icon: <I.chat/>,       count: null },
   { id: "approvals",  label: "Approvals",  icon: <I.approvals/>,  count: null, badge: null, liveKey: "approvals" },
@@ -196,6 +197,7 @@ function Sidebar({ page, go }) {
 
 const CRUMBS = {
   overview:   ["RustyHand", "Overview"],
+  capabilities: ["RustyHand", "Capabilities"],
   agents:     ["RustyHand", "Agents"],
   chat:       ["RustyHand", "Chat"],
   workflows:  ["RustyHand", "Workflows"],
@@ -1011,6 +1013,7 @@ function App() {
 
   let pageEl;
   if (page === "overview") pageEl = <OverviewPage go={setPage}/>;
+  else if (page === "capabilities") pageEl = <CapabilitiesPage go={setPage}/>;
   else if (page === "agents") pageEl = <AgentsPage openAgent={openAgent}/>;
   else if (page === "chat") pageEl = <ChatPage go={setPage}/>;
   else if (page === "workflows") pageEl = <WorkflowsPage/>;

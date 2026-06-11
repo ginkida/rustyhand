@@ -104,6 +104,7 @@ async fn dashboard_includes_all_panel_modules() {
         ("NetworkPage", "pages.js must expose NetworkPage"),
         ("BindingsPage", "pages.js must expose BindingsPage"),
         ("HealthPage", "pages.js must expose HealthPage"),
+        ("CapabilitiesPage", "pages.js must expose CapabilitiesPage"),
         ("ToastHost", "api.js must expose ToastHost"),
         ("ErrorBoundary", "api.js must expose ErrorBoundary"),
         ("usePagination", "api.js must expose usePagination"),
@@ -241,8 +242,10 @@ async fn dashboard_wires_every_kernel_endpoint_it_uses() {
         "/api/providers",
         // Agents drawer
         "/api/budget/agents",
-        // Chat
+        // Chat / Capabilities
         "/api/tools",
+        // Capabilities
+        "/api/templates",
         // Workflows
         "/api/workflows",
         // Automation

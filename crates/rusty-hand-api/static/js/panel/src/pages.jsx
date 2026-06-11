@@ -7661,9 +7661,129 @@ function AddBindingModal({ onClose, onCreated }) {
   );
 }
 
+// ── Capabilities page ───────────────────────────────────────────────────
+// One searchable surface for "what can this do": the 72 built-in tools
+// (grouped by category, mirroring the CLI's `rustyhand tools`), the agent
+// templates, and the skills. Read-only discovery — every section links to
+// the page where you act on it.
+const CAP_TOOL_CATEGORIES = [
+  ["Files & editing",          n => n.startsWith("file_") || n === "apply_patch"],
+  ["Browser automation",       n => n.startsWith("browser_")],
+  ["Web & retrieval",          n => n.startsWith("web_") || n.startsWith("doc_")],
+  ["Memory & knowledge",       n => n.startsWith("memory_") || n.startsWith("knowledge_")],
+  ["Agents & coordination",    n => n.startsWith("agent_") || n.startsWith("a2a_") || n.startsWith("task_")],
+  ["Scheduling & events",      n => n.startsWith("cron_") || n.startsWith("schedule_") || n === "event_publish"],
+  ["Media & devices",          n => n.startsWith("image_") || n.startsWith("media_") || n === "speech_to_text" || n === "text_to_speech" || n === "canvas_present" || n === "location_get"],
+  ["System & processes",       n => n.startsWith("process_") || n === "shell_exec" || n === "docker_exec"],
+  ["Config & self-management", n => n.startsWith("config_") || n.startsWith("self_") || n === "skill_install"],
+];
+function capToolCategory(name) {
+  for (const [cat, test] of CAP_TOOL_CATEGORIES) if (test(name)) return cat;
+  return "Other";
+}
+function capClip(s, n) {
+  const o = (s || "").replace(/\s+/g, " ").trim();
+  return o.length > n ? o.slice(0, n - 1) + "…" : o;
+}
+
+function CapabilitiesPage({ go }) {
+  const [toolsResp] = useApi("/api/tools");
+  const [tmplResp] = useApi("/api/templates");
+  const [skillsResp] = useApi("/api/skills");
+  const [q, setQ] = useState("");
+
+  const tools = (toolsResp && toolsResp.tools) || [];
+  const templates = (tmplResp && tmplResp.templates) || [];
+  const skills = (skillsResp && skillsResp.skills) || [];
+  const META = ["coordinator", "capability-builder", "diagnostic"];
+
+  const ql = q.trim().toLowerCase();
+  const match = (s) => !ql || (s || "").toLowerCase().includes(ql);
+
+  const fTools = tools.filter(t => match(t.name) || match(t.description));
+  const groups = {};
+  for (const t of fTools) {
+    const c = capToolCategory(t.name);
+    (groups[c] = groups[c] || []).push(t);
+  }
+  const cats = Object.keys(groups).sort();
+  const fTemplates = templates.filter(t => match(t.name) || match(t.description));
+  const fSkills = skills.filter(s => match(s.name) || match(s.description));
+
+  return (
+    <div>
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">Capabilities <span className="dim mono" style={{fontSize:14}}>· {tools.length} tools · {templates.length} templates · {skills.length} skills</span></h1>
+          <p className="page-sub">Everything your agents can do — built-in tools, agent templates, and skills.</p>
+        </div>
+        <div className="page-actions">
+          <input className="modal-field" style={{width:240}} placeholder="Search capabilities…" value={q} onChange={e => setQ(e.target.value)}/>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head"><span>Built-in tools</span><span className="mono dim">{fTools.length}</span></div>
+        {!toolsResp && <div className="muted mono" style={{padding:"16px", fontSize:12}}>loading…</div>}
+        {toolsResp && fTools.length === 0 && <div className="muted mono" style={{padding:"16px", fontSize:12}}>No tools match the search.</div>}
+        {cats.map(cat => (
+          <div key={cat} style={{padding:"10px 14px", borderTop:"1px solid var(--border)"}}>
+            <div className="mono dim" style={{fontSize:11, letterSpacing:".08em", textTransform:"uppercase", marginBottom:6}}>{cat} · {groups[cat].length}</div>
+            <div className="grid-12">
+              {groups[cat].map(t => (
+                <div key={t.name} className="col-6" style={{padding:"3px 0"}}>
+                  <span className="mono" style={{fontSize:12.5, color:"var(--rust)"}}>{t.name}</span>
+                  <div className="dim" style={{fontSize:11.5, lineHeight:1.4}}>{capClip(t.description, 120)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="card" style={{marginTop:16}}>
+        <div className="card-head"><span>Agent templates</span><span className="mono dim">{fTemplates.length}</span></div>
+        {!tmplResp && <div className="muted mono" style={{padding:"16px", fontSize:12}}>loading…</div>}
+        {tmplResp && templates.length === 0 && <div className="muted" style={{padding:"16px", fontSize:12}}>No templates on disk yet — run <span className="mono">rustyhand init</span> to install the bundled set.</div>}
+        {tmplResp && templates.length > 0 && fTemplates.length === 0 && <div className="muted mono" style={{padding:"16px", fontSize:12}}>No templates match the search.</div>}
+        <div className="grid-12">
+          {fTemplates.map(t => (
+            <div key={t.name} className="col-4" style={{padding:"10px 14px", borderTop:"1px solid var(--border)"}}>
+              <div className="row gap-6">
+                <span className="mono" style={{fontSize:13}}>{t.name}</span>
+                {META.includes(t.name) && <span className="badge">meta</span>}
+              </div>
+              <div className="dim" style={{fontSize:11.5, lineHeight:1.4, marginTop:2}}>{capClip(t.description, 90)}</div>
+            </div>
+          ))}
+        </div>
+        {go && fTemplates.length > 0 && <div style={{padding:"10px 14px"}}><button className="btn sm" onClick={() => go("agents")}><I.plus/> Spawn an agent</button></div>}
+      </div>
+
+      <div className="card" style={{marginTop:16}}>
+        <div className="card-head"><span>Skills</span><span className="mono dim">{fSkills.length}</span></div>
+        {!skillsResp && <div className="muted mono" style={{padding:"16px", fontSize:12}}>loading…</div>}
+        {skillsResp && fSkills.length === 0 && <div className="muted mono" style={{padding:"16px", fontSize:12}}>No skills match the search.</div>}
+        <div className="grid-12">
+          {fSkills.map(s => (
+            <div key={s.name} className="col-4" style={{padding:"10px 14px", borderTop:"1px solid var(--border)"}}>
+              <div className="row between gap-6">
+                <span className="mono" style={{fontSize:13}}>{s.name}</span>
+                <span className="badge">{(s.source && s.source.type) || "local"}</span>
+              </div>
+              <div className="dim" style={{fontSize:11.5, lineHeight:1.4, marginTop:2}}>{capClip(s.description, 90)}</div>
+            </div>
+          ))}
+        </div>
+        {go && <div style={{padding:"10px 14px"}}><button className="btn sm ghost" onClick={() => go("skills")}>Manage skills →</button></div>}
+      </div>
+    </div>
+  );
+}
+
 Object.assign(window, {
   OverviewPage, AgentsPage, AgentDrawer, ChatPage, WorkflowsPage,
   AutomationPage, ChannelsPage, AnalyticsPage, KnowledgePage,
   SkillsPage, ApprovalsPage, AuditPage, SettingsPage, MemoryPage,
-  McpPage, NetworkPage, BindingsPage, HealthPage,
+  McpPage, NetworkPage, BindingsPage, HealthPage, CapabilitiesPage,
 });

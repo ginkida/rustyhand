@@ -4655,6 +4655,47 @@ function AddBindingModal({ onClose, onCreated }) {
   };
   return /* @__PURE__ */ React.createElement("div", { className: "modal-back", onClick: onClose }, /* @__PURE__ */ React.createElement("div", { className: "modal", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "modal-head" }, /* @__PURE__ */ React.createElement("b", { className: "mono" }, "Add binding"), /* @__PURE__ */ React.createElement("button", { className: "icon-btn", onClick: onClose }, /* @__PURE__ */ React.createElement(I.close, null))), /* @__PURE__ */ React.createElement("div", { className: "modal-body" }, /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Agent"), /* @__PURE__ */ React.createElement("select", { className: "t-select", value: agent, onChange: (e) => setAgent(e.target.value) }, agents.length === 0 && /* @__PURE__ */ React.createElement("option", { value: "" }, "(loading\u2026)"), agents.map((a) => /* @__PURE__ */ React.createElement("option", { key: a.id, value: a.id }, a.name, " (", String(a.id).slice(0, 8), ")")))), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Channel ", /* @__PURE__ */ React.createElement("span", { className: "dim" }, "(optional filter)")), /* @__PURE__ */ React.createElement("input", { className: "modal-field", value: channel, onChange: (e) => setChannel(e.target.value), placeholder: "telegram, discord, slack\u2026" })), /* @__PURE__ */ React.createElement("label", { className: "t-row col" }, /* @__PURE__ */ React.createElement("span", { className: "t-lbl" }, "Peer ID ", /* @__PURE__ */ React.createElement("span", { className: "dim" }, "(optional DM filter)")), /* @__PURE__ */ React.createElement("input", { className: "modal-field", value: peerId, onChange: (e) => setPeerId(e.target.value), placeholder: "user/chat ID" })), err && /* @__PURE__ */ React.createElement("div", { className: "banner", style: { borderColor: "oklch(0.66 0.18 25 / .35)" } }, /* @__PURE__ */ React.createElement("span", { className: "dot err" }), /* @__PURE__ */ React.createElement("span", { className: "banner-title" }, "ERROR"), /* @__PURE__ */ React.createElement("span", { className: "banner-body mono", style: { fontSize: 11 } }, err))), /* @__PURE__ */ React.createElement("div", { className: "modal-foot" }, /* @__PURE__ */ React.createElement("button", { className: "btn ghost", onClick: onClose }, "Cancel"), /* @__PURE__ */ React.createElement("button", { className: "btn primary", onClick: submit, disabled: busy || !agent }, busy ? "Adding\u2026" : "Add"))));
 }
+const CAP_TOOL_CATEGORIES = [
+  ["Files & editing", (n) => n.startsWith("file_") || n === "apply_patch"],
+  ["Browser automation", (n) => n.startsWith("browser_")],
+  ["Web & retrieval", (n) => n.startsWith("web_") || n.startsWith("doc_")],
+  ["Memory & knowledge", (n) => n.startsWith("memory_") || n.startsWith("knowledge_")],
+  ["Agents & coordination", (n) => n.startsWith("agent_") || n.startsWith("a2a_") || n.startsWith("task_")],
+  ["Scheduling & events", (n) => n.startsWith("cron_") || n.startsWith("schedule_") || n === "event_publish"],
+  ["Media & devices", (n) => n.startsWith("image_") || n.startsWith("media_") || n === "speech_to_text" || n === "text_to_speech" || n === "canvas_present" || n === "location_get"],
+  ["System & processes", (n) => n.startsWith("process_") || n === "shell_exec" || n === "docker_exec"],
+  ["Config & self-management", (n) => n.startsWith("config_") || n.startsWith("self_") || n === "skill_install"]
+];
+function capToolCategory(name) {
+  for (const [cat, test] of CAP_TOOL_CATEGORIES) if (test(name)) return cat;
+  return "Other";
+}
+function capClip(s, n) {
+  const o = (s || "").replace(/\s+/g, " ").trim();
+  return o.length > n ? o.slice(0, n - 1) + "\u2026" : o;
+}
+function CapabilitiesPage({ go }) {
+  const [toolsResp] = useApi("/api/tools");
+  const [tmplResp] = useApi("/api/templates");
+  const [skillsResp] = useApi("/api/skills");
+  const [q, setQ] = useState("");
+  const tools = toolsResp && toolsResp.tools || [];
+  const templates = tmplResp && tmplResp.templates || [];
+  const skills = skillsResp && skillsResp.skills || [];
+  const META = ["coordinator", "capability-builder", "diagnostic"];
+  const ql = q.trim().toLowerCase();
+  const match = (s) => !ql || (s || "").toLowerCase().includes(ql);
+  const fTools = tools.filter((t) => match(t.name) || match(t.description));
+  const groups = {};
+  for (const t of fTools) {
+    const c = capToolCategory(t.name);
+    (groups[c] = groups[c] || []).push(t);
+  }
+  const cats = Object.keys(groups).sort();
+  const fTemplates = templates.filter((t) => match(t.name) || match(t.description));
+  const fSkills = skills.filter((s) => match(s.name) || match(s.description));
+  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "page-head" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "page-title" }, "Capabilities ", /* @__PURE__ */ React.createElement("span", { className: "dim mono", style: { fontSize: 14 } }, "\xB7 ", tools.length, " tools \xB7 ", templates.length, " templates \xB7 ", skills.length, " skills")), /* @__PURE__ */ React.createElement("p", { className: "page-sub" }, "Everything your agents can do \u2014 built-in tools, agent templates, and skills.")), /* @__PURE__ */ React.createElement("div", { className: "page-actions" }, /* @__PURE__ */ React.createElement("input", { className: "modal-field", style: { width: 240 }, placeholder: "Search capabilities\u2026", value: q, onChange: (e) => setQ(e.target.value) }))), /* @__PURE__ */ React.createElement("div", { className: "card" }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Built-in tools"), /* @__PURE__ */ React.createElement("span", { className: "mono dim" }, fTools.length)), !toolsResp && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px", fontSize: 12 } }, "loading\u2026"), toolsResp && fTools.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px", fontSize: 12 } }, "No tools match the search."), cats.map((cat) => /* @__PURE__ */ React.createElement("div", { key: cat, style: { padding: "10px 14px", borderTop: "1px solid var(--border)" } }, /* @__PURE__ */ React.createElement("div", { className: "mono dim", style: { fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 6 } }, cat, " \xB7 ", groups[cat].length), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, groups[cat].map((t) => /* @__PURE__ */ React.createElement("div", { key: t.name, className: "col-6", style: { padding: "3px 0" } }, /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 12.5, color: "var(--rust)" } }, t.name), /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 11.5, lineHeight: 1.4 } }, capClip(t.description, 120)))))))), /* @__PURE__ */ React.createElement("div", { className: "card", style: { marginTop: 16 } }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Agent templates"), /* @__PURE__ */ React.createElement("span", { className: "mono dim" }, fTemplates.length)), !tmplResp && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px", fontSize: 12 } }, "loading\u2026"), tmplResp && templates.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "muted", style: { padding: "16px", fontSize: 12 } }, "No templates on disk yet \u2014 run ", /* @__PURE__ */ React.createElement("span", { className: "mono" }, "rustyhand init"), " to install the bundled set."), tmplResp && templates.length > 0 && fTemplates.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px", fontSize: 12 } }, "No templates match the search."), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, fTemplates.map((t) => /* @__PURE__ */ React.createElement("div", { key: t.name, className: "col-4", style: { padding: "10px 14px", borderTop: "1px solid var(--border)" } }, /* @__PURE__ */ React.createElement("div", { className: "row gap-6" }, /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 13 } }, t.name), META.includes(t.name) && /* @__PURE__ */ React.createElement("span", { className: "badge" }, "meta")), /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 11.5, lineHeight: 1.4, marginTop: 2 } }, capClip(t.description, 90))))), go && fTemplates.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 14px" } }, /* @__PURE__ */ React.createElement("button", { className: "btn sm", onClick: () => go("agents") }, /* @__PURE__ */ React.createElement(I.plus, null), " Spawn an agent"))), /* @__PURE__ */ React.createElement("div", { className: "card", style: { marginTop: 16 } }, /* @__PURE__ */ React.createElement("div", { className: "card-head" }, /* @__PURE__ */ React.createElement("span", null, "Skills"), /* @__PURE__ */ React.createElement("span", { className: "mono dim" }, fSkills.length)), !skillsResp && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px", fontSize: 12 } }, "loading\u2026"), skillsResp && fSkills.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "muted mono", style: { padding: "16px", fontSize: 12 } }, "No skills match the search."), /* @__PURE__ */ React.createElement("div", { className: "grid-12" }, fSkills.map((s) => /* @__PURE__ */ React.createElement("div", { key: s.name, className: "col-4", style: { padding: "10px 14px", borderTop: "1px solid var(--border)" } }, /* @__PURE__ */ React.createElement("div", { className: "row between gap-6" }, /* @__PURE__ */ React.createElement("span", { className: "mono", style: { fontSize: 13 } }, s.name), /* @__PURE__ */ React.createElement("span", { className: "badge" }, s.source && s.source.type || "local")), /* @__PURE__ */ React.createElement("div", { className: "dim", style: { fontSize: 11.5, lineHeight: 1.4, marginTop: 2 } }, capClip(s.description, 90))))), go && /* @__PURE__ */ React.createElement("div", { style: { padding: "10px 14px" } }, /* @__PURE__ */ React.createElement("button", { className: "btn sm ghost", onClick: () => go("skills") }, "Manage skills \u2192"))));
+}
 Object.assign(window, {
   OverviewPage,
   AgentsPage,
@@ -4673,7 +4714,8 @@ Object.assign(window, {
   McpPage,
   NetworkPage,
   BindingsPage,
-  HealthPage
+  HealthPage,
+  CapabilitiesPage
 });
 
 })();
