@@ -123,7 +123,11 @@ impl DiscordAdapter {
                     body = %body_text,
                     "Discord sendMessage failed"
                 );
-                return Err(format!("Discord sendMessage failed: {status} — {body_text}").into());
+                return Err(format!(
+                    "Discord sendMessage failed: {status} — {body_text}{}",
+                    crate::http_status_hint(status.as_u16())
+                )
+                .into());
             }
         }
         Ok(())
@@ -153,7 +157,11 @@ impl DiscordAdapter {
                 .text()
                 .await
                 .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
-            return Err(format!("Discord sendMessage failed: {status} — {body_text}").into());
+            return Err(format!(
+                "Discord sendMessage failed: {status} — {body_text}{}",
+                crate::http_status_hint(status.as_u16())
+            )
+            .into());
         }
         let json: serde_json::Value = resp.json().await?;
         match json["id"].as_str() {
@@ -185,7 +193,11 @@ impl DiscordAdapter {
                 .text()
                 .await
                 .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
-            return Err(format!("Discord editMessage failed: {status} — {body_text}").into());
+            return Err(format!(
+                "Discord editMessage failed: {status} — {body_text}{}",
+                crate::http_status_hint(status.as_u16())
+            )
+            .into());
         }
         Ok(())
     }
@@ -877,9 +889,12 @@ mod tests {
             prod.contains("if !resp.status().is_success()"),
             "non-success guard must still be in place"
         );
-        // The corrective Err return inside the guard.
+        // The corrective Err return inside the guard. (Formatting-robust: the
+        // format! may wrap across lines, so match the message literal — which
+        // only appears in the Err path; the warn! uses it as a tracing field
+        // without the trailing colon.)
         assert!(
-            prod.contains("return Err(format!(\"Discord sendMessage failed:"),
+            prod.contains("\"Discord sendMessage failed:"),
             "api_send_message must Err on Discord 4xx/5xx (not silently return Ok)"
         );
 

@@ -112,7 +112,11 @@ impl SlackAdapter {
                     error = %err,
                     "Slack chat.postMessage failed"
                 );
-                return Err(format!("Slack chat.postMessage failed: {err}").into());
+                return Err(format!(
+                    "Slack chat.postMessage failed: {err}{}",
+                    crate::slack_error_hint(err)
+                )
+                .into());
             }
         }
         Ok(())
@@ -141,7 +145,11 @@ impl SlackAdapter {
             .await?;
         if resp["ok"].as_bool() != Some(true) {
             let err = resp["error"].as_str().unwrap_or("unknown");
-            return Err(format!("Slack chat.postMessage failed: {err}").into());
+            return Err(format!(
+                "Slack chat.postMessage failed: {err}{}",
+                crate::slack_error_hint(err)
+            )
+            .into());
         }
         match resp["ts"].as_str() {
             Some(ts) => Ok(ts.to_string()),
@@ -172,7 +180,11 @@ impl SlackAdapter {
             .await?;
         if resp["ok"].as_bool() != Some(true) {
             let err = resp["error"].as_str().unwrap_or("unknown");
-            return Err(format!("Slack chat.update failed: {err}").into());
+            return Err(format!(
+                "Slack chat.update failed: {err}{}",
+                crate::slack_error_hint(err)
+            )
+            .into());
         }
         Ok(())
     }
@@ -758,9 +770,10 @@ mod tests {
             prod.contains("if resp[\"ok\"].as_bool() != Some(true)"),
             "ok-false guard must still be in place"
         );
-        // The corrective Err return inside the guard.
+        // The corrective Err return inside the guard. (Formatting-robust: the
+        // format! may wrap across lines, so match the message literal.)
         assert!(
-            prod.contains("return Err(format!(\"Slack chat.postMessage failed:"),
+            prod.contains("\"Slack chat.postMessage failed:"),
             "api_send_message must Err on ok=false (not silently return Ok)"
         );
         // Pre-fix shape: a bare warn without a propagated error.

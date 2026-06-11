@@ -147,7 +147,10 @@ impl TelegramAdapter {
                         }
                     }
                 } else {
-                    warn!("Telegram sendMessage failed ({status}): {body_text}");
+                    warn!(
+                        "Telegram sendMessage failed ({status}): {body_text}{}",
+                        crate::http_status_hint(status.as_u16())
+                    );
                 }
             }
         }
@@ -344,12 +347,17 @@ impl TelegramAdapter {
             }
             let desc2 = parsed2["description"].as_str().unwrap_or(body2.as_str());
             return Err(format!(
-                "Telegram sendMessage (plain fallback) failed ({status2}): {desc2}"
+                "Telegram sendMessage (plain fallback) failed ({status2}): {desc2}{}",
+                crate::http_status_hint(status2.as_u16())
             )
             .into());
         }
 
-        Err(format!("Telegram sendMessage failed ({status}): {description}").into())
+        Err(format!(
+            "Telegram sendMessage failed ({status}): {description}{}",
+            crate::http_status_hint(status.as_u16())
+        )
+        .into())
     }
 
     /// Call `answerCallbackQuery` to dismiss the button spinner.
