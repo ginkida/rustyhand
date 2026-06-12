@@ -521,7 +521,9 @@ async fn providers_envelope_and_entry_shape() {
 
 /// `GET /api/channels` returns `{channels, total, configured_count}`. Each
 /// channel exposes `name`, `display_name`, `auth_status` (used by
-/// channels.js statusBadge and CLI `channel list`).
+/// channels.js statusBadge and CLI `channel list`), plus the setup guidance
+/// (`quick_setup`, `setup_steps`, `setup_url`) the ChannelConfigModal renders
+/// so a connecting operator sees where to get a token, not bare input boxes.
 #[tokio::test]
 async fn channels_envelope_and_entry_shape() {
     let server = require_server!(start_test_server());
@@ -541,8 +543,20 @@ async fn channels_envelope_and_entry_shape() {
             "auth_status",
             "configured",
             "fields",
+            "quick_setup",
+            "setup_steps",
+            "setup_url",
         ],
         "/api/channels[0]",
+    );
+    // setup_url must be a usable https link (the modal's "Get a token →" href).
+    assert!(
+        first["setup_url"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("https://"),
+        "channel setup_url must be an https link, got {:?}",
+        first["setup_url"]
     );
 }
 

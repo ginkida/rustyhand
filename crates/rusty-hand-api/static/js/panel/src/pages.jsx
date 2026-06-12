@@ -4572,6 +4572,19 @@ function ChannelConfigModal({ channel, onClose, onSaved }) {
         <div className="modal-head"><b className="mono">Configure · {channel.display_name || channel.name}</b><button className="icon-btn" onClick={onClose}><I.close/></button></div>
         <div className="modal-body">
           {channel.description && <div className="dim" style={{fontSize:12, marginBottom:12}}>{channel.description}</div>}
+          {(channel.quick_setup || (channel.setup_steps && channel.setup_steps.length) || channel.setup_url) && (
+            <div style={{background:"var(--bg-2)", border:"1px solid var(--border)", borderRadius:6, padding:"10px 12px", marginBottom:12}}>
+              {channel.quick_setup && <div style={{fontSize:12, marginBottom:(channel.setup_steps && channel.setup_steps.length) ? 8 : 0}}>{channel.quick_setup}</div>}
+              {channel.setup_steps && channel.setup_steps.length > 0 && (
+                <ol style={{margin:0, paddingLeft:18}}>
+                  {channel.setup_steps.map((s, i) => <li key={i} className="dim" style={{fontSize:11.5, lineHeight:1.55}}>{s}</li>)}
+                </ol>
+              )}
+              {channel.setup_url && (
+                <a href={channel.setup_url} target="_blank" rel="noreferrer" className="mono" style={{display:"inline-block", marginTop:8, fontSize:11.5, color:"var(--rust)"}}>Get a token →</a>
+              )}
+            </div>
+          )}
           <div className="col gap-8">
             {fields.length === 0 && <div className="dim mono" style={{fontSize:11}}>No fields defined for this channel.</div>}
             {fields.map(f => (

@@ -1795,6 +1795,9 @@ struct ChannelMeta {
     setup_time: &'static str,
     /// One-line quick setup hint shown in the simple form view.
     quick_setup: &'static str,
+    /// Where to obtain the credential (BotFather / developer portal), so the
+    /// configure dialog can offer a one-click "get a token" link.
+    setup_url: &'static str,
     fields: &'static [ChannelField],
     setup_steps: &'static [&'static str],
     config_template: &'static str,
@@ -1806,6 +1809,7 @@ const CHANNEL_REGISTRY: &[ChannelMeta] = &[
         description: "Telegram Bot API — long-polling adapter",
         difficulty: "Easy", setup_time: "~2 min",
         quick_setup: "Paste your bot token from @BotFather",
+        setup_url: "https://t.me/BotFather",
         fields: &[
             ChannelField { key: "bot_token_env", label: "Bot Token", field_type: FieldType::Secret, env_var: Some("TELEGRAM_BOT_TOKEN"), required: true, placeholder: "123456:ABC-DEF...", advanced: false },
             ChannelField { key: "allowed_users", label: "Allowed User IDs", field_type: FieldType::List, env_var: None, required: false, placeholder: "12345, 67890", advanced: true },
@@ -1820,6 +1824,7 @@ const CHANNEL_REGISTRY: &[ChannelMeta] = &[
         description: "Discord Gateway bot adapter",
         difficulty: "Easy", setup_time: "~3 min",
         quick_setup: "Paste your bot token from the Discord Developer Portal",
+        setup_url: "https://discord.com/developers/applications",
         fields: &[
             ChannelField { key: "bot_token_env", label: "Bot Token", field_type: FieldType::Secret, env_var: Some("DISCORD_BOT_TOKEN"), required: true, placeholder: "MTIz...", advanced: false },
             ChannelField { key: "allowed_guilds", label: "Allowed Guild IDs", field_type: FieldType::List, env_var: None, required: false, placeholder: "123456789, 987654321", advanced: true },
@@ -1834,6 +1839,7 @@ const CHANNEL_REGISTRY: &[ChannelMeta] = &[
         description: "Slack Socket Mode + Events API",
         difficulty: "Medium", setup_time: "~5 min",
         quick_setup: "Paste your App Token and Bot Token from api.slack.com",
+        setup_url: "https://api.slack.com/apps",
         fields: &[
             ChannelField { key: "app_token_env", label: "App Token (xapp-)", field_type: FieldType::Secret, env_var: Some("SLACK_APP_TOKEN"), required: true, placeholder: "xapp-1-...", advanced: false },
             ChannelField { key: "bot_token_env", label: "Bot Token (xoxb-)", field_type: FieldType::Secret, env_var: Some("SLACK_BOT_TOKEN"), required: true, placeholder: "xoxb-...", advanced: false },
@@ -1941,6 +1947,7 @@ pub async fn list_channels(State(state): State<Arc<AppState>>) -> impl IntoRespo
             "difficulty": meta.difficulty,
             "setup_time": meta.setup_time,
             "quick_setup": meta.quick_setup,
+            "setup_url": meta.setup_url,
             "configured": configured,
             "has_token": has_token,
             "auth_status": auth_status,
