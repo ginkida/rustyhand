@@ -461,6 +461,120 @@ tools = ["file_read", "web_search"]
     );
 }
 
+/// Regression: a PARTIAL PUT (the natural "edit one field" workflow) must touch
+/// only the keys the caller actually sent, NOT reset every omitted field to its
+/// serde default. AgentManifest/ModelConfig both carry container-level
+/// `#[serde(default)]`, so a naive handler deserializes an omitted field as a
+/// non-empty default (temperature 0.7, max_tokens 4096, system_prompt
+/// "You are a helpful AI agent.", model claude-sonnet-4-6) and silently
+/// clobbers the live agent — a data-loss bug. This pins true PATCH semantics.
+#[tokio::test]
+async fn test_update_agent_partial_preserves_unspecified_fields() {
+    let server = require_server!(start_test_server());
+    let client = reqwest::Client::new();
+
+    // Baseline with DISTINCTIVE, non-default values so a clobber-to-default
+    // regression is detectable (0.33 != 0.7, 1234 != 4096).
+    let baseline = r#"
+name = "partial-base"
+version = "0.1.0"
+description = "Original description"
+author = "test"
+module = "builtin:chat"
+
+[model]
+provider = "mock"
+model = "mock-model"
+system_prompt = "Original system prompt."
+temperature = 0.33
+max_tokens = 1234
+
+[capabilities]
+tools = ["file_read", "web_search"]
+"#;
+    let resp = client
+        .post(format!("{}/api/agents", server.base_url))
+        .json(&serde_json::json!({"manifest_toml": baseline}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 201);
+    let agent_id = resp.json::<serde_json::Value>().await.unwrap()["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Snapshot the agent's state right after spawn. Comparing against THIS
+    // (rather than hard-coded expectations) makes the test robust to whatever
+    // the spawn path normalizes — what matters is that a partial PUT changes
+    // nothing it wasn't asked to.
+    let get = || async {
+        client
+            .get(format!("{}/api/agents/{}", server.base_url, agent_id))
+            .send()
+            .await
+            .unwrap()
+            .json::<serde_json::Value>()
+            .await
+            .unwrap()
+    };
+    let before = get().await;
+    // Sanity: the distinctive values are not the serde defaults, so a clobber
+    // would be observable. (temperature is stored as f32, so compare with an
+    // epsilon rather than exact f64 equality.)
+    let base_temp = before["model"]["temperature"].as_f64().unwrap();
+    assert!(
+        (base_temp - 0.33).abs() < 1e-3 && (base_temp - 0.7).abs() > 1e-3,
+        "baseline temperature should be the distinctive 0.33, got {base_temp}"
+    );
+    assert_eq!(before["model"]["max_tokens"].as_u64().unwrap(), 1234);
+
+    // PUT a partial manifest that only renames the agent. Everything else is
+    // omitted and must survive untouched.
+    let partial = r#"name = "partial-renamed""#;
+    let resp = client
+        .put(format!(
+            "{}/api/agents/{}/update",
+            server.base_url, agent_id
+        ))
+        .json(&serde_json::json!({"manifest_toml": partial}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let applied: Vec<&str> = body["applied"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    // Only `name` was sent → only `name` may be applied. If any other field
+    // appears here, the handler touched a key the caller never submitted.
+    assert_eq!(
+        applied,
+        vec!["name"],
+        "partial PUT must apply only the sent key, got {applied:?}"
+    );
+
+    // GET again: the rename landed, and every omitted field is byte-identical
+    // to the post-spawn snapshot (NOT reset to a serde default).
+    let after = get().await;
+    assert_eq!(after["name"], "partial-renamed");
+    assert_eq!(
+        after["description"], before["description"],
+        "description must survive a partial PUT"
+    );
+    assert_eq!(
+        after["model"], before["model"],
+        "the whole model config (provider/model/temperature/max_tokens) must survive a partial PUT"
+    );
+    assert_eq!(
+        after["capabilities"]["tools"], before["capabilities"]["tools"],
+        "tools must survive a partial PUT"
+    );
+}
+
 #[tokio::test]
 async fn test_agent_group_roundtrip_and_persistence() {
     let server = require_server!(start_test_server());

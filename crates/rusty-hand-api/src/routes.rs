@@ -4889,6 +4889,16 @@ pub async fn update_agent(
     // takes effect on the next turn (no respawn) instead of silently
     // acknowledging. Fields without a live setter (provider wire change,
     // skills, mcp_servers) are left to their dedicated endpoints.
+    // Parse the submitted manifest TWO ways. The typed form gives us values;
+    // the raw TOML table tells us which keys the caller ACTUALLY sent. We must
+    // gate on raw key-presence, NOT on the typed values, because AgentManifest
+    // and ModelConfig both carry container-level `#[serde(default)]`: a partial
+    // "edit one field" TOML deserializes with non-empty/non-zero DEFAULTS for
+    // every omitted field (temperature 0.7, max_tokens 4096, system_prompt
+    // "You are a helpful AI agent.", model claude-sonnet-4-6, provider
+    // anthropic). Applying those would silently clobber the live agent — so we
+    // treat this endpoint as a true PATCH and touch only keys the caller
+    // included. (The value guards below stay as sanity checks on top.)
     let manifest: AgentManifest = match toml::from_str(&req.manifest_toml) {
         Ok(m) => m,
         Err(e) => {
@@ -4898,8 +4908,32 @@ pub async fn update_agent(
             );
         }
     };
+    let raw: toml::Value = match toml::from_str(&req.manifest_toml) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid manifest: {e}")})),
+            );
+        }
+    };
+    // Key-presence predicates against the raw submitted TOML.
+    let has = |key: &str| raw.get(key).is_some();
+    let has_model = |key: &str| {
+        raw.get("model")
+            .and_then(|m| m.as_table())
+            .map(|t| t.contains_key(key))
+            .unwrap_or(false)
+    };
+    let has_tools = raw
+        .get("capabilities")
+        .and_then(|c| c.as_table())
+        .map(|t| t.contains_key("tools"))
+        .unwrap_or(false);
 
-    if !(0.0..=2.0).contains(&manifest.model.temperature) {
+    // Validate temperature only when the caller actually sent it (an omitted
+    // temperature defaults to 0.7, which would spuriously pass anyway).
+    if has_model("temperature") && !(0.0..=2.0).contains(&manifest.model.temperature) {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": "model.temperature must be 0.0–2.0"})),
@@ -4909,30 +4943,37 @@ pub async fn update_agent(
     let reg = &state.kernel.registry;
     let mut applied: Vec<&str> = Vec::new();
 
-    if !manifest.name.trim().is_empty() && reg.update_name(agent_id, manifest.name.clone()).is_ok()
+    if has("name")
+        && !manifest.name.trim().is_empty()
+        && reg.update_name(agent_id, manifest.name.clone()).is_ok()
     {
         applied.push("name");
     }
-    if reg
-        .update_description(agent_id, manifest.description.clone())
-        .is_ok()
+    // description may legitimately be cleared, so the presence gate is enough.
+    if has("description")
+        && reg
+            .update_description(agent_id, manifest.description.clone())
+            .is_ok()
     {
         applied.push("description");
     }
-    if !manifest.model.system_prompt.trim().is_empty()
+    if has_model("system_prompt")
+        && !manifest.model.system_prompt.trim().is_empty()
         && reg
             .update_system_prompt(agent_id, manifest.model.system_prompt.clone())
             .is_ok()
     {
         applied.push("system_prompt");
     }
-    if reg
-        .update_temperature(agent_id, manifest.model.temperature)
-        .is_ok()
+    if has_model("temperature")
+        && reg
+            .update_temperature(agent_id, manifest.model.temperature)
+            .is_ok()
     {
         applied.push("temperature");
     }
-    if manifest.model.max_tokens > 0
+    if has_model("max_tokens")
+        && manifest.model.max_tokens > 0
         && reg
             .update_max_tokens(agent_id, manifest.model.max_tokens)
             .is_ok()
@@ -4940,8 +4981,11 @@ pub async fn update_agent(
         applied.push("max_tokens");
     }
 
-    // Model is validated against the catalog by the kernel — surface a bad id.
-    if !manifest.model.model.trim().is_empty() {
+    // Model id is passed straight to the kernel setter (which persists model +
+    // provider). Off-catalog ids are accepted by design — newer provider models
+    // not yet in the local pricing catalog must still work — so set_agent_model
+    // only errs on agent-not-found / lock failure, not on an unknown id.
+    if has_model("model") && !manifest.model.model.trim().is_empty() {
         if let Err(e) = state
             .kernel
             .set_agent_model(agent_id, &manifest.model.model)
@@ -4949,7 +4993,7 @@ pub async fn update_agent(
             return (
                 StatusCode::BAD_REQUEST,
                 Json(
-                    serde_json::json!({"error": format!("Invalid model '{}': {e}", manifest.model.model)}),
+                    serde_json::json!({"error": format!("Failed to set model '{}': {e}", manifest.model.model)}),
                 ),
             );
         }
@@ -4957,7 +5001,7 @@ pub async fn update_agent(
     }
 
     // Tools re-grant capabilities live (e.g. ["*"] = all tools).
-    if !manifest.capabilities.tools.is_empty() {
+    if has_tools && !manifest.capabilities.tools.is_empty() {
         if let Err(e) = state
             .kernel
             .set_agent_tools(agent_id, manifest.capabilities.tools.clone())
