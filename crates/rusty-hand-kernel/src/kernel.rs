@@ -1546,6 +1546,18 @@ impl RustyHandKernel {
             return Ok((rx, handle));
         }
 
+        // LLM agent: enforce cost quotas before doing any work. The streaming
+        // path previously checked only the scheduler rate quota, so it bypassed
+        // the per-agent cost quota (max_cost_per_*_usd) and the global budget
+        // cap — both enforced on the non-streaming path. Dashboard chat and the
+        // Telegram/Discord/Slack channels all go through here.
+        self.metering
+            .check_quota(agent_id, &entry.manifest.resources)
+            .map_err(KernelError::RustyHand)?;
+        self.metering
+            .check_global_budget(&self.budget_config())
+            .map_err(KernelError::RustyHand)?;
+
         // LLM agent: true streaming via agent loop
         let mut session = self
             .memory
@@ -2054,9 +2066,14 @@ impl RustyHandKernel {
         message: &str,
         kernel_handle: Option<Arc<dyn KernelHandle>>,
     ) -> KernelResult<AgentLoopResult> {
-        // Check metering quota before starting
+        // Check metering quota before starting: per-agent cost quota AND the
+        // global budget cap (across all agents). Both are no-ops unless the
+        // corresponding limit is configured (> 0.0).
         self.metering
             .check_quota(agent_id, &entry.manifest.resources)
+            .map_err(KernelError::RustyHand)?;
+        self.metering
+            .check_global_budget(&self.budget_config())
             .map_err(KernelError::RustyHand)?;
 
         let mut session = self

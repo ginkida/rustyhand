@@ -382,6 +382,54 @@ mod tests {
     }
 
     #[test]
+    fn test_check_global_budget_exceeded() {
+        // Global budget aggregates across agents. Two agents each under their
+        // own (absent) per-agent quota can still blow the global cap.
+        let engine = setup();
+        for _ in 0..2 {
+            engine
+                .record(&UsageRecord {
+                    agent_id: AgentId::new(),
+                    model: "claude-sonnet".to_string(),
+                    input_tokens: 10000,
+                    output_tokens: 5000,
+                    cost_usd: 0.30,
+                    tool_calls: 0,
+                })
+                .unwrap();
+        }
+        let budget = rusty_hand_types::config::BudgetConfig {
+            max_hourly_usd: 0.5,
+            ..Default::default()
+        };
+        let result = engine.check_global_budget(&budget);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Global hourly budget exceeded"));
+    }
+
+    #[test]
+    fn test_check_global_budget_zero_limit_skipped() {
+        let engine = setup();
+        engine
+            .record(&UsageRecord {
+                agent_id: AgentId::new(),
+                model: "claude-opus".to_string(),
+                input_tokens: 100000,
+                output_tokens: 50000,
+                cost_usd: 100.0,
+                tool_calls: 0,
+            })
+            .unwrap();
+        // All-zero budget = unlimited; no enforcement.
+        assert!(engine
+            .check_global_budget(&rusty_hand_types::config::BudgetConfig::default())
+            .is_ok());
+    }
+
+    #[test]
     fn test_estimate_cost_haiku() {
         let cost = MeteringEngine::estimate_cost("claude-haiku-4-5-20251001", 1_000_000, 1_000_000);
         assert!((cost - 6.0).abs() < 0.01); // $1.00 + $5.00
