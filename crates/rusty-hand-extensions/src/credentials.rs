@@ -143,9 +143,11 @@ fn load_dotenv(path: &Path) -> Result<HashMap<String, String>, std::io::Error> {
         if let Some((key, value)) = line.split_once('=') {
             let key = key.trim();
             let mut value = value.trim().to_string();
-            // Strip surrounding quotes
-            if (value.starts_with('"') && value.ends_with('"'))
-                || (value.starts_with('\'') && value.ends_with('\''))
+            // Strip surrounding quotes. Require at least 2 chars so a lone
+            // quote char (`"` or `'`) doesn't produce a reverse-range slice panic.
+            if value.len() >= 2
+                && ((value.starts_with('"') && value.ends_with('"'))
+                    || (value.starts_with('\'') && value.ends_with('\'')))
             {
                 value = value[1..value.len() - 1].to_string();
             }
@@ -207,6 +209,18 @@ SINGLE_QUOTED='single'
     fn load_dotenv_nonexistent() {
         let map = load_dotenv(Path::new("/nonexistent/.env")).unwrap();
         assert!(map.is_empty());
+    }
+
+    #[test]
+    fn load_dotenv_lone_quote_does_not_panic() {
+        // A value that is a single quote char used to produce a reverse-range
+        // byte slice (`value[1..0]`) and panic. It must be kept verbatim now.
+        let dir = tempfile::tempdir().unwrap();
+        let env_path = dir.path().join(".env");
+        std::fs::write(&env_path, "LONE_DQ=\"\nLONE_SQ='\n").unwrap();
+        let map = load_dotenv(&env_path).unwrap();
+        assert_eq!(map.get("LONE_DQ").unwrap(), "\"");
+        assert_eq!(map.get("LONE_SQ").unwrap(), "'");
     }
 
     #[test]

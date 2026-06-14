@@ -4588,18 +4588,18 @@ function ChannelConfigModal({ channel, onClose, onSaved }) {
           <div className="col gap-8">
             {fields.length === 0 && <div className="dim mono" style={{fontSize:11}}>No fields defined for this channel.</div>}
             {fields.map(f => (
-              <label key={f.name} className="t-row col">
+              <label key={f.key} className="t-row col">
                 <span className="t-lbl">
-                  {f.label || f.name}
+                  {f.label || f.key}
                   {f.required && <span style={{color:"var(--rust)"}}> *</span>}
                   {f.env_var && <span className="dim mono" style={{marginLeft:6, fontSize:10}}>({f.env_var})</span>}
                 </span>
                 <input
                   className="modal-field"
-                  type={f.secret ? "password" : "text"}
+                  type={f.type === "secret" ? "password" : "text"}
                   placeholder={f.placeholder || ""}
-                  value={values[f.name] || ""}
-                  onChange={e => setValues({ ...values, [f.name]: e.target.value })}
+                  value={values[f.key] || ""}
+                  onChange={e => setValues({ ...values, [f.key]: e.target.value })}
                 />
                 {f.description && <span className="dim" style={{fontSize:10.5, marginTop:2}}>{f.description}</span>}
               </label>

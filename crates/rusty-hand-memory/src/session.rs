@@ -771,7 +771,13 @@ impl SessionStore {
                 // Keep summary under ~4000 chars
                 let mut full_summary = summary_parts.join("\n");
                 if full_summary.len() > 4000 {
-                    full_summary = full_summary[full_summary.len() - 4000..].to_string();
+                    // Keep the trailing ~4000 bytes, snapping the start index down to a
+                    // char boundary so multi-byte UTF-8 content cannot panic the slice.
+                    let start = rusty_hand_types::text::floor_char_boundary(
+                        &full_summary,
+                        full_summary.len() - 4000,
+                    );
+                    full_summary = full_summary[start..].to_string();
                 }
                 canonical.compacted_summary = Some(full_summary);
                 canonical.compaction_cursor = to_compact;
@@ -1057,6 +1063,32 @@ mod tests {
         // After compaction: should keep DEFAULT_CANONICAL_WINDOW (50) messages
         assert!(canonical.messages.len() <= 60); // some tolerance
         assert!(canonical.compacted_summary.is_some());
+    }
+
+    #[test]
+    fn test_canonical_compaction_multibyte_no_panic() {
+        // Regression: the summary tail-slice (keep last ~4000 bytes) used a raw
+        // byte index that panicked when it landed mid-UTF-8-char. Heavy
+        // multibyte content must compact without panicking and stay under cap.
+        let store = setup();
+        let agent_id = AgentId::new();
+        let msgs: Vec<Message> = (0..120)
+            .map(|i| {
+                Message::user(format!(
+                    "Сообщение {i} 🚀 данные あ ёжик {}",
+                    "пример ".repeat(20)
+                ))
+            })
+            .collect();
+        let canonical = store.append_canonical(agent_id, &msgs, Some(100)).unwrap();
+        let summary = canonical.compacted_summary.expect("summary built");
+        // floor_char_boundary snaps the start down, so the kept tail is at most
+        // 4000 + (max char width - 1) bytes.
+        assert!(
+            summary.len() <= 4003,
+            "summary len {} exceeds cap",
+            summary.len()
+        );
     }
 
     #[test]
