@@ -761,9 +761,12 @@ pub async fn run_agent_loop(
                 }
                 // Model hit token limit — add partial response and continue
                 let text = response.text();
+                // Persist only the partial assistant text; the synthetic
+                // continuation prompt goes to the in-flight context only — it is
+                // not a real user turn and would bloat history. Consecutive
+                // assistant chunks are merged on load by validate_and_repair.
                 session.messages.push(Message::assistant(&text));
                 messages.push(Message::assistant(&text));
-                session.messages.push(Message::user("Please continue."));
                 messages.push(Message::user("Please continue."));
                 warn!(iteration, "Max tokens hit, continuing");
             }
@@ -1775,9 +1778,12 @@ pub async fn run_agent_loop_streaming(
                     });
                 }
                 let text = response.text();
+                // Persist only the partial assistant text; the synthetic
+                // continuation prompt goes to the in-flight context only — it is
+                // not a real user turn and would bloat history. Consecutive
+                // assistant chunks are merged on load by validate_and_repair.
                 session.messages.push(Message::assistant(&text));
                 messages.push(Message::assistant(&text));
-                session.messages.push(Message::user("Please continue."));
                 messages.push(Message::user("Please continue."));
                 warn!(iteration, "Max tokens hit (streaming), continuing");
             }

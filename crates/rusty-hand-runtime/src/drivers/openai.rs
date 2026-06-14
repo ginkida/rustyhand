@@ -538,21 +538,49 @@ impl LlmDriver for OpenAIDriver {
                     });
                 }
                 (Role::User, MessageContent::Blocks(blocks)) => {
+                    // Mirror the non-streaming builder: handle tool results AND
+                    // text/image blocks. The previous version dropped Text and
+                    // Image blocks, so vision input never reached the model on
+                    // the streaming path.
+                    let mut parts: Vec<OaiContentPart> = Vec::new();
+                    let mut has_tool_results = false;
                     for block in blocks {
-                        if let ContentBlock::ToolResult {
-                            tool_use_id,
-                            content,
-                            ..
-                        } = block
-                        {
-                            oai_messages.push(OaiMessage {
-                                role: "tool".to_string(),
-                                content: Some(OaiMessageContent::Text(content.clone())),
-                                tool_calls: None,
-                                tool_call_id: Some(tool_use_id.clone()),
-                                reasoning_content: None,
-                            });
+                        match block {
+                            ContentBlock::ToolResult {
+                                tool_use_id,
+                                content,
+                                ..
+                            } => {
+                                has_tool_results = true;
+                                oai_messages.push(OaiMessage {
+                                    role: "tool".to_string(),
+                                    content: Some(OaiMessageContent::Text(content.clone())),
+                                    tool_calls: None,
+                                    tool_call_id: Some(tool_use_id.clone()),
+                                    reasoning_content: None,
+                                });
+                            }
+                            ContentBlock::Text { text } => {
+                                parts.push(OaiContentPart::Text { text: text.clone() });
+                            }
+                            ContentBlock::Image { media_type, data } => {
+                                parts.push(OaiContentPart::ImageUrl {
+                                    image_url: OaiImageUrl {
+                                        url: format!("data:{media_type};base64,{data}"),
+                                    },
+                                });
+                            }
+                            _ => {}
                         }
+                    }
+                    if !parts.is_empty() && !has_tool_results {
+                        oai_messages.push(OaiMessage {
+                            role: "user".to_string(),
+                            content: Some(OaiMessageContent::Parts(parts)),
+                            tool_calls: None,
+                            tool_call_id: None,
+                            reasoning_content: None,
+                        });
                     }
                 }
                 (Role::Assistant, MessageContent::Blocks(blocks)) => {

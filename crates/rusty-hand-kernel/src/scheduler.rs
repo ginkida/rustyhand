@@ -66,11 +66,12 @@ impl AgentScheduler {
         self.usage.insert(agent_id, UsageTracker::default());
     }
 
-    /// Record token usage for an agent.
-    pub fn record_usage(&self, agent_id: AgentId, usage: &TokenUsage) {
+    /// Record token usage (and tool calls) for an agent in the rolling window.
+    pub fn record_usage(&self, agent_id: AgentId, usage: &TokenUsage, tool_calls: u64) {
         if let Some(mut tracker) = self.usage.get_mut(&agent_id) {
             tracker.reset_if_expired();
             tracker.total_tokens += usage.total();
+            tracker.tool_calls += tool_calls;
         }
     }
 
@@ -142,9 +143,11 @@ mod tests {
                 input_tokens: 100,
                 output_tokens: 50,
             },
+            3,
         );
-        let (tokens, _) = scheduler.get_usage(id).unwrap();
+        let (tokens, tool_calls) = scheduler.get_usage(id).unwrap();
         assert_eq!(tokens, 150);
+        assert_eq!(tool_calls, 3);
     }
 
     #[test]
@@ -162,6 +165,7 @@ mod tests {
                 input_tokens: 60,
                 output_tokens: 50,
             },
+            0,
         );
         assert!(scheduler.check_quota(id).is_err());
     }

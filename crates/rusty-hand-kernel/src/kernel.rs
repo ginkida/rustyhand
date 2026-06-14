@@ -1429,7 +1429,7 @@ impl RustyHandKernel {
         match result {
             Ok(result) => {
                 // Record token usage for quota tracking
-                self.scheduler.record_usage(agent_id, &result.total_usage);
+                self.scheduler.record_usage(agent_id, &result.total_usage, result.iterations.saturating_sub(1) as u64);
 
                 // Update last active time
                 if let Err(e) = self.registry.set_state(agent_id, AgentState::Running) {
@@ -1529,7 +1529,7 @@ impl RustyHandKernel {
                             .await;
                         kernel_clone
                             .scheduler
-                            .record_usage(agent_id, &result.total_usage);
+                            .record_usage(agent_id, &result.total_usage, result.iterations.saturating_sub(1) as u64);
                         let _ = kernel_clone
                             .registry
                             .set_state(agent_id, AgentState::Running);
@@ -1830,7 +1830,7 @@ impl RustyHandKernel {
 
                     kernel_clone
                         .scheduler
-                        .record_usage(agent_id, &result.total_usage);
+                        .record_usage(agent_id, &result.total_usage, result.iterations.saturating_sub(1) as u64);
                     let _ = kernel_clone
                         .registry
                         .set_state(agent_id, AgentState::Running);
