@@ -781,7 +781,7 @@ async fn dispatch_message(
 
                     // For voice/audio: auto-transcribe and send text to agent
                     if media_type == "voice" || media_type == "audio" {
-                        match handle.transcribe_audio(&local_path).await {
+                        let transcribed = match handle.transcribe_audio(&local_path).await {
                             Ok(transcription) => {
                                 if caption_text.is_empty() {
                                     format!("[Voice message transcription]: {transcription}")
@@ -793,16 +793,21 @@ async fn dispatch_message(
                             }
                             Err(e) => {
                                 warn!("Voice transcription failed: {e}");
-                                let _ = tokio::fs::remove_file(&local_path).await;
                                 "[Voice message received, but transcription failed. Please try again.]".to_string()
                             }
-                        }
+                        };
+                        // The temp file is only needed for transcription — drop
+                        // it on both paths so the temp dir doesn't grow unbounded.
+                        let _ = tokio::fs::remove_file(&local_path).await;
+                        transcribed
                     } else if media_type == "photo" {
                         // Auto-describe the photo for the agent
                         let description = match handle.describe_image(&local_path).await {
                             Ok(desc) => desc,
                             Err(_) => "Image received (description unavailable)".to_string(),
                         };
+                        // The temp file is only needed for description — drop it.
+                        let _ = tokio::fs::remove_file(&local_path).await;
                         if caption_text.is_empty() {
                             format!("[Photo: {description}]")
                         } else {

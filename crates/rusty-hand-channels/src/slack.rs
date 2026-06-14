@@ -546,6 +546,12 @@ async fn parse_slack_event(
 
     let channel = event["channel"].as_str()?;
 
+    // Slack DMs ("im" channels, whose ids start with 'D') must be governed by
+    // dm_policy rather than group_policy. channel_type is the authoritative
+    // signal; fall back to the channel-id prefix when it is absent.
+    let channel_type = event["channel_type"].as_str().unwrap_or("");
+    let is_group = !(channel_type == "im" || channel.starts_with('D'));
+
     // Filter by allowed channels
     if !allowed_channels.is_empty() && !allowed_channels.contains(&channel.to_string()) {
         return None;
@@ -600,7 +606,7 @@ async fn parse_slack_event(
         content,
         target_agent: None,
         timestamp,
-        is_group: true,
+        is_group,
         thread_id: None,
         metadata: HashMap::new(),
     })
@@ -625,6 +631,27 @@ mod tests {
         assert_eq!(msg.channel, ChannelType::Slack);
         assert_eq!(msg.sender.platform_id, "C789");
         assert!(matches!(msg.content, ChannelContent::Text(ref t) if t == "Hello agent!"));
+        assert!(msg.is_group, "a channel message must be is_group");
+    }
+
+    #[tokio::test]
+    async fn test_parse_slack_dm_is_not_group() {
+        let bot_id = Arc::new(RwLock::new(Some("B123".to_string())));
+        // Authoritative channel_type=im.
+        let im = serde_json::json!({
+            "type": "message", "user": "U456", "channel": "D789",
+            "channel_type": "im", "text": "hi", "ts": "1700000000.000100"
+        });
+        let msg = parse_slack_event(&im, &bot_id, &[]).await.unwrap();
+        assert!(!msg.is_group, "an im must not be is_group");
+
+        // Fallback: channel_type absent, but the id has the DM 'D' prefix.
+        let im2 = serde_json::json!({
+            "type": "message", "user": "U456", "channel": "D000",
+            "text": "hi", "ts": "1700000000.000100"
+        });
+        let msg2 = parse_slack_event(&im2, &bot_id, &[]).await.unwrap();
+        assert!(!msg2.is_group, "a 'D'-prefixed channel must not be is_group");
     }
 
     #[tokio::test]

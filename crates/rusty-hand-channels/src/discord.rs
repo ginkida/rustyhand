@@ -279,12 +279,39 @@ impl ChannelAdapter for DiscordAdapter {
                 info!("Discord gateway connected");
 
                 let (mut ws_tx, mut ws_rx) = ws_stream.split();
-                let mut _heartbeat_interval: Option<u64> = None;
+                let mut heartbeat_interval: Option<u64> = None;
+                // Periodic heartbeat ticker. Discord requires an op-1 heartbeat
+                // every heartbeat_interval ms (delivered in HELLO); without it
+                // the gateway treats the connection as a zombie and closes it
+                // (~45s). Placeholder period until HELLO arrives; the tick arm
+                // is a no-op until heartbeat_interval is set.
+                let mut heartbeat =
+                    tokio::time::interval(std::time::Duration::from_millis(45_000));
+                heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                heartbeat.reset(); // don't fire immediately
 
                 // Inner message loop — returns true if we should reconnect
                 let should_reconnect = 'inner: loop {
                     let msg = tokio::select! {
                         msg = ws_rx.next() => msg,
+                        _ = heartbeat.tick() => {
+                            if heartbeat_interval.is_none() {
+                                continue; // HELLO not yet received
+                            }
+                            let seq = *sequence.read().await;
+                            let hb = serde_json::json!({ "op": opcode::HEARTBEAT, "d": seq });
+                            if let Err(e) = ws_tx
+                                .send(tokio_tungstenite::tungstenite::Message::Text(
+                                    serde_json::to_string(&hb).unwrap(),
+                                ))
+                                .await
+                            {
+                                warn!("Discord: failed to send heartbeat: {e}");
+                                break 'inner true;
+                            }
+                            debug!("Discord: sent heartbeat (seq={seq:?})");
+                            continue;
+                        }
                         _ = shutdown.changed() => {
                             if *shutdown.borrow() {
                                 info!("Discord shutdown requested");
@@ -335,7 +362,16 @@ impl ChannelAdapter for DiscordAdapter {
                         opcode::HELLO => {
                             let interval =
                                 payload["d"]["heartbeat_interval"].as_u64().unwrap_or(45000);
-                            _heartbeat_interval = Some(interval);
+                            heartbeat_interval = Some(interval);
+                            // Start ticking at the server-provided interval; the
+                            // first heartbeat goes out one interval after HELLO.
+                            heartbeat = tokio::time::interval(
+                                std::time::Duration::from_millis(interval.max(1)),
+                            );
+                            heartbeat.set_missed_tick_behavior(
+                                tokio::time::MissedTickBehavior::Delay,
+                            );
+                            heartbeat.reset();
                             debug!("Discord HELLO: heartbeat_interval={interval}ms");
 
                             // Try RESUME if we have a session, otherwise IDENTIFY
@@ -618,13 +654,23 @@ async fn parse_discord_message(
         return None;
     }
 
-    // Filter by allowed guilds
+    // Discord DMs carry no guild_id. Track this so (a) the bridge applies
+    // dm_policy rather than group_policy and (b) a configured guild allowlist
+    // also gates DMs instead of letting them slip through unfiltered.
+    let in_guild = d["guild_id"].as_str().is_some();
+
+    // Filter by allowed guilds. A non-empty allowlist locks the bot to those
+    // guilds; messages from other guilds — and DMs, which belong to no guild —
+    // are rejected.
     if !allowed_guilds.is_empty() {
-        if let Some(guild_id) = d["guild_id"].as_str() {
-            let gid: u64 = guild_id.parse().unwrap_or(0);
-            if !allowed_guilds.contains(&gid) {
-                return None;
+        match d["guild_id"].as_str() {
+            Some(guild_id) => {
+                let gid: u64 = guild_id.parse().unwrap_or(0);
+                if !allowed_guilds.contains(&gid) {
+                    return None;
+                }
             }
+            None => return None, // DM — not part of any allowed guild
         }
     }
 
@@ -677,7 +723,7 @@ async fn parse_discord_message(
         content,
         target_agent: None,
         timestamp,
-        is_group: true,
+        is_group: in_guild,
         thread_id: None,
         metadata: HashMap::new(),
     })
@@ -772,6 +818,43 @@ mod tests {
         // In allowed guilds
         let msg = parse_discord_message(&d, &bot_id, &[999]).await;
         assert!(msg.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_parse_discord_dm_classification_and_allowlist() {
+        let bot_id = Arc::new(RwLock::new(Some("bot123".to_string())));
+        // A DM has no guild_id.
+        let dm = serde_json::json!({
+            "id": "msg1",
+            "channel_id": "dmchan",
+            "content": "hi",
+            "author": { "id": "user1", "username": "bob", "discriminator": "0" },
+            "timestamp": "2024-01-01T00:00:00+00:00"
+        });
+
+        // No allowlist: DM is accepted and classified as NOT a group (so the
+        // bridge applies dm_policy, not group_policy).
+        let msg = parse_discord_message(&dm, &bot_id, &[]).await.unwrap();
+        assert!(!msg.is_group, "a DM must not be is_group");
+
+        // With a guild allowlist, DMs (no guild) are rejected — they belong to
+        // no allowed guild and must not bypass the allowlist.
+        assert!(parse_discord_message(&dm, &bot_id, &[111]).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_parse_discord_guild_message_is_group() {
+        let bot_id = Arc::new(RwLock::new(None));
+        let d = serde_json::json!({
+            "id": "msg1",
+            "channel_id": "ch1",
+            "guild_id": "999",
+            "content": "hi",
+            "author": { "id": "user1", "username": "bob", "discriminator": "0" },
+            "timestamp": "2024-01-01T00:00:00+00:00"
+        });
+        let msg = parse_discord_message(&d, &bot_id, &[]).await.unwrap();
+        assert!(msg.is_group, "a guild message must be is_group");
     }
 
     #[tokio::test]
