@@ -5069,7 +5069,10 @@ pub async fn security_status(State(state): State<Arc<AppState>>) -> impl IntoRes
             },
             "manifest_signing": {
                 "algorithm": "Ed25519",
-                "available": true
+                "available": true,
+                "trust_anchor_configured": false,
+                "provides": "integrity",
+                "note": "Tamper-evidence only — no trusted-key allowlist is configured, so a re-signed manifest is not detected. Signers are not authenticated."
             }
         },
         "runtime_posture": {

@@ -12,8 +12,21 @@
 //! 3. Bundle the signature, public key, and content hash into a
 //!    `SignedManifest` envelope.
 //!
-//! Verification recomputes the hash and checks the Ed25519 signature
-//! against the embedded public key.
+//! Verification recomputes the hash and checks the Ed25519 signature.
+//!
+//! ## Trust model — read before relying on this
+//!
+//! [`SignedManifest::verify`] checks the signature against the public key
+//! **embedded in the envelope**. That proves the envelope is internally
+//! consistent and tamper-evident, but it does NOT establish authenticity: an
+//! attacker who edits the manifest can simply re-sign it with their own key and
+//! embed that key, and `verify()` still returns `Ok`. Treat `verify()` as an
+//! integrity / corruption check only.
+//!
+//! For an actual trust decision — "was this signed by someone I trust?" — use
+//! [`SignedManifest::verify_with_trusted_keys`] with an allowlist of trusted
+//! public keys (a trust anchor). With no trust anchor, signing buys integrity,
+//! not provenance.
 
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -66,11 +79,16 @@ impl SignedManifest {
         }
     }
 
-    /// Verifies the integrity and authenticity of this signed manifest.
+    /// Verifies the **integrity** of this signed manifest (NOT authenticity).
     ///
     /// Checks:
     /// 1. The `content_hash` matches a fresh SHA-256 of `manifest`.
-    /// 2. The `signature` is valid for `content_hash` under `signer_public_key`.
+    /// 2. The `signature` is valid for `content_hash` under the *embedded*
+    ///    `signer_public_key`.
+    ///
+    /// This is tamper-evidence only: it cannot tell a trusted signer from an
+    /// attacker who re-signed with their own key. For trust decisions use
+    /// [`Self::verify_with_trusted_keys`].
     ///
     /// Returns `Ok(())` on success, or `Err(description)` on failure.
     pub fn verify(&self) -> Result<(), String> {
@@ -105,6 +123,32 @@ impl SignedManifest {
             .verify(self.content_hash.as_bytes(), &signature)
             .map_err(|e| format!("signature verification failed: {}", e))
     }
+
+    /// Verifies integrity AND authenticity against a trust anchor.
+    ///
+    /// In addition to [`Self::verify`], this requires the embedded
+    /// `signer_public_key` to be one of `trusted_keys` (each a 32-byte Ed25519
+    /// public key). An empty `trusted_keys` is rejected — without a trust anchor
+    /// there is nothing to authenticate against, so accepting would be the same
+    /// self-attestation hole `verify()` has.
+    pub fn verify_with_trusted_keys(&self, trusted_keys: &[Vec<u8>]) -> Result<(), String> {
+        if trusted_keys.is_empty() {
+            return Err(
+                "no trusted signing keys configured — cannot authenticate the signer".to_string(),
+            );
+        }
+        // Integrity + internal signature first.
+        self.verify()?;
+        // Then require the signer key to be explicitly trusted.
+        if trusted_keys.iter().any(|k| k == &self.signer_public_key) {
+            Ok(())
+        } else {
+            Err(format!(
+                "signer '{}' public key is not in the trusted set",
+                self.signer_id
+            ))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -129,6 +173,38 @@ network = false
         assert_eq!(signed.content_hash, hash_manifest(manifest));
         assert_eq!(signed.signer_id, "test@rustyhand.dev");
         assert!(signed.verify().is_ok());
+    }
+
+    #[test]
+    fn test_verify_with_trusted_keys() {
+        let trusted = SigningKey::generate(&mut OsRng);
+        let attacker = SigningKey::generate(&mut OsRng);
+        let manifest = "[agent]\nname = \"a\"\n";
+
+        let signed = SignedManifest::sign(manifest, &trusted, "trusted@rustyhand.dev");
+        let trusted_pk = trusted.verifying_key().to_bytes().to_vec();
+        let attacker_pk = attacker.verifying_key().to_bytes().to_vec();
+
+        // Trusted key accepted.
+        assert!(signed
+            .verify_with_trusted_keys(std::slice::from_ref(&trusted_pk))
+            .is_ok());
+        // Unknown signer rejected even though verify() (integrity) passes.
+        assert!(signed.verify().is_ok());
+        assert!(signed
+            .verify_with_trusted_keys(std::slice::from_ref(&attacker_pk))
+            .unwrap_err()
+            .contains("not in the trusted set"));
+        // No trust anchor at all is rejected (closes the self-attestation hole).
+        assert!(signed.verify_with_trusted_keys(&[]).is_err());
+
+        // An attacker who re-signs with their own key passes verify() but is
+        // rejected by the trust-anchored check.
+        let forged = SignedManifest::sign(manifest, &attacker, "attacker");
+        assert!(forged.verify().is_ok());
+        assert!(forged
+            .verify_with_trusted_keys(std::slice::from_ref(&trusted_pk))
+            .is_err());
     }
 
     #[test]

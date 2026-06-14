@@ -1359,10 +1359,15 @@ impl RustyHandKernel {
         Ok(agent_id)
     }
 
-    /// Verify a signed manifest envelope (Ed25519 + SHA-256).
+    /// Verify the *integrity* of a signed manifest envelope (Ed25519 + SHA-256).
     ///
     /// Call this before `spawn_agent` when a `SignedManifest` JSON is provided
-    /// alongside the TOML. Returns the verified manifest TOML string on success.
+    /// alongside the TOML. Returns the manifest TOML string on success.
+    ///
+    /// NOTE: this checks the signature against the key embedded in the envelope,
+    /// so it is tamper-evidence only — it does NOT authenticate the signer (a
+    /// re-signed manifest with the attacker's own key would pass). Provenance
+    /// requires a trust anchor; see `SignedManifest::verify_with_trusted_keys`.
     pub fn verify_signed_manifest(&self, signed_json: &str) -> KernelResult<String> {
         let signed: rusty_hand_types::manifest_signing::SignedManifest =
             serde_json::from_str(signed_json).map_err(|e| {
@@ -1375,7 +1380,7 @@ impl RustyHandKernel {
                 "Manifest signature verification failed: {e}"
             )))
         })?;
-        info!(signer = %signed.signer_id, hash = %signed.content_hash, "Signed manifest verified");
+        info!(signer = %signed.signer_id, hash = %signed.content_hash, "Signed manifest integrity verified (signer not authenticated — no trust anchor)");
         Ok(signed.manifest)
     }
 
