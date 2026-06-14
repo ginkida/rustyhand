@@ -285,8 +285,7 @@ impl ChannelAdapter for DiscordAdapter {
                 // the gateway treats the connection as a zombie and closes it
                 // (~45s). Placeholder period until HELLO arrives; the tick arm
                 // is a no-op until heartbeat_interval is set.
-                let mut heartbeat =
-                    tokio::time::interval(std::time::Duration::from_millis(45_000));
+                let mut heartbeat = tokio::time::interval(std::time::Duration::from_millis(45_000));
                 heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                 heartbeat.reset(); // don't fire immediately
 
@@ -365,12 +364,11 @@ impl ChannelAdapter for DiscordAdapter {
                             heartbeat_interval = Some(interval);
                             // Start ticking at the server-provided interval; the
                             // first heartbeat goes out one interval after HELLO.
-                            heartbeat = tokio::time::interval(
-                                std::time::Duration::from_millis(interval.max(1)),
-                            );
-                            heartbeat.set_missed_tick_behavior(
-                                tokio::time::MissedTickBehavior::Delay,
-                            );
+                            heartbeat = tokio::time::interval(std::time::Duration::from_millis(
+                                interval.max(1),
+                            ));
+                            heartbeat
+                                .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                             heartbeat.reset();
                             debug!("Discord HELLO: heartbeat_interval={interval}ms");
 

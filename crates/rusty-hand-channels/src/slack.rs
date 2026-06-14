@@ -651,7 +651,10 @@ mod tests {
             "text": "hi", "ts": "1700000000.000100"
         });
         let msg2 = parse_slack_event(&im2, &bot_id, &[]).await.unwrap();
-        assert!(!msg2.is_group, "a 'D'-prefixed channel must not be is_group");
+        assert!(
+            !msg2.is_group,
+            "a 'D'-prefixed channel must not be is_group"
+        );
     }
 
     #[tokio::test]

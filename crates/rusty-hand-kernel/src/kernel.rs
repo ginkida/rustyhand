@@ -1434,7 +1434,11 @@ impl RustyHandKernel {
         match result {
             Ok(result) => {
                 // Record token usage for quota tracking
-                self.scheduler.record_usage(agent_id, &result.total_usage, result.iterations.saturating_sub(1) as u64);
+                self.scheduler.record_usage(
+                    agent_id,
+                    &result.total_usage,
+                    result.iterations.saturating_sub(1) as u64,
+                );
 
                 // Update last active time
                 if let Err(e) = self.registry.set_state(agent_id, AgentState::Running) {
@@ -1532,9 +1536,11 @@ impl RustyHandKernel {
                                 usage: result.total_usage,
                             })
                             .await;
-                        kernel_clone
-                            .scheduler
-                            .record_usage(agent_id, &result.total_usage, result.iterations.saturating_sub(1) as u64);
+                        kernel_clone.scheduler.record_usage(
+                            agent_id,
+                            &result.total_usage,
+                            result.iterations.saturating_sub(1) as u64,
+                        );
                         let _ = kernel_clone
                             .registry
                             .set_state(agent_id, AgentState::Running);
@@ -1833,9 +1839,11 @@ impl RustyHandKernel {
                         append_daily_memory_log(workspace, &result.response);
                     }
 
-                    kernel_clone
-                        .scheduler
-                        .record_usage(agent_id, &result.total_usage, result.iterations.saturating_sub(1) as u64);
+                    kernel_clone.scheduler.record_usage(
+                        agent_id,
+                        &result.total_usage,
+                        result.iterations.saturating_sub(1) as u64,
+                    );
                     let _ = kernel_clone
                         .registry
                         .set_state(agent_id, AgentState::Running);

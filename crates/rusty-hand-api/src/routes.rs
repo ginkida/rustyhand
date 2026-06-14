@@ -8426,7 +8426,9 @@ pub async fn config_set(
             Err(e) => {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"status": "error", "error": format!("failed to read config.toml: {e}")})),
+                    Json(
+                        serde_json::json!({"status": "error", "error": format!("failed to read config.toml: {e}")}),
+                    ),
                 );
             }
         }
@@ -8456,7 +8458,9 @@ pub async fn config_set(
                 _ => {
                     return (
                         StatusCode::BAD_REQUEST,
-                        Json(serde_json::json!({"status": "error", "error": format!("'{}' is not a table section", parts[0])})),
+                        Json(
+                            serde_json::json!({"status": "error", "error": format!("'{}' is not a table section", parts[0])}),
+                        ),
                     );
                 }
             }
@@ -8470,7 +8474,9 @@ pub async fn config_set(
                 _ => {
                     return (
                         StatusCode::BAD_REQUEST,
-                        Json(serde_json::json!({"status": "error", "error": format!("'{}' is not a table section", parts[0])})),
+                        Json(
+                            serde_json::json!({"status": "error", "error": format!("'{}' is not a table section", parts[0])}),
+                        ),
                     );
                 }
             };
@@ -8484,7 +8490,9 @@ pub async fn config_set(
                 _ => {
                     return (
                         StatusCode::BAD_REQUEST,
-                        Json(serde_json::json!({"status": "error", "error": format!("'{}.{}' is not a table section", parts[0], parts[1])})),
+                        Json(
+                            serde_json::json!({"status": "error", "error": format!("'{}.{}' is not a table section", parts[0], parts[1])}),
+                        ),
                     );
                 }
             }
