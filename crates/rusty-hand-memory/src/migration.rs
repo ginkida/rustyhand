@@ -5,7 +5,7 @@
 use rusqlite::Connection;
 
 /// Current schema version.
-pub const SCHEMA_VERSION: u32 = 9;
+pub const SCHEMA_VERSION: u32 = 10;
 
 /// Run all migrations to bring the database up to date.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -45,6 +45,10 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     if current_version < 9 {
         migrate_v9(conn)?;
+    }
+
+    if current_version < 10 {
+        migrate_v10(conn)?;
     }
 
     set_schema_version(conn, SCHEMA_VERSION)?;
@@ -366,6 +370,28 @@ fn migrate_v9(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Version 10: Make `agents.session_id` part of the canonical schema.
+///
+/// It was previously added lazily by `StructuredStore::save_agent` via a
+/// best-effort `ALTER TABLE`. On a DB where no agent had been saved yet, the
+/// column was absent — which broke database import/restore: a snapshot exported
+/// from an install that HAD the column produced
+/// `INSERT INTO agents (..., session_id) ...` against a table without it,
+/// failing the whole restore with "table agents has no column named session_id".
+fn migrate_v10(conn: &Connection) -> Result<(), rusqlite::Error> {
+    if !column_exists(conn, "agents", "session_id") {
+        conn.execute(
+            "ALTER TABLE agents ADD COLUMN session_id TEXT DEFAULT ''",
+            [],
+        )?;
+    }
+    conn.execute(
+        "INSERT OR IGNORE INTO migrations (version, applied_at, description) VALUES (10, datetime('now'), 'Add agents.session_id to canonical schema (was lazy ALTER) — fixes DB import')",
+        [],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,5 +423,17 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         run_migrations(&conn).unwrap();
         run_migrations(&conn).unwrap(); // Should not error
+    }
+
+    #[test]
+    fn test_agents_session_id_is_canonical() {
+        // Regression: agents.session_id used to be added only by the lazy
+        // ALTER in StructuredStore::save_agent, so a freshly-migrated DB that
+        // had never saved an agent lacked the column — which broke DB import
+        // (INSERT INTO agents (..., session_id) against a table without it).
+        // It must now be present straight after migrations on a clean DB.
+        let conn = Connection::open_in_memory().unwrap();
+        run_migrations(&conn).unwrap();
+        assert!(column_exists(&conn, "agents", "session_id"));
     }
 }

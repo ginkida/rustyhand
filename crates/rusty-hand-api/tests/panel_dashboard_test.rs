@@ -552,7 +552,7 @@ async fn dashboard_does_not_hardcode_stale_version_literals() {
     assert!(
         !body.contains("schema v8"),
         "dashboard must not hardcode `schema v8` — the live value is \
-         health.schema_version (currently 9). Hardcoded suffix rots."
+         health.schema_version (currently 10). Hardcoded suffix rots."
     );
 
     // The new wiring must be in place: both fields are read from health.
