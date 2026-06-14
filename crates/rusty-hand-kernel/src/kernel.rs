@@ -3154,6 +3154,17 @@ impl RustyHandKernel {
         info!(agent = %entry.name, old_id = %agent_id, "Agent stopped for restart (sessions preserved)");
 
         let new_id = self.spawn_agent(entry.manifest)?;
+
+        // Re-point the agent's cron jobs to the new id, or they'd keep firing
+        // against the dead old id and silently auto-disable after failures.
+        let moved = self.cron_scheduler.reassign_agent(agent_id, new_id);
+        if moved > 0 {
+            if let Err(e) = self.cron_scheduler.persist() {
+                warn!(error = %e, "Failed to persist cron jobs after restart reassignment");
+            }
+            info!(old_id = %agent_id, new_id = %new_id, count = moved, "Reassigned cron jobs to restarted agent");
+        }
+
         info!(agent = %entry.name, new_id = %new_id, "Agent restarted");
         Ok((agent_id, new_id))
     }
@@ -3999,6 +4010,14 @@ impl RustyHandKernel {
         }
 
         self.supervisor.shutdown();
+
+        // Persist the cron schedule directly. The cron tick loop has its own
+        // persist-on-shutdown branch, but it only runs on the loop's next 15s
+        // tick — and we abort that task just below, before it can observe the
+        // shutdown flag — so persist here to avoid losing recent schedule state.
+        if let Err(e) = self.cron_scheduler.persist() {
+            warn!(error = %e, "Failed to persist cron schedule during shutdown");
+        }
 
         // Abort background system tasks (cleanup loops, heartbeat, cron, etc.)
         if let Ok(mut handles) = self.background_handles.lock() {

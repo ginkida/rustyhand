@@ -190,6 +190,21 @@ impl CronScheduler {
         }
     }
 
+    /// Re-point every job owned by `old_id` to `new_id`. Used when an agent is
+    /// restarted and gets a fresh AgentId, so its scheduled jobs keep firing
+    /// against the live agent instead of orphaning on the dead id. Returns the
+    /// number of jobs moved.
+    pub fn reassign_agent(&self, old_id: AgentId, new_id: AgentId) -> usize {
+        let mut moved = 0;
+        for mut entry in self.jobs.iter_mut() {
+            if entry.value().job.agent_id == old_id {
+                entry.value_mut().job.agent_id = new_id;
+                moved += 1;
+            }
+        }
+        moved
+    }
+
     // -- Queries ------------------------------------------------------------
 
     /// Get a single job by ID.
@@ -509,6 +524,24 @@ mod tests {
         // next_run should have been computed
         assert!(fetched.next_run.is_some());
         assert_eq!(sched.total_jobs(), 1);
+    }
+
+    #[test]
+    fn test_reassign_agent_moves_jobs() {
+        let (sched, _tmp) = make_scheduler(100);
+        let old = AgentId::new();
+        let new = AgentId::new();
+        let other = AgentId::new();
+        sched.add_job(make_job(old), false).unwrap();
+        sched.add_job(make_job(old), false).unwrap();
+        sched.add_job(make_job(other), false).unwrap();
+
+        let moved = sched.reassign_agent(old, new);
+        assert_eq!(moved, 2);
+        assert_eq!(sched.list_jobs(old).len(), 0);
+        assert_eq!(sched.list_jobs(new).len(), 2);
+        // Unrelated agent's job is untouched.
+        assert_eq!(sched.list_jobs(other).len(), 1);
     }
 
     // -- test_remove_job ----------------------------------------------------
