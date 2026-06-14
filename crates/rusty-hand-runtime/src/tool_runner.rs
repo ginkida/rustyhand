@@ -4120,7 +4120,11 @@ async fn tool_config_set(
     let mut table: toml::value::Table = if config_path.exists() {
         let s = std::fs::read_to_string(&config_path)
             .map_err(|e| format!("config_set: read failed: {e}"))?;
-        toml::from_str(&s).unwrap_or_default()
+        // Refuse on a corrupt existing config rather than silently resetting it
+        // to empty (which would drop every other field, keeping only this one).
+        toml::from_str(&s).map_err(|e| {
+            format!("config_set: existing config.toml is not valid TOML ({e}); refusing to overwrite — fix or remove it first")
+        })?
     } else {
         toml::value::Table::new()
     };
@@ -4209,7 +4213,12 @@ async fn tool_config_replace(
     let current_table: toml::value::Table = if config_path.exists() {
         let s = std::fs::read_to_string(&config_path)
             .map_err(|e| format!("config_replace: read current failed: {e}"))?;
-        toml::from_str(&s).unwrap_or_default()
+        // Refuse on a corrupt existing config: <redacted> placeholders in the
+        // new TOML could not be restored, silently writing literal placeholders
+        // over real secrets. Remove the file first to replace from scratch.
+        toml::from_str(&s).map_err(|e| {
+            format!("config_replace: existing config.toml is not valid TOML ({e}); cannot restore redacted secrets — fix or remove it first")
+        })?
     } else {
         toml::value::Table::new()
     };
@@ -4241,41 +4250,14 @@ async fn tool_config_replace(
 /// HTTP `mask_config_secrets` helper so MCP `config_get` matches the
 /// `GET /api/config/export` view byte-for-byte.
 fn mask_secrets_in_toml(toml_text: &str) -> String {
-    let mut out = String::with_capacity(toml_text.len());
-    for line in toml_text.lines() {
-        let trimmed = line.trim_start();
-        let key = trimmed
-            .find('=')
-            .map(|i| trimmed[..i].trim().to_lowercase());
-        let is_secret = match key {
-            Some(k) => is_secret_field_name(&k),
-            None => false,
-        };
-        if is_secret {
-            if let Some(eq) = line.find('=') {
-                let (lhs, _) = line.split_at(eq + 1);
-                out.push_str(lhs);
-                out.push_str(" \"<redacted>\"");
-                out.push('\n');
-                continue;
-            }
-        }
-        out.push_str(line);
-        out.push('\n');
-    }
-    out
+    // Delegate to the shared byte-robust masker so config_get matches the HTTP
+    // export view exactly — including secrets nested inside inline tables and
+    // arrays-of-tables, which the old leading-key line scanner leaked.
+    rusty_hand_types::secret_mask::mask_toml_secrets(toml_text)
 }
 
 fn is_secret_field_name(k: &str) -> bool {
-    k == "api_key"
-        || k == "password"
-        || k == "token"
-        || k == "secret"
-        || k == "bearer_token"
-        || k.ends_with("_key")
-        || k.ends_with("_token")
-        || k.ends_with("_password")
-        || k.ends_with("_secret")
+    rusty_hand_types::secret_mask::is_secret_key_name(k)
 }
 
 /// Walk `new_table` and substitute `<redacted>` placeholders with the
@@ -4299,6 +4281,26 @@ fn restore_redacted_in_table(
                 } else {
                     let empty = toml::value::Table::new();
                     restore_redacted_in_table(nested, &empty);
+                }
+            }
+            toml::Value::Array(arr) => {
+                // Recurse into arrays-of-tables (e.g. fallback_models = [{...}]),
+                // matching elements to the current array by index so redacted
+                // secrets nested inside inline tables are restored, not written
+                // back as literal "<redacted>".
+                let curr_arr = match current_table.get(key) {
+                    Some(toml::Value::Array(a)) => Some(a.as_slice()),
+                    _ => None,
+                };
+                for (idx, elem) in arr.iter_mut().enumerate() {
+                    if let toml::Value::Table(nested) = elem {
+                        let empty = toml::value::Table::new();
+                        let curr_nested = curr_arr
+                            .and_then(|a| a.get(idx))
+                            .and_then(|v| v.as_table())
+                            .unwrap_or(&empty);
+                        restore_redacted_in_table(nested, curr_nested);
+                    }
                 }
             }
             _ => {}

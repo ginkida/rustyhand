@@ -4132,116 +4132,9 @@ pub async fn export_config_toml(State(state): State<Arc<AppState>>) -> axum::res
 /// `<ident> = "..."` pair on the line and redacts each value whose key
 /// matches.
 fn mask_config_secrets(toml: &str) -> String {
-    let mut out = String::with_capacity(toml.len());
-    for line in toml.lines() {
-        out.push_str(&mask_secrets_in_line(line));
-        out.push('\n');
-    }
-    out
-}
-
-/// Walk a single TOML line and redact any `key = "..."` pair whose key
-/// matches a secret pattern. Preserves the line otherwise (whitespace,
-/// comments, surrounding inline-table braces).
-fn mask_secrets_in_line(line: &str) -> String {
-    let bytes = line.as_bytes();
-    let mut out = String::with_capacity(line.len());
-    let mut i = 0usize;
-    while i < bytes.len() {
-        // Find the next `ident = "...something..."` pair.
-        let key_start = match find_ident_start(bytes, i) {
-            Some(k) => k,
-            None => {
-                out.push_str(&line[i..]);
-                break;
-            }
-        };
-        out.push_str(&line[i..key_start]);
-        let key_end = find_ident_end(bytes, key_start);
-        let key = &line[key_start..key_end];
-
-        // After ident, skip whitespace and check for `=`.
-        let mut j = key_end;
-        while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
-            j += 1;
-        }
-        if j >= bytes.len() || bytes[j] != b'=' {
-            // Not a key=value pair — emit the ident and continue.
-            out.push_str(key);
-            i = key_end;
-            continue;
-        }
-        // Skip `=` and any whitespace.
-        let eq = j;
-        j += 1;
-        while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
-            j += 1;
-        }
-        // Only redact when the value is a quoted string. Numbers,
-        // booleans, arrays, and inline tables are NEVER secrets in
-        // RustyHand's config schema, and trying to redact them would
-        // produce malformed TOML.
-        if j >= bytes.len() || bytes[j] != b'"' {
-            out.push_str(&line[key_start..=eq]);
-            i = eq + 1;
-            continue;
-        }
-        // Find the matching closing quote, respecting `\"` escapes.
-        let value_start = j;
-        let mut k = j + 1;
-        while k < bytes.len() {
-            if bytes[k] == b'\\' && k + 1 < bytes.len() {
-                k += 2;
-                continue;
-            }
-            if bytes[k] == b'"' {
-                break;
-            }
-            k += 1;
-        }
-        let value_end = if k < bytes.len() { k + 1 } else { k };
-
-        if is_secret_key_name(key) {
-            out.push_str(&line[key_start..value_start]);
-            out.push_str("\"<redacted>\"");
-        } else {
-            out.push_str(&line[key_start..value_end]);
-        }
-        i = value_end;
-    }
-    out
-}
-
-/// Find the start of the next bare TOML identifier (letters/digits/`_`/`-`)
-/// at or after `i`. Returns None if no identifier remains on the line.
-fn find_ident_start(bytes: &[u8], from: usize) -> Option<usize> {
-    let mut i = from;
-    while i < bytes.len() {
-        let c = bytes[i];
-        if c.is_ascii_alphanumeric() || c == b'_' || c == b'-' {
-            // But identifiers can only start where the preceding byte is
-            // whitespace, `{`, `,`, or start-of-line — otherwise we're
-            // mid-value (e.g. inside a string).
-            if i == from || matches!(bytes[i - 1], b' ' | b'\t' | b'{' | b',' | b'\n') {
-                return Some(i);
-            }
-        }
-        i += 1;
-    }
-    None
-}
-
-fn find_ident_end(bytes: &[u8], from: usize) -> usize {
-    let mut i = from;
-    while i < bytes.len() {
-        let c = bytes[i];
-        if c.is_ascii_alphanumeric() || c == b'_' || c == b'-' {
-            i += 1;
-        } else {
-            break;
-        }
-    }
-    i
+    // Shared byte-robust masker (rusty-hand-types) — also used by the MCP
+    // config_get tool, so the two views stay identical.
+    rusty_hand_types::secret_mask::mask_toml_secrets(toml)
 }
 
 /// GET /api/config — Get kernel configuration (secrets redacted).
@@ -8703,22 +8596,33 @@ fn restore_redacted_secrets(
                     restore_redacted_secrets(nested, &empty);
                 }
             }
+            toml::Value::Array(arr) => {
+                // Recurse into arrays-of-tables (e.g. fallback_models = [{...}]),
+                // matching elements by index, so redacted secrets nested inside
+                // inline tables are restored — mask_config_secrets redacts them,
+                // so this side must be symmetric or it writes literal "<redacted>".
+                let current_arr = match current_table.get(key) {
+                    Some(toml::Value::Array(a)) => Some(a.as_slice()),
+                    _ => None,
+                };
+                for (idx, elem) in arr.iter_mut().enumerate() {
+                    if let toml::Value::Table(nested) = elem {
+                        let empty = toml::value::Table::new();
+                        let current_nested = current_arr
+                            .and_then(|a| a.get(idx))
+                            .and_then(|v| v.as_table())
+                            .unwrap_or(&empty);
+                        restore_redacted_secrets(nested, current_nested);
+                    }
+                }
+            }
             _ => {}
         }
     }
 }
 
 fn is_secret_key_name(k: &str) -> bool {
-    let k = k.to_lowercase();
-    k == "api_key"
-        || k == "password"
-        || k == "token"
-        || k == "secret"
-        || k == "bearer_token"
-        || k.ends_with("_key")
-        || k.ends_with("_token")
-        || k.ends_with("_password")
-        || k.ends_with("_secret")
+    rusty_hand_types::secret_mask::is_secret_key_name(k)
 }
 
 /// Convert a serde_json::Value to a toml::Value. Handles primitives,
