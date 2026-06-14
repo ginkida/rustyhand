@@ -6560,6 +6560,20 @@ pub async fn create_skill(
 /// secrets.env. Now the restrictive mode is applied at open time and is
 /// in force before any bytes are written.
 fn write_secret_env(path: &std::path::Path, key: &str, value: &str) -> Result<(), std::io::Error> {
+    // secrets.env is line-oriented KEY=VALUE. Reject control chars that would
+    // let a value inject extra lines (newline injection) or break parsing.
+    if key.contains('\n') || key.contains('\r') || key.contains('=') {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "secret key must not contain newlines or '='",
+        ));
+    }
+    if value.contains('\n') || value.contains('\r') {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "secret value must not contain newlines",
+        ));
+    }
     let mut lines: Vec<String> = if path.exists() {
         std::fs::read_to_string(path)?
             .lines()
@@ -6699,8 +6713,13 @@ fn upsert_channel_config(
         .and_then(|v| v.as_table_mut())
         .ok_or("channels is not a table")?;
 
-    // Build channel sub-table
-    let mut ch_table = toml::map::Map::new();
+    // Merge into the existing channel sub-table (if any) rather than replacing
+    // it, so re-configuring with a partial field set doesn't wipe previously-set
+    // fields (the form only submits non-empty fields).
+    let mut ch_table = match channels_table.get(channel_name) {
+        Some(toml::Value::Table(existing)) => existing.clone(),
+        _ => toml::map::Map::new(),
+    };
     for (k, v) in fields {
         ch_table.insert(k.clone(), toml::Value::String(v.clone()));
     }

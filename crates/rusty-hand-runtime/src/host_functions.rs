@@ -9,7 +9,6 @@
 use crate::sandbox::GuestState;
 use rusty_hand_types::capability::{capability_matches, Capability};
 use serde_json::json;
-use std::net::ToSocketAddrs;
 use std::path::{Component, Path};
 use tracing::debug;
 
@@ -123,56 +122,12 @@ fn safe_resolve_parent(path: &str) -> Result<std::path::PathBuf, serde_json::Val
 /// SSRF protection: check if a hostname resolves to a private/internal IP.
 /// This defeats DNS rebinding by checking the RESOLVED address, not the hostname.
 fn is_ssrf_target(url: &str) -> Result<(), serde_json::Value> {
-    // Only allow http:// and https:// schemes (block file://, gopher://, ftp://)
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err(json!({"error": "Only http:// and https:// URLs are allowed"}));
-    }
-
-    let host = extract_host_from_url(url);
-    let hostname = host.split(':').next().unwrap_or(&host);
-
-    // Check hostname-based blocklist first (catches metadata endpoints)
-    let blocked_hostnames = [
-        "localhost",
-        "metadata.google.internal",
-        "metadata.aws.internal",
-        "instance-data",
-        "169.254.169.254",
-    ];
-    if blocked_hostnames.contains(&hostname) {
-        return Err(json!({"error": format!("SSRF blocked: {hostname} is a restricted hostname")}));
-    }
-
-    // Resolve DNS and check every returned IP
-    let port = if url.starts_with("https") { 443 } else { 80 };
-    let socket_addr = format!("{hostname}:{port}");
-    if let Ok(addrs) = socket_addr.to_socket_addrs() {
-        for addr in addrs {
-            let ip = addr.ip();
-            if ip.is_loopback() || ip.is_unspecified() || is_private_ip(&ip) {
-                return Err(json!({"error": format!(
-                    "SSRF blocked: {hostname} resolves to private IP {ip}"
-                )}));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn is_private_ip(ip: &std::net::IpAddr) -> bool {
-    match ip {
-        std::net::IpAddr::V4(v4) => {
-            let octets = v4.octets();
-            matches!(
-                octets,
-                [10, ..] | [172, 16..=31, ..] | [192, 168, ..] | [169, 254, ..]
-            )
-        }
-        std::net::IpAddr::V6(v6) => {
-            let segments = v6.segments();
-            (segments[0] & 0xfe00) == 0xfc00 || (segments[0] & 0xffc0) == 0xfe80
-        }
-    }
+    // Delegate to the hardened web_fetch SSRF check (same crate) so the WASM
+    // net_fetch path has full parity: IPv4-mapped IPv6, .onion/.internal/.local
+    // suffixes, kubernetes.default, bracketed IPv6 literals, and the userinfo@
+    // bypass are all covered there. Keeping a second weaker copy here invited
+    // exactly the divergence this fixes.
+    crate::web_fetch::check_ssrf(url).map_err(|e| json!({ "error": e }))
 }
 
 // ---------------------------------------------------------------------------
@@ -654,14 +609,13 @@ mod tests {
     }
 
     #[test]
-    fn test_is_private_ip() {
-        use std::net::IpAddr;
-        assert!(is_private_ip(&"10.0.0.1".parse::<IpAddr>().unwrap()));
-        assert!(is_private_ip(&"172.16.0.1".parse::<IpAddr>().unwrap()));
-        assert!(is_private_ip(&"192.168.1.1".parse::<IpAddr>().unwrap()));
-        assert!(is_private_ip(&"169.254.169.254".parse::<IpAddr>().unwrap()));
-        assert!(!is_private_ip(&"8.8.8.8".parse::<IpAddr>().unwrap()));
-        assert!(!is_private_ip(&"1.1.1.1".parse::<IpAddr>().unwrap()));
+    fn test_ssrf_blocks_v4_mapped_ipv6_and_suffixes() {
+        // Parity with web_fetch: IPv4-mapped IPv6 to metadata and restricted
+        // domain suffixes must be blocked on the WASM net_fetch path too.
+        assert!(is_ssrf_target("http://service.internal/api").is_err());
+        assert!(is_ssrf_target("http://host.local/api").is_err());
+        assert!(is_ssrf_target("http://evil.onion/api").is_err());
+        assert!(is_ssrf_target("http://kubernetes.default/api").is_err());
     }
 
     #[test]

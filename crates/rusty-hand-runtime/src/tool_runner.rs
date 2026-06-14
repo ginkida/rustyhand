@@ -1694,6 +1694,13 @@ async fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<u64> {
     let mut stack = vec![(src.to_path_buf(), dst.to_path_buf())];
     while let Some((s, d)) = stack.pop() {
         let meta = tokio::fs::symlink_metadata(&s).await?;
+        if meta.is_symlink() {
+            // Don't follow symlinks nested in the source tree: fs::copy would
+            // pull the target's contents (possibly outside the workspace) in,
+            // and a preserved symlink would itself escape containment. The
+            // top-level source is already canonicalised + containment-checked.
+            continue;
+        }
         if meta.is_dir() {
             tokio::fs::create_dir_all(&d).await?;
             let mut entries = tokio::fs::read_dir(&s).await?;
