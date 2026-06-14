@@ -3462,7 +3462,14 @@ pub async fn logs_stream(
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-            let entries = state.kernel.audit_log.recent(200);
+            // First poll: bounded backfill of recent history. After that, tail
+            // every entry since last_seq via a cursor — a fixed recent(N) window
+            // would silently drop entries during bursts exceeding N per tick.
+            let entries = if first_poll {
+                state.kernel.audit_log.recent(200)
+            } else {
+                state.kernel.audit_log.since_seq(last_seq)
+            };
 
             for entry in &entries {
                 // On first poll, send all existing entries as backfill.
@@ -3662,11 +3669,26 @@ async fn execute_knowledge_query(
                 "properties": m.target.properties,
             }));
         }
+        // RelationType serializes as a snake_case string for unit variants and
+        // {"custom": "..."} for Custom — flatten both to a plain label and emit
+        // it under `relation` (what the dashboard reads), not a double-encoded
+        // JSON string under `type` (which left edge labels blank).
+        let relation_label = match serde_json::to_value(&m.relation.relation) {
+            Ok(serde_json::Value::String(s)) => s,
+            Ok(serde_json::Value::Object(map)) => map
+                .values()
+                .next()
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
         edges.push(serde_json::json!({
             "id": m.relation.id,
             "source": m.source.id,
             "target": m.target.id,
-            "type": serde_json::to_string(&m.relation.relation).unwrap_or_default(),
+            "relation": relation_label,
+            "type": relation_label,
             "confidence": m.relation.confidence,
             "properties": m.relation.properties,
         }));
@@ -5977,10 +5999,16 @@ pub async fn list_agent_memories(
         ..Default::default()
     };
 
+    // Scan a bounded but generous window so `total` reflects the real match
+    // count (for pagination), not just the current page. Without this, total
+    // was capped at limit+offset, so the client could never tell there were
+    // more pages. (No dedicated count query exists for semantic recall.)
+    const MEMORY_SCAN_CAP: usize = 1000;
+    let scan = (limit + offset).max(MEMORY_SCAN_CAP);
     match state
         .kernel
         .memory
-        .recall_with_embedding(&q, limit + offset, Some(filter), None)
+        .recall_with_embedding(&q, scan, Some(filter), None)
     {
         Ok(fragments) => {
             let total = fragments.len();
@@ -8376,11 +8404,28 @@ pub async fn config_set(
 
     let config_path = state.kernel.config.home_dir.join("config.toml");
 
-    // Read existing config as a TOML table, or start fresh
+    // Read existing config as a TOML table, or start fresh. Refuse on a
+    // corrupt/unreadable existing file instead of silently resetting it to
+    // empty (which would drop every other field, keeping only this one).
     let mut table: toml::value::Table = if config_path.exists() {
         match std::fs::read_to_string(&config_path) {
-            Ok(content) => toml::from_str(&content).unwrap_or_default(),
-            Err(_) => toml::value::Table::new(),
+            Ok(content) => match toml::from_str(&content) {
+                Ok(t) => t,
+                Err(e) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({"status": "error", "error": format!(
+                            "existing config.toml is not valid TOML ({e}); refusing to overwrite — fix or remove it first"
+                        )})),
+                    );
+                }
+            },
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"status": "error", "error": format!("failed to read config.toml: {e}")})),
+                );
+            }
         }
     } else {
         toml::value::Table::new()
@@ -8389,7 +8434,9 @@ pub async fn config_set(
     // Convert JSON value to TOML value
     let toml_val = json_to_toml_value(&value);
 
-    // Parse "section.key" path and set value
+    // Parse "section.key" path and set value. If a path segment is already
+    // occupied by a non-table scalar, fail loudly rather than silently dropping
+    // the value while still reporting success.
     let parts: Vec<&str> = path.split('.').collect();
     match parts.len() {
         1 => {
@@ -8399,20 +8446,43 @@ pub async fn config_set(
             let section = table
                 .entry(parts[0].to_string())
                 .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
-            if let toml::Value::Table(ref mut t) = section {
-                t.insert(parts[1].to_string(), toml_val);
+            match section {
+                toml::Value::Table(t) => {
+                    t.insert(parts[1].to_string(), toml_val);
+                }
+                _ => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({"status": "error", "error": format!("'{}' is not a table section", parts[0])})),
+                    );
+                }
             }
         }
         3 => {
             let section = table
                 .entry(parts[0].to_string())
                 .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
-            if let toml::Value::Table(ref mut t) = section {
-                let sub = t
-                    .entry(parts[1].to_string())
-                    .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
-                if let toml::Value::Table(ref mut t2) = sub {
+            let t = match section {
+                toml::Value::Table(t) => t,
+                _ => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({"status": "error", "error": format!("'{}' is not a table section", parts[0])})),
+                    );
+                }
+            };
+            let sub = t
+                .entry(parts[1].to_string())
+                .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
+            match sub {
+                toml::Value::Table(t2) => {
                     t2.insert(parts[2].to_string(), toml_val);
+                }
+                _ => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({"status": "error", "error": format!("'{}.{}' is not a table section", parts[0], parts[1])})),
+                    );
                 }
             }
         }

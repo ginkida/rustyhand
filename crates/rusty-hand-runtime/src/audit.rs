@@ -358,6 +358,19 @@ impl AuditLog {
         let start = entries.len().saturating_sub(n);
         entries[start..].to_vec()
     }
+
+    /// Returns all entries with `seq` strictly greater than `after`, in order.
+    /// Unlike `recent(n)`, this never drops entries during a burst that exceeds
+    /// a fixed window — used by the live log stream to tail without gaps.
+    pub fn since_seq(&self, after: u64) -> Vec<AuditEntry> {
+        let entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        // Entries are appended in monotonically increasing seq order.
+        entries
+            .iter()
+            .skip_while(|e| e.seq <= after)
+            .cloned()
+            .collect()
+    }
 }
 
 impl Default for AuditLog {
@@ -369,6 +382,22 @@ impl Default for AuditLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_since_seq_tails_without_gaps() {
+        let log = AuditLog::new();
+        for i in 0..10 {
+            log.record("a", AuditAction::ToolInvoke, format!("call {i}"), "ok");
+        }
+        let all = log.recent(100);
+        let cursor = all[2].seq; // after the 3rd entry
+        let tail = log.since_seq(cursor);
+        // Strictly-greater: 10 entries, after the 3rd -> 7 remain.
+        assert_eq!(tail.len(), 7);
+        assert!(tail.iter().all(|e| e.seq > cursor));
+        // Tailing past the tip yields nothing.
+        assert!(log.since_seq(all.last().unwrap().seq).is_empty());
+    }
 
     #[test]
     fn test_audit_chain_integrity() {

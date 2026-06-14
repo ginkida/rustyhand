@@ -4620,7 +4620,7 @@ function ChannelConfigModal({ channel, onClose, onSaved }) {
 
 /* ============================== ANALYTICS ============================== */
 function AnalyticsPage() {
-  // /api/usage/daily returns up to 30 daily buckets: {days:[{date, cost_usd, requests}], today_cost_usd, first_event_date}.
+  // /api/usage/daily returns daily buckets: {days:[{date, cost_usd, tokens, calls}], today_cost_usd, first_event_date}.
   // /api/usage/by-model returns per-model spend totals.
   // /api/usage/summary returns aggregate totals: call_count, total_tool_calls, total_*_tokens, total_cost_usd.
   // /api/usage returns per-agent token + tool_call counts (the legacy "usage_stats" handler).
@@ -4654,7 +4654,7 @@ function AnalyticsPage() {
   const days = (daily && daily.days) || [];
   const dailyCosts = days.map(d => Number(d.cost_usd || 0));
   const totalSpend7d = dailyCosts.slice(-7).reduce((s, v) => s + v, 0);
-  const totalRequests7d = days.slice(-7).reduce((s, d) => s + (d.requests || 0), 0);
+  const totalRequests7d = days.slice(-7).reduce((s, d) => s + (d.calls || 0), 0);
   const avgPerDay = days.length ? (totalRequests7d / Math.min(7, days.length)) : 0;
   const modelRows = Array.isArray(byModel) ? byModel : (byModel && byModel.models) || [];
   const maxModelSpend = Math.max(0.0001, ...modelRows.map(m => Number(m.spend || m.total_cost_usd || m.cost_usd || 0)));
@@ -4688,7 +4688,7 @@ function AnalyticsPage() {
             const csv = rowsToCsv(days, [
               { key: "date", label: "date" },
               { key: "cost_usd", label: "cost_usd", format: v => Number(v || 0).toFixed(6) },
-              { key: "requests", label: "requests" },
+              { key: "calls", label: "requests" },
             ]);
             downloadBlob(`rustyhand-usage-${new Date().toISOString().slice(0, 10)}.csv`, csv, "text/csv");
           }}><I.download/> CSV</button>
@@ -4697,7 +4697,7 @@ function AnalyticsPage() {
 
       <div className="tiles">
         <Tile label="Total spend · 7d"  value={`$${totalSpend7d.toFixed(2)}`}  foot={daily ? `${days.length} day(s) of data` : "loading…"} spark={dailyCosts.slice(-12)}/>
-        <Tile label="LLM requests · 7d" value={totalRequests7d.toLocaleString()} foot={daily ? `${avgPerDay.toFixed(0)} / day avg` : "loading…"} spark={days.slice(-12).map(d => d.requests || 0)}/>
+        <Tile label="LLM requests · 7d" value={totalRequests7d.toLocaleString()} foot={daily ? `${avgPerDay.toFixed(0)} / day avg` : "loading…"} spark={days.slice(-12).map(d => d.calls || 0)}/>
         <Tile label="LLM calls · total" value={llmCalls}       foot={summary ? "kernel UsageStore" : "loading…"} spark={[0,0,0,0,0,0,0,0,0,0,0,0]}/>
         <Tile label="Tool calls · total" value={totalToolCalls} foot={summary ? "kernel UsageStore" : "loading…"} spark={[0,0,0,0,0,0,0,0,0,0,0,0]}/>
       </div>
@@ -5001,7 +5001,7 @@ function KnowledgePage() {
                     onClick={async () => {
                       const ok = await confirmDialog({
                         title: "Delete entity?",
-                        body: `This will remove '${active.name || active.id}' and ${activeEdges.length} relation(s).`,
+                        message: `This will remove '${active.name || active.id}' and ${activeEdges.length} relation(s).`,
                         confirmLabel: "Delete",
                         danger: true,
                       });
@@ -5052,7 +5052,7 @@ function KnowledgePage() {
                                 ev.stopPropagation();
                                 const ok = await confirmDialog({
                                   title: "Delete relation?",
-                                  body: `${e.relation || "→"} between these two entities will be removed.`,
+                                  message: `${e.relation || "→"} between these two entities will be removed.`,
                                   confirmLabel: "Delete",
                                   danger: true,
                                 });
