@@ -1489,7 +1489,18 @@ pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
 /// outright. The `..` rejection stays for relative `../../foo` cases.
 fn validate_path(path: &str) -> Result<&str, String> {
     let parsed = std::path::Path::new(path);
-    if parsed.is_absolute() {
+    // Deny absolute/rooted paths on EVERY platform. `is_absolute()` is
+    // platform-dependent — a Unix-style leading separator like `/etc/passwd`
+    // is absolute on Unix but NOT on Windows (which needs a `C:\` drive
+    // prefix), so it would slip past an `is_absolute()`-only check there.
+    // `has_root()` is true for a leading `/` or `\` on both platforms, and a
+    // `Prefix` component catches Windows drive/UNC roots (`C:\`, `\\server`).
+    let starts_with_separator = path.starts_with('/') || path.starts_with('\\');
+    let has_windows_prefix = matches!(
+        parsed.components().next(),
+        Some(std::path::Component::Prefix(_))
+    );
+    if parsed.is_absolute() || parsed.has_root() || starts_with_separator || has_windows_prefix {
         return Err(format!(
             "Absolute paths are denied without a workspace sandbox: '{path}' (use a path relative to the agent workspace)"
         ));
@@ -5411,6 +5422,29 @@ mod tests {
         .await;
         assert!(result.is_error);
         assert!(result.content.contains("Absolute paths are denied"));
+    }
+
+    #[test]
+    fn test_validate_path_denies_rooted_paths_cross_platform() {
+        // A Unix-style leading separator must be denied on EVERY platform —
+        // `is_absolute()` alone returns false for these on Windows. Regression
+        // for the Windows-only failure where `/nonexistent/...` slipped through.
+        for p in [
+            "/etc/passwd",
+            "/nonexistent/image.png",
+            "\\\\server\\share",
+            "\\windows",
+        ] {
+            assert!(
+                validate_path(p).is_err(),
+                "rooted path should be denied: {p}"
+            );
+        }
+        // Relative paths remain allowed.
+        assert!(validate_path("sub/dir/file.png").is_ok());
+        assert!(validate_path("file.txt").is_ok());
+        // Parent-dir traversal still denied.
+        assert!(validate_path("../escape").is_err());
     }
 
     #[test]
