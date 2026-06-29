@@ -328,10 +328,7 @@ pub async fn apply_patch(ops: &[PatchOp], workspace_root: &Path) -> PatchResult 
                         // Determine target path (move or in-place)
                         let target = if let Some(new_path) = move_to {
                             match resolve_patch_path(new_path, workspace_root) {
-                                Ok(t) => {
-                                    result.files_moved += 1;
-                                    t
-                                }
+                                Ok(t) => t,
                                 Err(e) => {
                                     result.errors.push(format!("{}: {}", new_path, e));
                                     continue;
@@ -352,16 +349,25 @@ pub async fn apply_patch(ops: &[PatchOp], workspace_root: &Path) -> PatchResult 
 
                         match tokio::fs::write(&target, patched).await {
                             Ok(()) => {
-                                result.files_updated += 1;
-                                // If moved, delete original
+                                // A move counts as moved (not also updated) and
+                                // only once the source is actually removed; an
+                                // in-place edit counts as updated.
                                 if move_to.is_some() && target != resolved {
-                                    if let Err(e) = tokio::fs::remove_file(&resolved).await {
-                                        result.errors.push(format!(
-                                            "cleanup-after-move {}: {}",
-                                            resolved.display(),
-                                            e
-                                        ));
+                                    match tokio::fs::remove_file(&resolved).await {
+                                        Ok(()) => result.files_moved += 1,
+                                        Err(e) => {
+                                            // New file written but source removal
+                                            // failed: count as an update and report.
+                                            result.files_updated += 1;
+                                            result.errors.push(format!(
+                                                "cleanup-after-move {}: {}",
+                                                resolved.display(),
+                                                e
+                                            ));
+                                        }
                                     }
+                                } else {
+                                    result.files_updated += 1;
                                 }
                             }
                             Err(e) => {
@@ -398,34 +404,66 @@ pub async fn apply_patch(ops: &[PatchOp], workspace_root: &Path) -> PatchResult 
 fn apply_hunks(content: &str, hunks: &[Hunk]) -> Result<String, String> {
     let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
 
-    // Track if original file ended with newline
+    // Preserve the file's dominant line ending and trailing-newline state so
+    // untouched content is not silently rewritten (e.g. CRLF -> LF). `.lines()`
+    // strips both \n and \r\n, so the detected terminator is re-applied on join.
+    let newline = if content.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
     let trailing_newline = content.ends_with('\n');
 
     for (hunk_idx, hunk) in hunks.iter().enumerate() {
-        let anchor: Vec<&str> = hunk
+        // Pure insertion: no context_before and no old_lines. Anchor on
+        // context_after (if present) so the lines land WHERE the hunk says,
+        // instead of always being appended at end-of-file.
+        if hunk.context_before.is_empty() && hunk.old_lines.is_empty() {
+            if hunk.context_after.is_empty() {
+                lines.extend(hunk.new_lines.iter().cloned());
+            } else {
+                let after: Vec<&str> = hunk.context_after.iter().map(|s| s.as_str()).collect();
+                let pos = find_anchor(&lines, &after)
+                    .or_else(|| find_anchor_fuzzy(&lines, &after))
+                    .ok_or_else(|| {
+                        format!(
+                            "Hunk {} failed: could not find insertion context in file",
+                            hunk_idx + 1
+                        )
+                    })?;
+                lines.splice(pos..pos, hunk.new_lines.iter().cloned());
+            }
+            continue;
+        }
+
+        // Match context_before + old_lines, optionally extended with
+        // context_after to disambiguate non-unique old_lines; fall back to the
+        // core window when the trailing context is absent (EOF / diverged file).
+        let core: Vec<&str> = hunk
             .context_before
             .iter()
             .chain(hunk.old_lines.iter())
             .map(|s| s.as_str())
             .collect();
-
-        if anchor.is_empty() && hunk.old_lines.is_empty() {
-            // Pure insertion hunk — append new lines at end
-            lines.extend(hunk.new_lines.iter().cloned());
-            continue;
+        let pos = if hunk.context_after.is_empty() {
+            find_anchor(&lines, &core).or_else(|| find_anchor_fuzzy(&lines, &core))
+        } else {
+            let mut full = core.clone();
+            full.extend(hunk.context_after.iter().map(|s| s.as_str()));
+            find_anchor(&lines, &full)
+                .or_else(|| find_anchor_fuzzy(&lines, &full))
+                .or_else(|| find_anchor(&lines, &core))
+                .or_else(|| find_anchor_fuzzy(&lines, &core))
         }
+        .ok_or_else(|| {
+            format!(
+                "Hunk {} failed: could not find context/old lines in file",
+                hunk_idx + 1
+            )
+        })?;
 
-        // Find the anchor in the file
-        let pos = find_anchor(&lines, &anchor)
-            .or_else(|| find_anchor_fuzzy(&lines, &anchor))
-            .ok_or_else(|| {
-                format!(
-                    "Hunk {} failed: could not find context/old lines in file",
-                    hunk_idx + 1
-                )
-            })?;
-
-        // Replace: remove context_before + old_lines, insert context_before + new_lines
+        // Replace: remove context_before + old_lines, insert context_before +
+        // new_lines (matched trailing context, if any, is left untouched).
         let remove_count = hunk.context_before.len() + hunk.old_lines.len();
         let mut replacement: Vec<String> = hunk.context_before.clone();
         replacement.extend(hunk.new_lines.iter().cloned());
@@ -433,9 +471,9 @@ fn apply_hunks(content: &str, hunks: &[Hunk]) -> Result<String, String> {
         lines.splice(pos..pos + remove_count, replacement);
     }
 
-    let mut result = lines.join("\n");
+    let mut result = lines.join(newline);
     if trailing_newline && !result.ends_with('\n') {
-        result.push('\n');
+        result.push_str(newline);
     }
     Ok(result)
 }
@@ -693,6 +731,50 @@ mod tests {
         assert!(result.contains("keep3"));
         assert!(result.contains("footer"));
         assert!(!result.contains("old_line"));
+    }
+
+    #[test]
+    fn test_apply_hunks_pure_insertion_uses_context_after() {
+        // A pure-insertion hunk (no context_before, no old_lines) with trailing
+        // context must insert BEFORE that context, not append at end-of-file.
+        let content = "first\nsecond\nthird\n";
+        let hunks = vec![Hunk {
+            context_before: vec![],
+            old_lines: vec![],
+            new_lines: vec!["inserted".to_string()],
+            context_after: vec!["second".to_string()],
+        }];
+        let result = apply_hunks(content, &hunks).unwrap();
+        assert_eq!(result, "first\ninserted\nsecond\nthird\n");
+    }
+
+    #[test]
+    fn test_apply_hunks_pure_insertion_no_context_appends() {
+        // With no anchoring context at all, a pure insertion still appends.
+        let content = "a\nb\n";
+        let hunks = vec![Hunk {
+            context_before: vec![],
+            old_lines: vec![],
+            new_lines: vec!["c".to_string()],
+            context_after: vec![],
+        }];
+        let result = apply_hunks(content, &hunks).unwrap();
+        assert_eq!(result, "a\nb\nc\n");
+    }
+
+    #[test]
+    fn test_apply_hunks_preserves_crlf() {
+        // A CRLF file must stay CRLF — untouched lines are not silently
+        // rewritten to LF.
+        let content = "alpha\r\nold\r\ngamma\r\n";
+        let hunks = vec![Hunk {
+            context_before: vec!["alpha".to_string()],
+            old_lines: vec!["old".to_string()],
+            new_lines: vec!["new".to_string()],
+            context_after: vec![],
+        }];
+        let result = apply_hunks(content, &hunks).unwrap();
+        assert_eq!(result, "alpha\r\nnew\r\ngamma\r\n");
     }
 
     #[test]

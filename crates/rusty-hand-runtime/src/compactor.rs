@@ -436,9 +436,15 @@ async fn summarize_messages(
     // Truncate if exceeding max_chunk_chars (with safety margin)
     let effective_max = (config.max_chunk_chars as f64 / config.safety_margin) as usize;
     if conversation_text.len() > effective_max {
-        // Keep the tail (most recent) which is usually more important
-        conversation_text =
-            conversation_text[conversation_text.len() - effective_max..].to_string();
+        // Keep the tail (most recent) which is usually more important.
+        // Snap the start index down to a char boundary first — a raw
+        // `[len - effective_max..]` slice panics when the offset lands
+        // mid-character (Cyrillic/CJK/emoji conversation content).
+        let start = rusty_hand_types::text::floor_char_boundary(
+            &conversation_text,
+            conversation_text.len() - effective_max,
+        );
+        conversation_text = conversation_text[start..].to_string();
     }
 
     let summarize_prompt = format!(

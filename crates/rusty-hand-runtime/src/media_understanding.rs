@@ -9,6 +9,14 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tracing::info;
 
+/// `env::var(name).is_ok()` returns true for variables that are set but empty —
+/// a common shell mistake. Use this helper anywhere we only care about "is there
+/// a real value here?", to avoid the Some("") trap (e.g. `GROQ_API_KEY=""`
+/// would otherwise select 'groq' then send `bearer_auth("")` -> opaque 401).
+fn env_nonempty(name: &str) -> bool {
+    std::env::var(name).map(|v| !v.is_empty()).unwrap_or(false)
+}
+
 /// Media understanding engine.
 pub struct MediaEngine {
     config: MediaConfig,
@@ -197,11 +205,19 @@ impl MediaEngine {
         let (api_url, api_key) = match provider {
             "groq" => (
                 "https://api.groq.com/openai/v1/audio/transcriptions",
-                std::env::var("GROQ_API_KEY").map_err(|_| "GROQ_API_KEY not set")?,
+                // Reject Some("") so a configured-but-empty env var produces a
+                // clean "not set" error instead of an opaque 401 from the API.
+                std::env::var("GROQ_API_KEY")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .ok_or("GROQ_API_KEY not set")?,
             ),
             "openai" => (
                 "https://api.openai.com/v1/audio/transcriptions",
-                std::env::var("OPENAI_API_KEY").map_err(|_| "OPENAI_API_KEY not set")?,
+                std::env::var("OPENAI_API_KEY")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .ok_or("OPENAI_API_KEY not set")?,
             ),
             other => return Err(format!("Unsupported audio provider: {}", other)),
         };
@@ -352,13 +368,13 @@ fn describe_prompt(custom: Option<&str>) -> &str {
 /// instead. Currently `anthropic` is the only direct provider in the
 /// catalog with confirmed vision support.
 fn detect_vision_provider() -> Option<&'static str> {
-    if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+    if env_nonempty("ANTHROPIC_API_KEY") {
         return Some("anthropic");
     }
     // OpenRouter reaches Anthropic/OpenAI/Gemini vision models over the
     // OpenAI-compatible wire; default_vision_model("openrouter") is wired,
     // so a user whose only key is OPENROUTER_API_KEY can still use vision.
-    if std::env::var("OPENROUTER_API_KEY").is_ok() {
+    if env_nonempty("OPENROUTER_API_KEY") {
         return Some("openrouter");
     }
     None
@@ -366,10 +382,10 @@ fn detect_vision_provider() -> Option<&'static str> {
 
 /// Detect which audio transcription provider is available.
 fn detect_audio_provider() -> Option<&'static str> {
-    if std::env::var("GROQ_API_KEY").is_ok() {
+    if env_nonempty("GROQ_API_KEY") {
         return Some("groq");
     }
-    if std::env::var("OPENAI_API_KEY").is_ok() {
+    if env_nonempty("OPENAI_API_KEY") {
         return Some("openai");
     }
     None

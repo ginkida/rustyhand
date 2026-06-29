@@ -79,7 +79,7 @@ fn remove_non_content_blocks(html: &str) -> String {
 /// Remove all occurrences of a specific tag and its contents (case-insensitive).
 fn remove_tag_blocks(html: &str, tag: &str) -> String {
     let mut result = String::with_capacity(html.len());
-    let lower = html.to_lowercase();
+    let lower = html.to_ascii_lowercase();
     let open_tag = format!("<{}", tag);
     let close_tag = format!("</{}>", tag);
 
@@ -110,7 +110,7 @@ fn remove_tag_blocks(html: &str, tag: &str) -> String {
 
 /// Extract the content from <main>, <article>, or <body> (in priority order).
 fn extract_main_content(html: &str) -> String {
-    let lower = html.to_lowercase();
+    let lower = html.to_ascii_lowercase();
     for tag in &["main", "article", "body"] {
         let open = format!("<{}", tag);
         let close = format!("</{}>", tag);
@@ -196,7 +196,7 @@ fn convert_inline_tag(
     md_close: &str,
 ) -> String {
     let mut result = String::with_capacity(html.len());
-    let lower = html.to_lowercase();
+    let lower = html.to_ascii_lowercase();
     let mut pos = 0;
 
     while pos < html.len() {
@@ -233,7 +233,7 @@ fn convert_inline_tag(
 /// Convert <a href="url">text</a> to [text](url).
 fn convert_links(html: &str) -> String {
     let mut result = String::with_capacity(html.len());
-    let lower = html.to_lowercase();
+    let lower = html.to_ascii_lowercase();
     let mut pos = 0;
 
     while pos < html.len() {
@@ -272,7 +272,7 @@ fn convert_links(html: &str) -> String {
 
 /// Extract an attribute value from an HTML tag.
 fn extract_attribute(tag: &str, attr: &str) -> Option<String> {
-    let lower = tag.to_lowercase();
+    let lower = tag.to_ascii_lowercase();
     let pattern = format!("{}=\"", attr);
     if let Some(start) = lower.find(&pattern) {
         let val_start = start + pattern.len();
@@ -301,7 +301,7 @@ fn extract_attribute(tag: &str, attr: &str) -> Option<String> {
 /// ```
 fn convert_tables(html: &str) -> String {
     let mut result = String::with_capacity(html.len());
-    let lower = html.to_lowercase();
+    let lower = html.to_ascii_lowercase();
     let mut pos = 0;
 
     while pos < html.len() {
@@ -330,7 +330,7 @@ fn convert_tables(html: &str) -> String {
 
 /// Convert a single `<table>...</table>` block into a Markdown table.
 fn table_to_markdown(table_html: &str) -> String {
-    let lower = table_html.to_lowercase();
+    let lower = table_html.to_ascii_lowercase();
     let mut rows: Vec<Vec<String>> = Vec::new();
     let mut has_header = false;
     let mut pos = 0;
@@ -340,7 +340,7 @@ fn table_to_markdown(table_html: &str) -> String {
             let abs_tr = pos + tr_start;
             if let Some(tr_end) = lower[abs_tr..].find("</tr>") {
                 let row_html = &table_html[abs_tr..abs_tr + tr_end + 5];
-                let row_lower = row_html.to_lowercase();
+                let row_lower = row_html.to_ascii_lowercase();
                 let mut cells = Vec::new();
                 let mut is_header_row = false;
                 let mut cell_pos = 0;
