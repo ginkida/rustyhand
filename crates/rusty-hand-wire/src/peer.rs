@@ -14,15 +14,61 @@ use crate::registry::{PeerEntry, PeerRegistry, PeerState};
 use async_trait::async_trait;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
+use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 
 type HmacSha256 = Hmac<Sha256>;
+
+/// Maximum allowed clock skew between a handshake's signed timestamp and the
+/// receiver's clock. Handshakes outside this window are rejected as stale.
+const HANDSHAKE_FRESHNESS_SECS: i64 = 60;
+/// How long a seen handshake nonce is remembered for replay rejection. Must be
+/// >= 2 * HANDSHAKE_FRESHNESS_SECS so no replay can slip past the freshness gate.
+const NONCE_CACHE_TTL: Duration = Duration::from_secs(150);
+/// Pre-authentication frame size cap (1 MB). A handshake is tiny; this bounds
+/// memory an unauthenticated peer can force us to buffer before it proves auth.
+const HANDSHAKE_MAX_SIZE: u32 = 1024 * 1024;
+/// Per-read timeout for untrusted/outbound reads, so a stalling or malicious
+/// peer cannot wedge the caller or pin a connection indefinitely.
+const NETWORK_TIMEOUT: Duration = Duration::from_secs(30);
+/// TCP connect timeout for outbound peer connections.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+/// Cap on concurrently-handled inbound connections (slowloris / task-exhaustion
+/// backstop). Excess connections wait for a permit rather than each spawning a
+/// task that can be pinned forever pre-auth.
+const MAX_INBOUND_CONNECTIONS: usize = 256;
+/// Body read chunk size — bytes are appended as they arrive so we never commit
+/// the full attacker-declared frame length up front.
+const BODY_READ_CHUNK: usize = 64 * 1024;
+
+/// Build the length-framed payload that the handshake HMAC signs.
+///
+/// Length-prefixing each field (rather than `format!("{nonce}{node_id}")`)
+/// removes any ambiguity at field boundaries, and binding the timestamp ties
+/// the signature to a point in time for replay rejection.
+fn handshake_signed_data(nonce: &str, node_id: &str, timestamp: i64) -> Vec<u8> {
+    let mut data = Vec::with_capacity(nonce.len() + node_id.len() + 16);
+    for field in [nonce.as_bytes(), node_id.as_bytes()] {
+        data.extend_from_slice(&(field.len() as u32).to_be_bytes());
+        data.extend_from_slice(field);
+    }
+    data.extend_from_slice(&timestamp.to_be_bytes());
+    data
+}
+
+/// Whether a handshake timestamp is within the accepted freshness window.
+fn timestamp_is_fresh(timestamp: i64) -> bool {
+    let now = chrono::Utc::now().timestamp();
+    (now - timestamp).abs() <= HANDSHAKE_FRESHNESS_SECS
+}
 
 /// Generate HMAC-SHA256 signature for message authentication.
 fn hmac_sign(secret: &str, data: &[u8]) -> String {
@@ -113,6 +159,10 @@ pub struct PeerNode {
     registry: PeerRegistry,
     /// Actual bound address (useful when binding to port 0).
     local_addr: SocketAddr,
+    /// Recently-seen handshake nonces, for replay rejection on inbound auth.
+    nonce_cache: Mutex<HashMap<String, Instant>>,
+    /// Limits concurrent inbound connections (DoS backstop).
+    inbound_limit: Arc<Semaphore>,
 }
 
 impl PeerNode {
@@ -141,6 +191,8 @@ impl PeerNode {
             config,
             registry: registry.clone(),
             local_addr,
+            nonce_cache: Mutex::new(HashMap::new()),
+            inbound_limit: Arc::new(Semaphore::new(MAX_INBOUND_CONNECTIONS)),
         });
 
         let node_clone = Arc::clone(&node);
@@ -166,6 +218,23 @@ impl PeerNode {
         &self.registry
     }
 
+    /// Record a handshake nonce, returning `true` if it is fresh (not seen
+    /// within [`NONCE_CACHE_TTL`]) and `false` if it is a replay. Expired
+    /// entries are evicted on each call to keep the cache bounded.
+    fn register_nonce(&self, nonce: &str) -> bool {
+        let mut cache = self
+            .nonce_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let now = Instant::now();
+        cache.retain(|_, seen| now.duration_since(*seen) < NONCE_CACHE_TTL);
+        if cache.contains_key(nonce) {
+            return false;
+        }
+        cache.insert(nonce.to_string(), now);
+        true
+    }
+
     /// Connect to a remote peer and perform the handshake.
     pub async fn connect_to_peer(
         &self,
@@ -173,13 +242,21 @@ impl PeerNode {
         handle: Arc<dyn PeerHandle>,
     ) -> Result<(), WireError> {
         info!("RHP: connecting to peer at {}", addr);
-        let stream = TcpStream::connect(addr).await?;
+        let stream = match tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(addr)).await {
+            Ok(r) => r?,
+            Err(_) => {
+                return Err(WireError::HandshakeFailed(format!(
+                    "connect to {addr} timed out"
+                )))
+            }
+        };
         let (mut reader, mut writer) = stream.into_split();
 
         // Send our handshake with HMAC authentication
         let nonce = uuid::Uuid::new_v4().to_string();
-        let auth_data = format!("{}{}", nonce, self.config.node_id);
-        let auth_hmac = hmac_sign(&self.config.shared_secret, auth_data.as_bytes());
+        let timestamp = chrono::Utc::now().timestamp();
+        let auth_data = handshake_signed_data(&nonce, &self.config.node_id, timestamp);
+        let auth_hmac = hmac_sign(&self.config.shared_secret, &auth_data);
 
         let handshake = WireMessage {
             id: uuid::Uuid::new_v4().to_string(),
@@ -189,13 +266,15 @@ impl PeerNode {
                 protocol_version: PROTOCOL_VERSION,
                 agents: handle.local_agents(),
                 nonce,
+                timestamp,
                 auth_hmac,
             }),
         };
         write_message(&mut writer, &handshake).await?;
 
-        // Read their handshake ack
-        let response = read_message(&mut reader).await?;
+        // Read their handshake ack (bounded + timed out — peer may stall)
+        let response =
+            read_message_bounded(&mut reader, HANDSHAKE_MAX_SIZE, NETWORK_TIMEOUT).await?;
         match &response.kind {
             WireMessageKind::Response(WireResponse::HandshakeAck {
                 node_id,
@@ -203,6 +282,7 @@ impl PeerNode {
                 protocol_version,
                 agents,
                 nonce: ack_nonce,
+                timestamp: ack_ts,
                 auth_hmac: ack_hmac,
             }) => {
                 if *protocol_version != PROTOCOL_VERSION {
@@ -212,15 +292,18 @@ impl PeerNode {
                     });
                 }
 
-                // SECURITY: Verify the ack HMAC
-                let expected_data = format!("{}{}", ack_nonce, node_id);
-                if !hmac_verify(
-                    &self.config.shared_secret,
-                    expected_data.as_bytes(),
-                    ack_hmac,
-                ) {
+                // SECURITY: Verify the ack HMAC over the length-framed payload
+                let expected_data = handshake_signed_data(ack_nonce, node_id, *ack_ts);
+                if !hmac_verify(&self.config.shared_secret, &expected_data, ack_hmac) {
                     return Err(WireError::HandshakeFailed(
                         "HMAC verification failed on HandshakeAck".into(),
+                    ));
+                }
+
+                // SECURITY: Reject a stale ack (replay / clock skew).
+                if !timestamp_is_fresh(*ack_ts) {
+                    return Err(WireError::HandshakeFailed(
+                        "HandshakeAck timestamp outside freshness window".into(),
                     ));
                 }
 
@@ -295,13 +378,23 @@ impl PeerNode {
             .get_peer(node_id)
             .ok_or_else(|| WireError::HandshakeFailed(format!("Unknown peer: {node_id}")))?;
 
-        let stream = TcpStream::connect(peer.address).await?;
+        let stream =
+            match tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(peer.address)).await {
+                Ok(r) => r?,
+                Err(_) => {
+                    return Err(WireError::HandshakeFailed(format!(
+                        "connect to {} timed out",
+                        peer.address
+                    )))
+                }
+            };
         let (mut reader, mut writer) = stream.into_split();
 
         // SECURITY: Perform HMAC handshake before sending any data
         let nonce = uuid::Uuid::new_v4().to_string();
-        let auth_data = format!("{}{}", nonce, self.config.node_id);
-        let auth_hmac = hmac_sign(&self.config.shared_secret, auth_data.as_bytes());
+        let timestamp = chrono::Utc::now().timestamp();
+        let auth_data = handshake_signed_data(&nonce, &self.config.node_id, timestamp);
+        let auth_hmac = hmac_sign(&self.config.shared_secret, &auth_data);
 
         let handshake = WireMessage {
             id: uuid::Uuid::new_v4().to_string(),
@@ -311,17 +404,19 @@ impl PeerNode {
                 protocol_version: PROTOCOL_VERSION,
                 agents: handle.local_agents(),
                 nonce,
+                timestamp,
                 auth_hmac,
             }),
         };
         write_message(&mut writer, &handshake).await?;
 
-        // Verify handshake ack
-        let ack = read_message(&mut reader).await?;
+        // Verify handshake ack (bounded + timed out)
+        let ack = read_message_bounded(&mut reader, HANDSHAKE_MAX_SIZE, NETWORK_TIMEOUT).await?;
         match &ack.kind {
             WireMessageKind::Response(WireResponse::HandshakeAck {
                 node_id: ack_node_id,
                 nonce: ack_nonce,
+                timestamp: ack_ts,
                 auth_hmac: ack_hmac,
                 protocol_version,
                 ..
@@ -332,14 +427,15 @@ impl PeerNode {
                         remote: *protocol_version,
                     });
                 }
-                let expected_data = format!("{}{}", ack_nonce, ack_node_id);
-                if !hmac_verify(
-                    &self.config.shared_secret,
-                    expected_data.as_bytes(),
-                    ack_hmac,
-                ) {
+                let expected_data = handshake_signed_data(ack_nonce, ack_node_id, *ack_ts);
+                if !hmac_verify(&self.config.shared_secret, &expected_data, ack_hmac) {
                     return Err(WireError::HandshakeFailed(
                         "HMAC verification failed on HandshakeAck".into(),
+                    ));
+                }
+                if !timestamp_is_fresh(*ack_ts) {
+                    return Err(WireError::HandshakeFailed(
+                        "HandshakeAck timestamp outside freshness window".into(),
                     ));
                 }
             }
@@ -366,7 +462,7 @@ impl PeerNode {
         };
         write_message(&mut writer, &msg).await?;
 
-        let response = read_message(&mut reader).await?;
+        let response = read_message_bounded(&mut reader, MAX_MESSAGE_SIZE, NETWORK_TIMEOUT).await?;
         match response.kind {
             WireMessageKind::Response(WireResponse::AgentResponse { text }) => Ok(text),
             WireMessageKind::Response(WireResponse::Error { code, message }) => Err(
@@ -389,6 +485,13 @@ impl PeerNode {
             match listener.accept().await {
                 Ok((stream, addr)) => {
                     debug!("RHP: accepted connection from {}", addr);
+                    // SECURITY: bound concurrent inbound connections so an
+                    // attacker cannot exhaust tasks/sockets by opening many
+                    // connections and never authenticating.
+                    let permit = match Arc::clone(&node.inbound_limit).acquire_owned().await {
+                        Ok(p) => p,
+                        Err(_) => return, // semaphore closed — node shutting down
+                    };
                     let node = Arc::clone(&node);
                     let registry = registry.clone();
                     let handle = Arc::clone(&handle);
@@ -398,6 +501,7 @@ impl PeerNode {
                         {
                             debug!("RHP: inbound connection from {} ended: {}", addr, e);
                         }
+                        drop(permit);
                     });
                 }
                 Err(e) => {
@@ -418,8 +522,10 @@ impl PeerNode {
     ) -> Result<(), WireError> {
         let (mut reader, mut writer) = stream.into_split();
 
-        // Read the incoming handshake request
-        let msg = read_message(&mut reader).await?;
+        // Read the incoming handshake request. SECURITY: this is pre-auth, so
+        // it is bounded to a small frame size and a read timeout — an
+        // unauthenticated peer cannot force a large allocation or pin the task.
+        let msg = read_message_bounded(&mut reader, HANDSHAKE_MAX_SIZE, NETWORK_TIMEOUT).await?;
         let peer_node_id = match &msg.kind {
             WireMessageKind::Request(WireRequest::Handshake {
                 node_id,
@@ -427,6 +533,7 @@ impl PeerNode {
                 protocol_version,
                 agents,
                 nonce,
+                timestamp,
                 auth_hmac,
             }) => {
                 if *protocol_version != PROTOCOL_VERSION {
@@ -447,13 +554,10 @@ impl PeerNode {
                     });
                 }
 
-                // SECURITY: Verify the incoming HMAC
-                let expected_data = format!("{}{}", nonce, node_id);
-                if !hmac_verify(
-                    &node.config.shared_secret,
-                    expected_data.as_bytes(),
-                    auth_hmac,
-                ) {
+                // SECURITY: Verify the incoming HMAC over the length-framed
+                // (nonce, node_id, timestamp) payload.
+                let expected_data = handshake_signed_data(nonce, node_id, *timestamp);
+                if !hmac_verify(&node.config.shared_secret, &expected_data, auth_hmac) {
                     let err_resp = WireMessage {
                         id: msg.id.clone(),
                         kind: WireMessageKind::Response(WireResponse::Error {
@@ -467,10 +571,29 @@ impl PeerNode {
                     ));
                 }
 
-                // Send handshake ack with our own HMAC
+                // SECURITY: Reject replays — the handshake must be recent and
+                // its nonce must not have been seen before. Without this, a
+                // captured handshake frame could be replayed verbatim over the
+                // plaintext transport to gain an authenticated session.
+                if !timestamp_is_fresh(*timestamp) || !node.register_nonce(nonce) {
+                    let err_resp = WireMessage {
+                        id: msg.id.clone(),
+                        kind: WireMessageKind::Response(WireResponse::Error {
+                            code: 403,
+                            message: "Stale or replayed handshake".to_string(),
+                        }),
+                    };
+                    write_message(&mut writer, &err_resp).await?;
+                    return Err(WireError::HandshakeFailed(
+                        "Rejected stale/replayed handshake".into(),
+                    ));
+                }
+
+                // Send handshake ack with our own fresh, timestamped HMAC
                 let ack_nonce = uuid::Uuid::new_v4().to_string();
-                let ack_auth_data = format!("{}{}", ack_nonce, node.config.node_id);
-                let ack_hmac = hmac_sign(&node.config.shared_secret, ack_auth_data.as_bytes());
+                let ack_ts = chrono::Utc::now().timestamp();
+                let ack_auth_data = handshake_signed_data(&ack_nonce, &node.config.node_id, ack_ts);
+                let ack_hmac = hmac_sign(&node.config.shared_secret, &ack_auth_data);
 
                 let ack = WireMessage {
                     id: msg.id.clone(),
@@ -480,6 +603,7 @@ impl PeerNode {
                         protocol_version: PROTOCOL_VERSION,
                         agents: handle.local_agents(),
                         nonce: ack_nonce,
+                        timestamp: ack_ts,
                         auth_hmac: ack_hmac,
                     }),
                 };
@@ -649,11 +773,50 @@ pub async fn write_message(
 }
 
 /// Read a framed message (4-byte length + JSON) from a TCP stream.
+///
+/// Used for established (post-handshake) connections: the full
+/// [`MAX_MESSAGE_SIZE`] cap applies and there is no idle timeout, so a quiet
+/// authenticated peer is not disconnected. The body is read in chunks so the
+/// full declared length is never pre-allocated before the bytes arrive.
 pub async fn read_message(
     reader: &mut tokio::net::tcp::OwnedReadHalf,
 ) -> Result<WireMessage, WireError> {
+    read_framed(reader, MAX_MESSAGE_SIZE, None).await
+}
+
+/// Read a framed message with an explicit size cap and a per-read timeout.
+///
+/// Use this for untrusted (pre-authentication) and outbound request/response
+/// reads: a stalling or malicious peer hits the timeout instead of pinning the
+/// caller forever, and an oversized declared length is rejected before any
+/// large allocation. SECURITY-relevant — see [`read_message`] for the trusted
+/// post-handshake variant.
+pub async fn read_message_bounded(
+    reader: &mut tokio::net::tcp::OwnedReadHalf,
+    max_size: u32,
+    timeout: Duration,
+) -> Result<WireMessage, WireError> {
+    read_framed(reader, max_size, Some(timeout)).await
+}
+
+/// Shared framed-read implementation. Reads the 4-byte length header, enforces
+/// `max_size`, then reads the body in [`BODY_READ_CHUNK`]-sized reads, growing
+/// the buffer as bytes actually arrive (never committing the full declared
+/// length up front). When `timeout` is `Some`, each underlying read is bounded.
+async fn read_framed(
+    reader: &mut tokio::net::tcp::OwnedReadHalf,
+    max_size: u32,
+    timeout: Option<Duration>,
+) -> Result<WireMessage, WireError> {
     let mut header = [0u8; 4];
-    match reader.read_exact(&mut header).await {
+    let header_res = match timeout {
+        Some(d) => match tokio::time::timeout(d, reader.read_exact(&mut header)).await {
+            Ok(r) => r,
+            Err(_) => return Err(WireError::ConnectionClosed),
+        },
+        None => reader.read_exact(&mut header).await,
+    };
+    match header_res {
         Ok(_) => {}
         Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
             return Err(WireError::ConnectionClosed);
@@ -662,15 +825,32 @@ pub async fn read_message(
     }
 
     let len = decode_length(&header);
-    if len > MAX_MESSAGE_SIZE {
+    if len > max_size {
         return Err(WireError::MessageTooLarge {
             size: len,
-            max: MAX_MESSAGE_SIZE,
+            max: max_size,
         });
     }
 
-    let mut body = vec![0u8; len as usize];
-    reader.read_exact(&mut body).await?;
+    let mut body = Vec::new();
+    let mut remaining = len as usize;
+    let mut buf = vec![0u8; BODY_READ_CHUNK];
+    while remaining > 0 {
+        let want = remaining.min(buf.len());
+        let n = match timeout {
+            Some(d) => match tokio::time::timeout(d, reader.read(&mut buf[..want])).await {
+                Ok(Ok(n)) => n,
+                Ok(Err(e)) => return Err(WireError::Io(e)),
+                Err(_) => return Err(WireError::ConnectionClosed),
+            },
+            None => reader.read(&mut buf[..want]).await.map_err(WireError::Io)?,
+        };
+        if n == 0 {
+            return Err(WireError::ConnectionClosed); // EOF mid-frame
+        }
+        body.extend_from_slice(&buf[..n]);
+        remaining -= n;
+    }
 
     let msg = decode_message(&body)?;
     Ok(msg)
@@ -690,15 +870,21 @@ pub async fn broadcast_notification(
             kind: WireMessageKind::Notification(notification.clone()),
         };
 
-        match TcpStream::connect(peer.address).await {
-            Ok(stream) => {
+        match tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(peer.address)).await {
+            Ok(Ok(stream)) => {
                 let (_, mut writer) = stream.into_split();
                 if let Err(e) = write_message(&mut writer, &msg).await {
                     errors.push((peer.node_id.clone(), e));
                 }
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 errors.push((peer.node_id.clone(), WireError::Io(e)));
+            }
+            Err(_) => {
+                errors.push((
+                    peer.node_id.clone(),
+                    WireError::HandshakeFailed(format!("connect to {} timed out", peer.address)),
+                ));
             }
         }
     }
@@ -1006,5 +1192,92 @@ mod tests {
         let config = PeerConfig::default();
         assert_eq!(config.node_name, "rusty-hand-node");
         assert!(!config.node_id.is_empty());
+    }
+
+    /// Build a fully-valid handshake frame for `secret` with the given nonce
+    /// and timestamp (used by the replay/freshness security tests).
+    fn signed_handshake(secret: &str, nonce: &str, timestamp: i64) -> WireMessage {
+        let auth_hmac = hmac_sign(secret, &handshake_signed_data(nonce, "client", timestamp));
+        WireMessage {
+            id: "hs".to_string(),
+            kind: WireMessageKind::Request(WireRequest::Handshake {
+                node_id: "client".to_string(),
+                node_name: "client-node".to_string(),
+                protocol_version: PROTOCOL_VERSION,
+                agents: vec![],
+                nonce: nonce.to_string(),
+                timestamp,
+                auth_hmac,
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_handshake_replay_rejected() {
+        let secret = "test-secret-for-unit-tests";
+        let config = PeerConfig {
+            listen_addr: "127.0.0.1:0".parse().unwrap(),
+            node_id: "server".to_string(),
+            node_name: "server-node".to_string(),
+            shared_secret: secret.to_string(),
+        };
+        let (node, _task) = require_network!(
+            start_test_node(config, PeerRegistry::new(), Arc::new(TestHandle::new())).await
+        );
+        let addr = node.local_addr();
+
+        // A single valid handshake (fresh timestamp, correct HMAC).
+        let handshake = signed_handshake(secret, "replay-nonce-1", chrono::Utc::now().timestamp());
+
+        // First use is accepted.
+        let stream = require_network!(connect_stream(addr).await);
+        let (mut reader, mut writer) = stream.into_split();
+        write_message(&mut writer, &handshake).await.unwrap();
+        let resp = read_message(&mut reader).await.unwrap();
+        assert!(
+            matches!(
+                resp.kind,
+                WireMessageKind::Response(WireResponse::HandshakeAck { .. })
+            ),
+            "first handshake should be accepted"
+        );
+
+        // Replaying the identical frame on a fresh connection is rejected.
+        let stream = require_network!(connect_stream(addr).await);
+        let (mut reader, mut writer) = stream.into_split();
+        write_message(&mut writer, &handshake).await.unwrap();
+        let resp = read_message(&mut reader).await.unwrap();
+        match resp.kind {
+            WireMessageKind::Response(WireResponse::Error { code, .. }) => assert_eq!(code, 403),
+            other => panic!("Expected Error(403) on replay, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_stale_handshake_rejected() {
+        let secret = "test-secret-for-unit-tests";
+        let config = PeerConfig {
+            listen_addr: "127.0.0.1:0".parse().unwrap(),
+            node_id: "server".to_string(),
+            node_name: "server-node".to_string(),
+            shared_secret: secret.to_string(),
+        };
+        let (node, _task) = require_network!(
+            start_test_node(config, PeerRegistry::new(), Arc::new(TestHandle::new())).await
+        );
+
+        // A handshake whose HMAC is valid but whose timestamp is far in the
+        // past must be rejected (outside the freshness window).
+        let stale_ts = chrono::Utc::now().timestamp() - 3600;
+        let handshake = signed_handshake(secret, "stale-nonce-1", stale_ts);
+
+        let stream = require_network!(connect_stream(node.local_addr()).await);
+        let (mut reader, mut writer) = stream.into_split();
+        write_message(&mut writer, &handshake).await.unwrap();
+        let resp = read_message(&mut reader).await.unwrap();
+        match resp.kind {
+            WireMessageKind::Response(WireResponse::Error { code, .. }) => assert_eq!(code, 403),
+            other => panic!("Expected Error(403) on stale handshake, got {other:?}"),
+        }
     }
 }

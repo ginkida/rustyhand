@@ -45,10 +45,14 @@ pub enum WireRequest {
         protocol_version: u32,
         /// List of agents available on this peer.
         agents: Vec<RemoteAgentInfo>,
-        /// Random nonce for HMAC authentication.
+        /// Random nonce for HMAC authentication (replay protection).
         #[serde(default)]
         nonce: String,
-        /// HMAC-SHA256(shared_secret, nonce + node_id).
+        /// Unix timestamp (seconds) when the handshake was signed. Bound into
+        /// the HMAC and checked for freshness by the receiver to reject replays.
+        #[serde(default)]
+        timestamp: i64,
+        /// HMAC-SHA256(shared_secret, frame(nonce, node_id, timestamp)).
         #[serde(default)]
         auth_hmac: String,
     },
@@ -84,10 +88,14 @@ pub enum WireResponse {
         node_name: String,
         protocol_version: u32,
         agents: Vec<RemoteAgentInfo>,
-        /// Random nonce for HMAC authentication.
+        /// Random nonce for HMAC authentication (replay protection).
         #[serde(default)]
         nonce: String,
-        /// HMAC-SHA256(shared_secret, nonce + node_id).
+        /// Unix timestamp (seconds) when the ack was signed. Bound into the
+        /// HMAC and checked for freshness by the receiver to reject replays.
+        #[serde(default)]
+        timestamp: i64,
+        /// HMAC-SHA256(shared_secret, frame(nonce, node_id, timestamp)).
         #[serde(default)]
         auth_hmac: String,
     },
@@ -149,7 +157,12 @@ pub struct RemoteAgentInfo {
 }
 
 /// Current protocol version.
-pub const PROTOCOL_VERSION: u32 = 1;
+///
+/// Bumped to 2 in the handshake-replay-protection change: the HMAC now signs a
+/// length-framed `(nonce, node_id, timestamp)` payload (was `nonce + node_id`),
+/// and the receiver enforces timestamp freshness + a seen-nonce cache. v1 peers
+/// are rejected with `VersionMismatch` since the signed-data format differs.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Encode a wire message to bytes (4-byte big-endian length + JSON).
 pub fn encode_message(msg: &WireMessage) -> Result<Vec<u8>, serde_json::Error> {
@@ -206,6 +219,7 @@ mod tests {
                     state: "running".to_string(),
                 }],
                 nonce: "test-nonce".to_string(),
+                timestamp: 1_700_000_000,
                 auth_hmac: "test-hmac".to_string(),
             }),
         };
