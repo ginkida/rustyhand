@@ -178,6 +178,13 @@ fn split_into_chunks(text: &str, chunk_size: usize, overlap: usize) -> Vec<Strin
             chunks.push(chunk.trim().to_string());
         }
 
+        // Once the window reaches end-of-text all content is covered by the
+        // chunk we just pushed. Stop here so the overlap-advance below can't
+        // emit a redundant trailing chunk that is a strict subset of it.
+        if chunk_end >= chars.len() {
+            break;
+        }
+
         // Advance with overlap
         let advance = if chunk_end > start + overlap {
             chunk_end - start - overlap

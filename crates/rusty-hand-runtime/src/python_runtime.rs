@@ -24,6 +24,12 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tracing::{debug, error, warn};
 
+/// Maximum total bytes of combined stdout+stderr captured from a Python agent
+/// script. The wall-clock timeout bounds runtime but NOT memory, so a script
+/// that floods its output would OOM-kill the daemon. Beyond this cap the output
+/// is truncated and the child is killed. 1 MiB.
+const MAX_PYTHON_OUTPUT_BYTES: usize = 1024 * 1024;
+
 /// Error type for Python runtime operations.
 #[derive(Debug, thiserror::Error)]
 pub enum PythonError {
@@ -240,14 +246,29 @@ pub async fn run_python_agent(
 
         let mut stdout_lines = Vec::new();
         let mut stderr_text = String::new();
+        // SECURITY: cap total captured output so a runaway script cannot OOM the
+        // daemon (the timeout below bounds runtime, not memory). Shared budget
+        // across stdout + stderr.
+        let mut total_bytes: usize = 0;
 
-        // Read all stdout lines
+        // Read all stdout lines (size-capped)
         let mut line = String::new();
         loop {
             line.clear();
             match stdout_reader.read_line(&mut line).await {
                 Ok(0) => break,
-                Ok(_) => stdout_lines.push(line.trim_end().to_string()),
+                Ok(n) => {
+                    if total_bytes + n > MAX_PYTHON_OUTPUT_BYTES {
+                        stdout_lines.push("... [output truncated]".to_string());
+                        warn!(
+                            "Python output exceeded {MAX_PYTHON_OUTPUT_BYTES} bytes; truncating stdout and killing child"
+                        );
+                        let _ = child.kill().await;
+                        break;
+                    }
+                    total_bytes += n;
+                    stdout_lines.push(line.trim_end().to_string());
+                }
                 Err(e) => {
                     warn!("Python stdout read error: {e}");
                     break;
@@ -255,13 +276,22 @@ pub async fn run_python_agent(
             }
         }
 
-        // Read stderr
+        // Read stderr (shares the size budget)
         let mut stderr_line = String::new();
         loop {
             stderr_line.clear();
             match stderr_reader.read_line(&mut stderr_line).await {
                 Ok(0) => break,
-                Ok(_) => {
+                Ok(n) => {
+                    if total_bytes + n > MAX_PYTHON_OUTPUT_BYTES {
+                        stderr_text.push_str("... [output truncated]");
+                        warn!(
+                            "Python output exceeded {MAX_PYTHON_OUTPUT_BYTES} bytes; truncating stderr and killing child"
+                        );
+                        let _ = child.kill().await;
+                        break;
+                    }
+                    total_bytes += n;
                     stderr_text.push_str(&stderr_line);
                 }
                 Err(_) => break,

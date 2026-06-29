@@ -7,6 +7,9 @@
 use dashmap::DashMap;
 use std::time::{Duration, Instant};
 
+/// Maximum cache entries to prevent unbounded memory growth.
+const MAX_ENTRIES: usize = 1000;
+
 /// A cached entry with its insertion timestamp.
 struct CacheEntry {
     value: String,
@@ -49,6 +52,20 @@ impl WebCache {
         if self.ttl.is_zero() {
             return;
         }
+
+        // Evict oldest entries if at capacity
+        if self.entries.len() >= MAX_ENTRIES {
+            // Find and remove the oldest entry
+            let oldest = self
+                .entries
+                .iter()
+                .min_by_key(|e| e.value().inserted_at)
+                .map(|e| e.key().clone());
+            if let Some(oldest_key) = oldest {
+                self.entries.remove(&oldest_key);
+            }
+        }
+
         self.entries.insert(
             key,
             CacheEntry {

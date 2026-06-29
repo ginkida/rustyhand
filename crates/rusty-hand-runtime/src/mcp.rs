@@ -9,7 +9,7 @@
 use rusty_hand_types::tool::ToolDefinition;
 use serde::{Deserialize, Serialize};
 use std::process::Stdio;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tracing::{debug, info};
 
 // ---------------------------------------------------------------------------
@@ -124,6 +124,13 @@ impl std::fmt::Display for JsonRpcError {
 /// "Invalid MCP JSON-RPC response: expected value at line 1 column 1".
 const MAX_NOISE_LINES: usize = 32;
 
+/// Hard cap on the size of a single JSON-RPC line / response body read from
+/// an MCP server. Without this, a malicious or buggy server that never emits
+/// a newline (or returns a multi-gigabyte body) would make us buffer the whole
+/// thing into memory and OOM. 16 MiB is far larger than any legitimate
+/// JSON-RPC message yet bounds the blast radius.
+const MAX_MCP_LINE_BYTES: usize = 16 * 1024 * 1024;
+
 /// Read the next plausibly JSON-RPC line from an MCP server's stdout,
 /// skipping blank lines and obvious log/banner noise. Returns the raw
 /// line (untrimmed) so the caller can re-trim and parse.
@@ -147,13 +154,31 @@ where
         }
         let remaining = deadline - now;
 
-        let mut line = String::new();
-        match tokio::time::timeout(remaining, reader.read_line(&mut line)).await {
-            Ok(Ok(0)) => return Err("MCP server closed connection".to_string()),
-            Ok(Ok(_)) => {}
-            Ok(Err(e)) => return Err(format!("Failed to read MCP response: {e}")),
-            Err(_) => return Err("MCP request timed out".to_string()),
+        // Size-bounded read: cap the bytes we'll buffer for a single line so a
+        // server that never emits a newline can't make us OOM. `take` limits
+        // the underlying reader to MAX_MCP_LINE_BYTES; `read_until` then reads
+        // up to (and including) the newline or until that cap is hit.
+        let mut line_buf: Vec<u8> = Vec::new();
+        {
+            let mut limited = (&mut *reader).take(MAX_MCP_LINE_BYTES as u64);
+            match tokio::time::timeout(remaining, limited.read_until(b'\n', &mut line_buf)).await {
+                Ok(Ok(0)) => return Err("MCP server closed connection".to_string()),
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => return Err(format!("Failed to read MCP response: {e}")),
+                Err(_) => return Err("MCP request timed out".to_string()),
+            }
         }
+
+        // If we filled the entire budget without a terminating newline, the
+        // server sent an oversized (or unterminated) line — reject it.
+        if line_buf.len() >= MAX_MCP_LINE_BYTES {
+            return Err(format!(
+                "MCP server response exceeded {MAX_MCP_LINE_BYTES}-byte line cap"
+            ));
+        }
+
+        let line = String::from_utf8(line_buf)
+            .map_err(|e| format!("MCP response was not valid UTF-8: {e}"))?;
 
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -292,8 +317,15 @@ impl McpConnection {
 
         match response {
             Some(result) => {
+                // Per the MCP spec, a failed tool call is reported as a normal
+                // result with `isError: true` and the error text carried in
+                // `content` — NOT via the JSON-RPC `error` object. Detect that
+                // here so failures surface as Err to the agent loop instead of
+                // masquerading as a successful result.
+                let is_error = result.get("isError").and_then(|v| v.as_bool()) == Some(true);
+
                 // Extract text content from the response
-                if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
+                let text = if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
                     let texts: Vec<&str> = content
                         .iter()
                         .filter_map(|item| {
@@ -304,10 +336,15 @@ impl McpConnection {
                             }
                         })
                         .collect();
-                    Ok(texts.join("\n"))
+                    texts.join("\n")
                 } else {
-                    Ok(result.to_string())
+                    result.to_string()
+                };
+
+                if is_error {
+                    return Err(text);
                 }
+                Ok(text)
             }
             None => Err("No result from MCP tools/call".to_string()),
         }
@@ -373,7 +410,7 @@ impl McpConnection {
                 Ok(response.result)
             }
             McpTransportHandle::Sse { client, url } => {
-                let response = client
+                let mut response = client
                     .post(url.as_str())
                     .json(&request)
                     .timeout(std::time::Duration::from_secs(self.config.timeout_secs))
@@ -385,10 +422,33 @@ impl McpConnection {
                     return Err(format!("MCP SSE returned {}", response.status()));
                 }
 
-                let body = response
-                    .text()
+                // Reject up front if the server advertises an oversized body.
+                if let Some(len) = response.content_length() {
+                    if len > MAX_MCP_LINE_BYTES as u64 {
+                        return Err(format!(
+                            "MCP SSE response too large: {len} bytes exceeds {MAX_MCP_LINE_BYTES}-byte cap"
+                        ));
+                    }
+                }
+
+                // Stream the body with a running-total cap so a server that
+                // lies about (or omits) Content-Length can't OOM us either.
+                let mut buf: Vec<u8> = Vec::new();
+                while let Some(chunk) = response
+                    .chunk()
                     .await
-                    .map_err(|e| format!("Failed to read SSE response: {e}"))?;
+                    .map_err(|e| format!("Failed to read SSE response: {e}"))?
+                {
+                    if buf.len() + chunk.len() > MAX_MCP_LINE_BYTES {
+                        return Err(format!(
+                            "MCP SSE response exceeded {MAX_MCP_LINE_BYTES}-byte cap"
+                        ));
+                    }
+                    buf.extend_from_slice(&chunk);
+                }
+
+                let body = String::from_utf8(buf)
+                    .map_err(|e| format!("MCP SSE response was not valid UTF-8: {e}"))?;
 
                 let rpc_response: JsonRpcResponse = serde_json::from_str(&body)
                     .map_err(|e| format!("Invalid MCP SSE JSON-RPC response: {e}"))?;

@@ -630,6 +630,16 @@ pub async fn run_agent_loop(
                     let effective_exec_policy =
                         manifest.exec_policy.as_ref().or(global_exec_policy);
 
+                    // Graduated backoff for repeated identical poll calls
+                    // (e.g. status checks) so a polling loop doesn't hammer the
+                    // tool/provider with no delay between attempts.
+                    if let Some(delay_ms) =
+                        loop_guard.get_poll_backoff(&tool_call.name, &tool_call.input)
+                    {
+                        debug!(tool = %tool_call.name, delay_ms, "Loop guard poll backoff");
+                        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                    }
+
                     // Timeout-wrapped execution
                     let result = match tokio::time::timeout(
                         Duration::from_secs(TOOL_TIMEOUT_SECS),
@@ -688,14 +698,31 @@ pub async fn run_agent_loop(
                         let _ = hook_reg.fire(&ctx);
                     }
 
+                    // Record the call+result outcome so identical repetition
+                    // escalates faster than plain per-params counting and the
+                    // outcome-block fast path in loop_guard.check() can fire.
+                    let outcome_warning = loop_guard.record_outcome(
+                        &tool_call.name,
+                        &tool_call.input,
+                        &result.content,
+                    );
+
                     // Dynamic truncation based on context budget (replaces flat MAX_TOOL_RESULT_CHARS)
                     let content = truncate_tool_result_dynamic(&result.content, &context_budget);
 
-                    // Append warning if verdict was Warn
-                    let final_content = if let LoopGuardVerdict::Warn(ref warn_msg) = verdict {
-                        format!("{content}\n\n[LOOP GUARD] {warn_msg}")
-                    } else {
+                    // Surface loop-guard notes (repeated-call warning and/or
+                    // repeated-identical-result warning) to the model.
+                    let mut loop_notes: Vec<String> = Vec::new();
+                    if let LoopGuardVerdict::Warn(ref warn_msg) = verdict {
+                        loop_notes.push(warn_msg.clone());
+                    }
+                    if let Some(w) = outcome_warning {
+                        loop_notes.push(w);
+                    }
+                    let final_content = if loop_notes.is_empty() {
                         content
+                    } else {
+                        format!("{content}\n\n[LOOP GUARD] {}", loop_notes.join(" "))
                     };
 
                     tool_result_blocks.push(ContentBlock::ToolResult {
@@ -952,6 +979,22 @@ async fn call_with_retry(
                     classified.sanitized_message
                 );
 
+                // Honor the classifier's verdict: transient errors (5xx,
+                // connection reset, read timeout, DNS) are retryable. The
+                // driver's own loop only retries 429/529, so without this these
+                // would fail the whole turn on the first occurrence.
+                if classified.is_retryable && attempt < MAX_RETRIES {
+                    let delay = retry_delay_with_jitter(0, attempt);
+                    warn!(
+                        attempt,
+                        delay_ms = delay,
+                        "Retryable LLM error, retrying after delay"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                    last_error = Some(classified.sanitized_message.clone());
+                    continue;
+                }
+
                 if let (Some(provider), Some(cooldown)) = (provider, cooldown) {
                     cooldown.record_failure(provider, classified.is_billing);
                 }
@@ -1061,6 +1104,20 @@ async fn stream_with_retry(
                     "LLM stream error classified: {}",
                     classified.sanitized_message
                 );
+
+                // Honor the classifier's verdict for transient errors, matching
+                // the rate-limit/overload retry behavior already present above.
+                if classified.is_retryable && attempt < MAX_RETRIES {
+                    let delay = retry_delay_with_jitter(0, attempt);
+                    warn!(
+                        attempt,
+                        delay_ms = delay,
+                        "Retryable LLM stream error, retrying after delay"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                    last_error = Some(classified.sanitized_message.clone());
+                    continue;
+                }
 
                 if let (Some(provider), Some(cooldown)) = (provider, cooldown) {
                     cooldown.record_failure(provider, classified.is_billing);
@@ -1609,6 +1666,16 @@ pub async fn run_agent_loop_streaming(
                     let effective_exec_policy =
                         manifest.exec_policy.as_ref().or(global_exec_policy);
 
+                    // Graduated backoff for repeated identical poll calls
+                    // (e.g. status checks) so a polling loop doesn't hammer the
+                    // tool/provider with no delay between attempts.
+                    if let Some(delay_ms) =
+                        loop_guard.get_poll_backoff(&tool_call.name, &tool_call.input)
+                    {
+                        debug!(tool = %tool_call.name, delay_ms, "Loop guard poll backoff (streaming)");
+                        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                    }
+
                     // Execute the tool with the 120s timeout, but emit periodic
                     // ToolExecutionProgress heartbeats so streaming clients
                     // aren't left in a dead gap during slow tools. The first
@@ -1695,14 +1762,31 @@ pub async fn run_agent_loop_streaming(
                         let _ = hook_reg.fire(&ctx);
                     }
 
+                    // Record the call+result outcome so identical repetition
+                    // escalates faster than plain per-params counting and the
+                    // outcome-block fast path in loop_guard.check() can fire.
+                    let outcome_warning = loop_guard.record_outcome(
+                        &tool_call.name,
+                        &tool_call.input,
+                        &result.content,
+                    );
+
                     // Dynamic truncation based on context budget (replaces flat MAX_TOOL_RESULT_CHARS)
                     let content = truncate_tool_result_dynamic(&result.content, &context_budget);
 
-                    // Append warning if verdict was Warn
-                    let final_content = if let LoopGuardVerdict::Warn(ref warn_msg) = verdict {
-                        format!("{content}\n\n[LOOP GUARD] {warn_msg}")
-                    } else {
+                    // Surface loop-guard notes (repeated-call warning and/or
+                    // repeated-identical-result warning) to the model.
+                    let mut loop_notes: Vec<String> = Vec::new();
+                    if let LoopGuardVerdict::Warn(ref warn_msg) = verdict {
+                        loop_notes.push(warn_msg.clone());
+                    }
+                    if let Some(w) = outcome_warning {
+                        loop_notes.push(w);
+                    }
+                    let final_content = if loop_notes.is_empty() {
                         content
+                    } else {
+                        format!("{content}\n\n[LOOP GUARD] {}", loop_notes.join(" "))
                     };
 
                     // Notify client of tool execution result (detect dead consumer)

@@ -747,6 +747,9 @@ impl LlmDriver for OpenAIDriver {
 
             // Parse the SSE stream
             let mut buffer = String::new();
+            // Raw bytes carried over between chunks so a multi-byte UTF-8
+            // char split across a TCP chunk boundary is decoded whole.
+            let mut pending: Vec<u8> = Vec::new();
             let mut text_content = String::new();
             let mut thinking_content = String::new();
             let mut in_thinking = false; // tracks <think> tag state for streaming
@@ -758,7 +761,7 @@ impl LlmDriver for OpenAIDriver {
             let mut byte_stream = resp.bytes_stream();
             while let Some(chunk_result) = byte_stream.next().await {
                 let chunk = chunk_result.map_err(|e| LlmError::Http(e.to_string()))?;
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
+                decode_sse_bytes(&mut pending, &chunk, &mut buffer);
 
                 // Process complete lines
                 while let Some(pos) = buffer.find('\n') {
@@ -982,6 +985,11 @@ impl LlmDriver for OpenAIDriver {
                 }
             }
 
+            // Flush the valid prefix of any bytes still buffered at
+            // stream end (an incomplete trailing sequence here is a
+            // genuinely truncated tail and is dropped, never U+FFFD'd).
+            decode_sse_bytes(&mut pending, &[], &mut buffer);
+
             // Detect a truncated/empty SSE stream — same guard the
             // Anthropic driver got in v0.7.11. The OpenAI-compat
             // streaming pattern can also return HTTP 200 with zero
@@ -1094,6 +1102,46 @@ impl LlmDriver for OpenAIDriver {
             status: 0,
             message: "Max retries exceeded".to_string(),
         })
+    }
+}
+
+/// Append SSE bytes to `buffer`, carrying any incomplete trailing UTF-8
+/// sequence over in `pending` so multi-byte chars (Cyrillic/CJK/emoji) split
+/// across TCP chunk boundaries decode correctly instead of being mangled by
+/// lossy per-chunk decoding. Genuinely-invalid byte sequences become U+FFFD;
+/// an incomplete trailing sequence is retained for the next chunk and is
+/// never replaced.
+fn decode_sse_bytes(pending: &mut Vec<u8>, chunk: &[u8], buffer: &mut String) {
+    pending.extend_from_slice(chunk);
+    loop {
+        match std::str::from_utf8(pending) {
+            Ok(s) => {
+                buffer.push_str(s);
+                pending.clear();
+                return;
+            }
+            Err(e) => {
+                let valid = e.valid_up_to();
+                if valid > 0 {
+                    if let Ok(s) = std::str::from_utf8(&pending[..valid]) {
+                        buffer.push_str(s);
+                    }
+                }
+                match e.error_len() {
+                    // Genuinely invalid sequence: emit a replacement char,
+                    // skip the offending bytes, and keep decoding the rest.
+                    Some(bad) => {
+                        buffer.push('\u{FFFD}');
+                        pending.drain(..valid + bad);
+                    }
+                    // Incomplete trailing sequence: keep it for the next chunk.
+                    None => {
+                        pending.drain(..valid);
+                        return;
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -10,7 +10,7 @@
 //! - `A2aClient` — discover and interact with external A2A agents
 
 use rusty_hand_types::agent::AgentManifest;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tracing::{debug, info, warn};
@@ -176,10 +176,15 @@ impl A2aTaskStore {
         }
     }
 
-    /// Insert a task. If the store is at capacity, the oldest task is evicted.
+    /// Insert a task. If the store is at capacity, evict a task before inserting.
+    ///
+    /// The cap is hard: we prefer to evict a terminal
+    /// (completed/failed/cancelled) task, but if none exists we fall back to
+    /// evicting any task so a removal always happens before the insert.
+    /// Otherwise a store full of `Working`/`Submitted` tasks would grow
+    /// unbounded past `max_tasks`.
     pub fn insert(&self, task: A2aTask) {
         let mut tasks = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
-        // Evict oldest completed/failed/cancelled tasks if at capacity
         if tasks.len() >= self.max_tasks {
             let evict_key = tasks
                 .iter()
@@ -190,7 +195,8 @@ impl A2aTaskStore {
                     )
                 })
                 .map(|(k, _)| k.clone())
-                .next();
+                .next()
+                .or_else(|| tasks.keys().next().cloned());
             if let Some(key) = evict_key {
                 tasks.remove(&key);
             }
@@ -341,6 +347,43 @@ pub fn build_agent_card(manifest: &AgentManifest, base_url: &str) -> AgentCard {
 // A2A Client — discover and interact with external A2A agents
 // ---------------------------------------------------------------------------
 
+/// Maximum size (in bytes) of an A2A HTTP response body we will buffer and
+/// parse. Protects against memory exhaustion via an agent-controlled URL that
+/// returns an unbounded body.
+const MAX_A2A_BODY_BYTES: usize = 8 * 1024 * 1024;
+
+/// Read an HTTP response body and deserialize it as JSON `T`, enforcing a hard
+/// size cap.
+///
+/// Rejects early if a known `Content-Length` exceeds `max`, then streams the
+/// body while accumulating a running total, aborting if it exceeds `max`
+/// (covers chunked/streaming responses that omit `Content-Length`).
+async fn read_capped_json<T: DeserializeOwned>(
+    resp: reqwest::Response,
+    max: usize,
+) -> Result<T, String> {
+    if let Some(len) = resp.content_length() {
+        if len > max as u64 {
+            return Err(format!("A2A response too large: {len} bytes (max {max})"));
+        }
+    }
+
+    let mut bytes = Vec::new();
+    let mut stream = resp.bytes_stream();
+    use futures::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("Failed to read A2A response body: {e}"))?;
+        bytes.extend_from_slice(&chunk);
+        if bytes.len() > max {
+            return Err(format!(
+                "A2A response body exceeded {max} byte limit during streaming"
+            ));
+        }
+    }
+
+    serde_json::from_slice(&bytes).map_err(|e| format!("Invalid A2A response: {e}"))
+}
+
 /// Client for discovering and interacting with external A2A agents.
 pub struct A2aClient {
     client: reqwest::Client,
@@ -375,8 +418,7 @@ impl A2aClient {
             return Err(format!("A2A discovery returned {}", response.status()));
         }
 
-        let card: AgentCard = response
-            .json()
+        let card: AgentCard = read_capped_json(response, MAX_A2A_BODY_BYTES)
             .await
             .map_err(|e| format!("Invalid Agent Card: {e}"))?;
 
@@ -412,10 +454,7 @@ impl A2aClient {
             .await
             .map_err(|e| format!("A2A send_task failed: {e}"))?;
 
-        let body: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| format!("Invalid A2A response: {e}"))?;
+        let body: serde_json::Value = read_capped_json(response, MAX_A2A_BODY_BYTES).await?;
 
         if let Some(result) = body.get("result") {
             serde_json::from_value(result.clone())
@@ -446,10 +485,7 @@ impl A2aClient {
             .await
             .map_err(|e| format!("A2A get_task failed: {e}"))?;
 
-        let body: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| format!("Invalid A2A response: {e}"))?;
+        let body: serde_json::Value = read_capped_json(response, MAX_A2A_BODY_BYTES).await?;
 
         if let Some(result) = body.get("result") {
             serde_json::from_value(result.clone()).map_err(|e| format!("Invalid A2A task: {e}"))

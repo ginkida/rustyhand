@@ -14,7 +14,7 @@ use rusty_hand_types::error::{RustyHandError, RustyHandResult};
 use rusty_hand_types::memory::{MemoryFilter, MemoryFragment, MemoryId, MemorySource};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// Semantic store backed by SQLite with optional vector search.
 #[derive(Clone)]
@@ -258,19 +258,39 @@ impl SemanticStore {
             });
         }
 
-        // If we have a query embedding, re-rank by cosine similarity
+        // If we have a query embedding, re-rank by cosine similarity.
+        // A stored embedding whose length differs from the query embedding's
+        // (e.g. after switching embedding models) is treated as a non-match
+        // (sentinel -1.0) rather than scoring a neutral 0.0 via
+        // cosine_similarity — otherwise every stale-dim embedding ties at 0.0
+        // and recall silently degrades to recency order.
         if let Some(qe) = query_embedding {
+            // Warn once if any candidate has a dimension mismatch.
+            static DIM_MISMATCH_WARNED: std::sync::Once = std::sync::Once::new();
+            if let Some(stored_dim) = fragments
+                .iter()
+                .filter_map(|f| f.embedding.as_deref())
+                .map(|e| e.len())
+                .find(|&len| len != qe.len())
+            {
+                DIM_MISMATCH_WARNED.call_once(|| {
+                    warn!(
+                        stored_dim,
+                        query_dim = qe.len(),
+                        "embedding dimension mismatch — vector recall degraded; re-embed after changing the embedding model"
+                    );
+                });
+            }
+            let score = |frag: &MemoryFragment| -> f32 {
+                frag.embedding
+                    .as_deref()
+                    .filter(|e| e.len() == qe.len())
+                    .map(|e| cosine_similarity(qe, e))
+                    .unwrap_or(-1.0)
+            };
             fragments.sort_by(|a, b| {
-                let sim_a = a
-                    .embedding
-                    .as_deref()
-                    .map(|e| cosine_similarity(qe, e))
-                    .unwrap_or(-1.0);
-                let sim_b = b
-                    .embedding
-                    .as_deref()
-                    .map(|e| cosine_similarity(qe, e))
-                    .unwrap_or(-1.0);
+                let sim_a = score(a);
+                let sim_b = score(b);
                 sim_b
                     .partial_cmp(&sim_a)
                     .unwrap_or(std::cmp::Ordering::Equal)
