@@ -19,14 +19,15 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT" />
-  <img src="https://img.shields.io/badge/version-0.7.84-green?style=flat-square" alt="v0.7.84" />
-  <img src="https://img.shields.io/badge/tests-1,728%20passing-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/version-0.7.85-green?style=flat-square" alt="v0.7.85" />
+  <img src="https://img.shields.io/badge/tests-1,748%20passing-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/clippy-0%20warnings-brightgreen?style=flat-square" alt="Clippy" />
 </p>
 
 ---
 
-> **v0.7.84 — Capabilities & Security dashboard pages, channel setup guidance, partial-update data-loss fix (June 2026)**
+> **v0.7.85 — Security & correctness hardening: 84 audit-confirmed fixes across two adversarial sweeps (June 2026)**
+> SSRF redirect re-validation, replay-proof RHP handshake (protocol v2), WASM sandbox isolation, supply-chain install guards, UTF-8 panic fixes, retry/loop-guard correctness, and broad DoS resource caps. See the release notes for details.
 >
 > Clone → `cargo run --release -- start` → open the dashboard → talk to an agent.
 > **No API key required.** When no provider key is found in the environment,
