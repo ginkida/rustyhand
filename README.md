@@ -19,15 +19,15 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT" />
-  <img src="https://img.shields.io/badge/version-0.7.85-green?style=flat-square" alt="v0.7.85" />
+  <img src="https://img.shields.io/badge/version-0.7.86-green?style=flat-square" alt="v0.7.86" />
   <img src="https://img.shields.io/badge/tests-1,748%20passing-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/clippy-0%20warnings-brightgreen?style=flat-square" alt="Clippy" />
 </p>
 
 ---
 
-> **v0.7.85 — Security & correctness hardening: 84 audit-confirmed fixes across two adversarial sweeps (June 2026)**
-> SSRF redirect re-validation, replay-proof RHP handshake (protocol v2), WASM sandbox isolation, supply-chain install guards, UTF-8 panic fixes, retry/loop-guard correctness, and broad DoS resource caps. See the release notes for details.
+> **v0.7.86 — Security & correctness hardening: 84 audit-confirmed fixes across two adversarial sweeps (June 2026)**
+> SSRF redirect re-validation, replay-proof RHP handshake (protocol v2), WASM sandbox isolation, supply-chain install guards, UTF-8 panic fixes, retry/loop-guard correctness, and broad DoS resource caps. Supersedes v0.7.85, adding a cross-platform absolute-path denial fix (Windows) and a quinn-proto advisory bump (RUSTSEC-2026-0185). See the release notes for details.
 >
 > Clone → `cargo run --release -- start` → open the dashboard → talk to an agent.
 > **No API key required.** When no provider key is found in the environment,
