@@ -88,14 +88,32 @@ impl BrowserManager {
                 cmd.env(var, v);
             }
         }
+        // Reap the child if the timeout below drops the future.
+        cmd.kill_on_drop(true);
 
         debug!(agent_id, args = ?args, "Running agent-browser command");
 
-        let output = cmd.output().await.map_err(|e| {
-            format!(
-                "Failed to run agent-browser: {e}. Install it with: npm install -g agent-browser"
-            )
-        })?;
+        // Bound execution time so a wedged page / infinite-loop script cannot
+        // hang the tool call forever and orphan the child (config.timeout_secs
+        // was previously dead — only the AGENT_BROWSER_DEFAULT_TIMEOUT env applied).
+        let output = match tokio::time::timeout(
+            std::time::Duration::from_secs(self.config.timeout_secs),
+            cmd.output(),
+        )
+        .await
+        {
+            Ok(r) => r.map_err(|e| {
+                format!(
+                    "Failed to run agent-browser: {e}. Install it with: npm install -g agent-browser"
+                )
+            })?,
+            Err(_) => {
+                return Err(format!(
+                    "agent-browser command timed out after {}s",
+                    self.config.timeout_secs
+                ))
+            }
+        };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -137,9 +155,25 @@ impl BrowserManager {
         }
     }
 
-    /// Clean up an agent's browser session (called after agent loop ends).
+    /// Clean up an agent's browser session (called when an agent run ends).
     pub async fn cleanup_agent(&self, agent_id: &str) {
         self.close_session(agent_id).await;
+    }
+
+    /// Release an agent's session slot WITHOUT issuing a close subprocess.
+    ///
+    /// Used from the (synchronous) agent-run-stop path so the `max_sessions`
+    /// limit recovers when an agent is stopped/removed — previously the slot was
+    /// freed only by an explicit LLM `browser_close`, so a handful of agents
+    /// could permanently exhaust the limit. The underlying browser process is
+    /// reaped by the agent-browser daemon's own idle timeout.
+    pub fn release_session(&self, agent_id: &str) -> bool {
+        if self.active_sessions.remove(agent_id).is_some() {
+            debug!(agent_id, "Released browser session slot");
+            true
+        } else {
+            false
+        }
     }
 
     /// Run a command without session limit checking (for close/cleanup).
@@ -156,8 +190,22 @@ impl BrowserManager {
                 cmd.env(var, v);
             }
         }
+        cmd.kill_on_drop(true);
 
-        let status = cmd.status().await.map_err(|e| e.to_string())?;
+        let status = match tokio::time::timeout(
+            std::time::Duration::from_secs(self.config.timeout_secs),
+            cmd.status(),
+        )
+        .await
+        {
+            Ok(r) => r.map_err(|e| e.to_string())?,
+            Err(_) => {
+                return Err(format!(
+                    "agent-browser command timed out after {}s",
+                    self.config.timeout_secs
+                ))
+            }
+        };
         if status.success() {
             Ok(())
         } else {
@@ -485,8 +533,11 @@ pub async fn tool_browser_scroll(
 
 /// browser_download — Download a file from a URL using the browser's session cookies.
 ///
-/// Uses the browser's authenticated session to download files that require
-/// login or cookies. Saves to temp dir and returns the local path.
+/// NOTE: this performs an UNAUTHENTICATED HTTP GET — it does NOT reuse the
+/// agent's browser-session cookies, so a URL gated behind a browser login will
+/// return the login page, not the file. The request is SSRF-checked, has its
+/// redirects re-validated per hop, and is size-capped. Saves to a temp dir and
+/// returns the local path.
 pub async fn tool_browser_download(
     input: &serde_json::Value,
     _mgr: &BrowserManager,
@@ -498,10 +549,15 @@ pub async fn tool_browser_download(
     // SECURITY: SSRF check before any network I/O
     crate::web_fetch::check_ssrf(url)?;
 
-    let client = crate::http_client::shared();
+    // Build a client whose redirect policy re-validates each hop against SSRF
+    // rules — the shared() client follows redirects with no per-hop re-check, so
+    // a public URL could 3xx-redirect to an internal/metadata host.
+    let client = crate::http_client::build_with_proxy(
+        &rusty_hand_types::config::ProxyConfig::default(),
+        std::time::Duration::from_secs(120),
+    );
     let resp = client
         .get(url)
-        .timeout(std::time::Duration::from_secs(120))
         .send()
         .await
         .map_err(|e| format!("Download failed: {e}"))?;
@@ -510,20 +566,30 @@ pub async fn tool_browser_download(
         return Err(format!("Download failed: HTTP {}", resp.status().as_u16()));
     }
 
-    // File size limit: 100 MB
-    const MAX_DOWNLOAD_SIZE: u64 = 100 * 1024 * 1024;
+    // File size limit: 100 MB — enforced via Content-Length AND during streaming
+    // (a chunked / no-Content-Length response would otherwise bypass the cap and
+    // let an attacker stream unbounded bytes into memory).
+    const MAX_DOWNLOAD_SIZE: usize = 100 * 1024 * 1024;
     if let Some(len) = resp.content_length() {
-        if len > MAX_DOWNLOAD_SIZE {
+        if len > MAX_DOWNLOAD_SIZE as u64 {
             return Err(format!(
                 "File too large: {len} bytes (max {MAX_DOWNLOAD_SIZE})"
             ));
         }
     }
 
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| format!("Failed to read response: {e}"))?;
+    use futures::StreamExt;
+    let mut stream = resp.bytes_stream();
+    let mut bytes: Vec<u8> = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("Failed to read response: {e}"))?;
+        if bytes.len() + chunk.len() > MAX_DOWNLOAD_SIZE {
+            return Err(format!(
+                "File too large (exceeds {MAX_DOWNLOAD_SIZE} bytes during streaming)"
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
 
     // Save to temp directory
     let dir = std::env::temp_dir().join("rusty_hand_downloads");

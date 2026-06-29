@@ -51,11 +51,27 @@ pub fn shared() -> &'static reqwest::Client {
 /// builder simple and avoids constructing a fresh Client per request.
 pub fn build_with_proxy(cfg: &ProxyConfig, timeout: Duration) -> reqwest::Client {
     // Reusable builder for the standard pool defaults.
+    //
+    // SECURITY: install a redirect policy that re-validates every hop against
+    // the SSRF rules (with an empty allowlist — an attacker-controlled redirect
+    // must not inherit the initial URL's allowlist trust). Without this, a
+    // public URL that passes the pre-flight SSRF check could 3xx-redirect to an
+    // internal/loopback/cloud-metadata host and reqwest's default policy would
+    // silently follow it. These clients are used only for web fetching.
     let direct_builder = || {
         reqwest::Client::builder()
             .timeout(timeout)
             .pool_idle_timeout(Duration::from_secs(60))
             .pool_max_idle_per_host(10)
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() >= 10 {
+                    return attempt.error("too many redirects");
+                }
+                match crate::web_fetch::check_ssrf_with_allowlist(attempt.url().as_str(), &[]) {
+                    Ok(()) => attempt.follow(),
+                    Err(_) => attempt.error("SSRF blocked: redirect to a restricted target"),
+                }
+            }))
     };
 
     if !cfg.is_enabled() {

@@ -1953,11 +1953,20 @@ impl RustyHandKernel {
 
         // Map manifest capabilities to sandbox capabilities
         let caps = manifest_to_capabilities(&entry.manifest);
+        // Enforce the effective exec policy (per-agent override → kernel global)
+        // on the WASM shell_exec host call, so RUSTYHAND_EXEC_MODE deny/allowlist
+        // is honored for guest code, not just the builtin shell tool.
+        let effective_exec_policy = entry
+            .manifest
+            .exec_policy
+            .clone()
+            .unwrap_or_else(|| self.config.exec_policy.clone());
         let sandbox_config = SandboxConfig {
             fuel_limit: entry.manifest.resources.max_cpu_time_ms * 100_000,
             max_memory_bytes: entry.manifest.resources.max_memory_bytes as usize,
             capabilities: caps,
             timeout_secs: Some(30),
+            exec_policy: Some(effective_exec_policy),
         };
 
         let input = serde_json::json!({
@@ -2964,6 +2973,10 @@ impl RustyHandKernel {
 
     /// Cancel an agent's currently running LLM task.
     pub fn stop_agent_run(&self, agent_id: AgentId) -> KernelResult<bool> {
+        // Release any browser-session slot the agent held so the max_sessions
+        // limit recovers (the slot was otherwise freed only by an explicit
+        // browser_close, letting a few agents exhaust browsing permanently).
+        self.browser_ctx.release_session(&agent_id.to_string());
         if let Some((_, handle)) = self.running_tasks.remove(&agent_id) {
             handle.abort();
             info!(agent_id = %agent_id, "Agent run cancelled");

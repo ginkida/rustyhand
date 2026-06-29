@@ -26,6 +26,7 @@
 use crate::host_functions;
 use crate::kernel_handle::KernelHandle;
 use rusty_hand_types::capability::Capability;
+use rusty_hand_types::config::ExecPolicy;
 use std::sync::Arc;
 use tracing::debug;
 use wasmtime::*;
@@ -42,6 +43,11 @@ pub struct SandboxConfig {
     /// Wall-clock timeout in seconds for epoch-based interruption.
     /// Defaults to 30 seconds if None.
     pub timeout_secs: Option<u64>,
+    /// Exec policy enforced on the WASM `shell_exec` host call. When set, the
+    /// operator's ExecSecurityMode (deny/allowlist) gates shell execution from
+    /// guest code the same way it gates the builtin shell tool. `None` = no
+    /// extra gate beyond the per-command capability check.
+    pub exec_policy: Option<ExecPolicy>,
 }
 
 impl Default for SandboxConfig {
@@ -51,6 +57,7 @@ impl Default for SandboxConfig {
             max_memory_bytes: 16 * 1024 * 1024,
             capabilities: Vec::new(),
             timeout_secs: None,
+            exec_policy: None,
         }
     }
 }
@@ -65,6 +72,8 @@ pub struct GuestState {
     pub agent_id: String,
     /// Tokio runtime handle for async operations in sync host functions.
     pub tokio_handle: tokio::runtime::Handle,
+    /// Exec policy gating the `shell_exec` host call (see [`SandboxConfig::exec_policy`]).
+    pub exec_policy: Option<ExecPolicy>,
 }
 
 /// Result of executing a WASM module.
@@ -164,6 +173,7 @@ impl WasmSandbox {
                 kernel,
                 agent_id: agent_id.to_string(),
                 tokio_handle,
+                exec_policy: config.exec_policy.clone(),
             },
         );
 

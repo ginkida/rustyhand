@@ -229,17 +229,27 @@ pub fn check_ssrf_with_allowlist(url: &str, allowlist: &[String]) -> Result<(), 
         return Ok(());
     }
 
-    // Resolve DNS and check every returned IP
+    // Resolve DNS and check every returned IP. Fail CLOSED: if resolution
+    // fails (or the host is empty/malformed), block rather than fall through to
+    // Ok — otherwise an unresolvable/garbage host bypasses the private-IP gate.
+    // (Residual: reqwest re-resolves at connect time, so a sub-TTL DNS-rebinding
+    // host could still differ; full mitigation requires pinning the validated IP
+    // via a custom resolver.)
     let port = if url.starts_with("https") { 443 } else { 80 };
     let socket_addr = format!("{hostname}:{port}");
-    if let Ok(addrs) = socket_addr.to_socket_addrs() {
-        for addr in addrs {
-            let ip = addr.ip();
-            if ip.is_loopback() || ip.is_unspecified() || is_private_ip(&ip) {
-                return Err(format!(
-                    "SSRF blocked: {hostname} resolves to private IP {ip}"
-                ));
+    match socket_addr.to_socket_addrs() {
+        Ok(addrs) => {
+            for addr in addrs {
+                let ip = addr.ip();
+                if ip.is_loopback() || ip.is_unspecified() || is_private_ip(&ip) {
+                    return Err(format!(
+                        "SSRF blocked: {hostname} resolves to private IP {ip}"
+                    ));
+                }
             }
+        }
+        Err(e) => {
+            return Err(format!("SSRF blocked: could not resolve {hostname}: {e}"));
         }
     }
 

@@ -3712,6 +3712,27 @@ fn boot_kernel(config: Option<PathBuf>) -> RustyHandKernel {
 // Skill commands
 // ---------------------------------------------------------------------------
 
+/// Reject skill names that are not a single safe path component, so an
+/// untrusted skill.toml cannot escape the skills dir (e.g. name = "../../.ssh"
+/// or an absolute path) and overwrite arbitrary files. Mirrors the
+/// ParentDir/absolute rejection in `rusty-hand-skills/src/marketplace.rs`.
+fn validate_skill_name(name: &str) {
+    let path = std::path::Path::new(name);
+    let unsafe_name = name.is_empty()
+        || path.components().count() != 1
+        || path.is_absolute()
+        || name.contains('/')
+        || name.contains('\\')
+        || name == "."
+        || name == "..";
+    if unsafe_name {
+        eprintln!(
+            "Refusing to install: unsafe skill name {name:?} (must be a single safe path component)"
+        );
+        std::process::exit(1);
+    }
+}
+
 fn cmd_skill_install(source: &str) {
     let home = rusty_hand_home();
     let skills_dir = home.join("skills");
@@ -3730,6 +3751,7 @@ fn cmd_skill_install(source: &str) {
                 println!("Detected OpenClaw skill format. Converting...");
                 match rusty_hand_skills::openclaw_compat::convert_openclaw_skill(&source_path) {
                     Ok(manifest) => {
+                        validate_skill_name(&manifest.skill.name);
                         let dest = skills_dir.join(&manifest.skill.name);
                         // Copy skill directory
                         copy_dir_recursive(&source_path, &dest);
@@ -3765,6 +3787,7 @@ fn cmd_skill_install(source: &str) {
                 std::process::exit(1);
             });
 
+        validate_skill_name(&manifest.skill.name);
         let dest = skills_dir.join(&manifest.skill.name);
         copy_dir_recursive(&source_path, &dest);
         println!(
@@ -4525,7 +4548,19 @@ fn cmd_config_set(key: &str, value: &str) {
             _ => toml::Value::String(value.to_string()),
         }
     } else {
-        toml::Value::String(value.to_string())
+        // Field absent from config — infer the TOML type from the literal.
+        // Writing it unconditionally as a String produced e.g.
+        // `max_iterations = "50"`, which then fails to deserialize into
+        // KernelConfig on next boot (silent fallback to defaults).
+        if let Ok(i) = value.parse::<i64>() {
+            toml::Value::Integer(i)
+        } else if value == "true" || value == "false" {
+            toml::Value::Boolean(value == "true")
+        } else if let Ok(f) = value.parse::<f64>() {
+            toml::Value::Float(f)
+        } else {
+            toml::Value::String(value.to_string())
+        }
     };
 
     tbl.insert(last_key.to_string(), new_value);
@@ -4535,6 +4570,17 @@ fn cmd_config_set(key: &str, value: &str) {
         ui::error(&format!("Failed to serialize config: {e}"));
         std::process::exit(1);
     });
+
+    // Refuse to write a config that no longer deserializes into KernelConfig —
+    // a bad `set` (e.g. a string where an int is expected) must never silently
+    // corrupt the user's config.
+    if let Err(e) = toml::from_str::<rusty_hand_types::config::KernelConfig>(&serialized) {
+        ui::error_with_fix(
+            &format!("Refusing to write: '{key} = {value}' produces an invalid config: {e}"),
+            "Check the expected type for that field",
+        );
+        std::process::exit(1);
+    }
 
     std::fs::write(&config_path, &serialized).unwrap_or_else(|e| {
         ui::error(&format!("Failed to write config: {e}"));
@@ -4614,7 +4660,7 @@ fn cmd_config_unset(key: &str) {
 fn cmd_config_set_key(provider: &str) {
     let env_var = provider_to_env_var(provider);
 
-    let key = prompt_input(&format!("  Paste your {provider} API key: "));
+    let key = prompt_secret(&format!("  Paste your {provider} API key: "));
     if key.is_empty() {
         ui::error("No key provided. Cancelled.");
         return;
@@ -4693,6 +4739,28 @@ fn prompt_input(prompt: &str) -> String {
     let mut line = String::new();
     io::stdin().lock().read_line(&mut line).unwrap_or(0);
     line.trim().to_string()
+}
+
+/// Prompt for a secret without echoing it to the terminal. On unix this
+/// toggles terminal echo off around the read via `stty` (best-effort); on
+/// other platforms it falls back to the plain echoing prompt.
+#[cfg(unix)]
+fn prompt_secret(label: &str) -> String {
+    print!("{label}");
+    io::stdout().flush().unwrap();
+    // Best-effort: if `stty` is unavailable the value is simply echoed as before.
+    let _ = std::process::Command::new("stty").arg("-echo").status();
+    let mut line = String::new();
+    io::stdin().lock().read_line(&mut line).unwrap_or(0);
+    let _ = std::process::Command::new("stty").arg("echo").status();
+    // The user's Enter wasn't echoed — print a newline to keep output tidy.
+    println!();
+    line.trim().to_string()
+}
+
+#[cfg(not(unix))]
+fn prompt_secret(label: &str) -> String {
+    prompt_input(label)
 }
 
 pub(crate) fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) {
@@ -4934,7 +5002,7 @@ fn cmd_vault_set(key: &str) {
         std::process::exit(1);
     }
 
-    let value = prompt_input(&format!("Enter value for {key}: "));
+    let value = prompt_secret(&format!("Enter value for {key}: "));
     if value.is_empty() {
         ui::error("Empty value — not stored.");
         std::process::exit(1);

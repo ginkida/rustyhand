@@ -256,10 +256,27 @@ fn host_net_fetch(state: &GuestState, params: &serde_json::Value) -> serde_json:
         match request.send().await {
             Ok(resp) => {
                 let status = resp.status().as_u16();
-                match resp.text().await {
-                    Ok(text) => json!({"ok": {"status": status, "body": text}}),
-                    Err(e) => json!({"error": format!("Failed to read response: {e}")}),
+                // SECURITY: cap the response body — resp.text() is unbounded, so
+                // a large/endless endpoint could OOM the daemon.
+                const MAX_NET_FETCH_BYTES: usize = 8 * 1024 * 1024;
+                use futures::StreamExt;
+                let mut stream = resp.bytes_stream();
+                let mut buf: Vec<u8> = Vec::new();
+                while let Some(chunk) = stream.next().await {
+                    match chunk {
+                        Ok(bytes) => {
+                            if buf.len() + bytes.len() > MAX_NET_FETCH_BYTES {
+                                return json!({"error": format!(
+                                    "Response too large (exceeds {MAX_NET_FETCH_BYTES} bytes)"
+                                )});
+                            }
+                            buf.extend_from_slice(&bytes);
+                        }
+                        Err(e) => return json!({"error": format!("Failed to read response: {e}")}),
+                    }
                 }
+                let text = String::from_utf8_lossy(&buf).to_string();
+                json!({"ok": {"status": status, "body": text}})
             }
             Err(e) => json!({"error": format!("Request failed: {e}")}),
         }
@@ -312,28 +329,76 @@ fn host_shell_exec(state: &GuestState, params: &serde_json::Value) -> serde_json
         return e;
     }
 
-    let args: Vec<&str> = params
+    // SECURITY: honor the operator's exec policy (deny / allowlist) — the same
+    // gate the builtin shell tool applies. Without this, RUSTYHAND_EXEC_MODE is
+    // silently bypassed for WASM guests.
+    if let Some(policy) = &state.exec_policy {
+        if let Err(reason) = crate::subprocess_sandbox::validate_command_allowlist(command, policy)
+        {
+            return json!({"error": format!("shell_exec denied by exec policy: {reason}")});
+        }
+    }
+
+    let args: Vec<String> = params
         .get("args")
         .and_then(|a| a.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
 
-    // Command::new does NOT use a shell — safe from shell injection.
-    // Each argument is passed directly to the process.
-    match std::process::Command::new(command).args(&args).output() {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            json!({
-                "ok": {
-                    "exit_code": output.status.code(),
-                    "stdout": stdout,
-                    "stderr": stderr,
-                }
-            })
+    const MAX_SHELL_OUTPUT_BYTES: usize = 100_000;
+    const SHELL_TIMEOUT_SECS: u64 = 30;
+    let command = command.to_string();
+
+    state.tokio_handle.block_on(async move {
+        // SECURITY: scrub the environment so the guest cannot read the daemon's
+        // secrets (provider keys, vault, OAuth tokens) via e.g. `env`. Re-add
+        // only a minimal safe set so common binaries still resolve. Command::new
+        // does NOT use a shell, so args are not re-interpreted.
+        let mut cmd = tokio::process::Command::new(&command);
+        cmd.args(&args);
+        cmd.env_clear();
+        for key in ["PATH", "HOME", "LANG", "LC_ALL", "USER", "TMPDIR"] {
+            if let Ok(val) = std::env::var(key) {
+                cmd.env(key, val);
+            }
         }
-        Err(e) => json!({"error": format!("shell_exec failed: {e}")}),
-    }
+        cmd.kill_on_drop(true);
+
+        // Bound execution time (the WASM fuel/epoch limits do NOT fire while
+        // native host code is blocked) and cap captured output.
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(SHELL_TIMEOUT_SECS),
+            cmd.output(),
+        )
+        .await
+        {
+            Ok(Ok(output)) => {
+                let stdout = rusty_hand_types::text::truncate_bytes(
+                    &String::from_utf8_lossy(&output.stdout),
+                    MAX_SHELL_OUTPUT_BYTES,
+                )
+                .to_string();
+                let stderr = rusty_hand_types::text::truncate_bytes(
+                    &String::from_utf8_lossy(&output.stderr),
+                    MAX_SHELL_OUTPUT_BYTES,
+                )
+                .to_string();
+                json!({
+                    "ok": {
+                        "exit_code": output.status.code(),
+                        "stdout": stdout,
+                        "stderr": stderr,
+                    }
+                })
+            }
+            Ok(Err(e)) => json!({"error": format!("shell_exec failed: {e}")}),
+            Err(_) => json!({"error": format!("shell_exec timed out after {SHELL_TIMEOUT_SECS}s")}),
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -470,6 +535,7 @@ mod tests {
             kernel: None,
             agent_id: "test-agent".to_string(),
             tokio_handle: tokio::runtime::Handle::current(),
+            exec_policy: None,
         }
     }
 
