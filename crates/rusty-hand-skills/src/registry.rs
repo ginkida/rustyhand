@@ -244,6 +244,23 @@ impl SkillRegistry {
             crate::SkillRuntime::PromptOnly | crate::SkillRuntime::Builtin => {}
         }
 
+        // SECURITY: Scan prompt content for injection attacks before accepting
+        // the skill — the same defense the bundled / SKILL.md load paths apply.
+        // A hand-written skill.toml must not inject critical patterns into the
+        // system prompt unscanned.
+        if let Some(ref ctx) = manifest.prompt_context {
+            let warnings = SkillVerifier::scan_prompt_content(ctx);
+            if let Some(critical) = warnings
+                .iter()
+                .find(|w| matches!(w.severity, crate::verify::WarningSeverity::Critical))
+            {
+                return Err(SkillError::SecurityBlocked(format!(
+                    "Skill '{}' blocked due to prompt injection: {}",
+                    manifest.skill.name, critical.message
+                )));
+            }
+        }
+
         let name = manifest.skill.name.clone();
 
         self.skills.insert(

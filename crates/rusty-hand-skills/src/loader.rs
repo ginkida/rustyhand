@@ -6,6 +6,11 @@ use std::process::Stdio;
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, error};
 
+/// Maximum bytes captured from a skill's stdout/stderr (each, independently).
+/// A malicious or buggy skill could otherwise stream unbounded output and OOM
+/// the host. Once the cap is exceeded we stop reading and kill the child.
+const MAX_SKILL_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
+
 /// Execute a skill tool by spawning the appropriate runtime.
 pub async fn execute_skill_tool(
     manifest: &SkillManifest,
@@ -89,7 +94,10 @@ async fn execute_python(
         .current_dir(skill_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        // Reap the child if this future is dropped/cancelled (timeout) instead
+        // of leaving it orphaned.
+        .kill_on_drop(true);
 
     // SECURITY: Isolate environment to prevent secret leakage.
     // Skills are third-party code — they must not inherit API keys,
@@ -114,28 +122,18 @@ async fn execute_python(
     // Python needs PYTHONIOENCODING for UTF-8 output
     cmd.env("PYTHONIOENCODING", "utf-8");
 
-    let mut child = cmd
+    let child = cmd
         .spawn()
         .map_err(|e| SkillError::ExecutionFailed(format!("Failed to spawn Python: {e}")))?;
 
-    // Write input to stdin
-    if let Some(mut stdin) = child.stdin.take() {
-        let payload_bytes = serde_json::to_vec(&payload)
-            .map_err(|e| SkillError::ExecutionFailed(format!("JSON serialize: {e}")))?;
-        stdin
-            .write_all(&payload_bytes)
-            .await
-            .map_err(|e| SkillError::ExecutionFailed(format!("Write stdin: {e}")))?;
-        drop(stdin);
-    }
+    let payload_bytes = serde_json::to_vec(&payload)
+        .map_err(|e| SkillError::ExecutionFailed(format!("JSON serialize: {e}")))?;
 
-    let output = child
-        .wait_with_output()
-        .await
-        .map_err(|e| SkillError::ExecutionFailed(format!("Wait for Python: {e}")))?;
+    // Write stdin concurrently with draining bounded stdout/stderr, then wait.
+    let (stdout_bytes, stderr_bytes, status) = drive_skill_process(child, payload_bytes).await?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    if !status.success() {
+        let stderr = String::from_utf8_lossy(&stderr_bytes);
         error!("Python skill failed: {stderr}");
         return Ok(SkillToolResult {
             output: serde_json::json!({ "error": stderr.to_string() }),
@@ -144,7 +142,7 @@ async fn execute_python(
     }
 
     // Parse stdout as JSON
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = String::from_utf8_lossy(&stdout_bytes);
     match serde_json::from_str::<serde_json::Value>(&stdout) {
         Ok(value) => Ok(SkillToolResult {
             output: value,
@@ -194,7 +192,10 @@ async fn execute_node(
         .current_dir(skill_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        // Reap the child if this future is dropped/cancelled (timeout) instead
+        // of leaving it orphaned.
+        .kill_on_drop(true);
 
     // SECURITY: Isolate environment (same as Python — prevent secret leakage)
     cmd.env_clear();
@@ -216,34 +217,25 @@ async fn execute_node(
     // Node needs NODE_PATH sometimes
     cmd.env("NODE_NO_WARNINGS", "1");
 
-    let mut child = cmd
+    let child = cmd
         .spawn()
         .map_err(|e| SkillError::ExecutionFailed(format!("Failed to spawn Node.js: {e}")))?;
 
-    if let Some(mut stdin) = child.stdin.take() {
-        let payload_bytes = serde_json::to_vec(&payload)
-            .map_err(|e| SkillError::ExecutionFailed(format!("JSON serialize: {e}")))?;
-        stdin
-            .write_all(&payload_bytes)
-            .await
-            .map_err(|e| SkillError::ExecutionFailed(format!("Write stdin: {e}")))?;
-        drop(stdin);
-    }
+    let payload_bytes = serde_json::to_vec(&payload)
+        .map_err(|e| SkillError::ExecutionFailed(format!("JSON serialize: {e}")))?;
 
-    let output = child
-        .wait_with_output()
-        .await
-        .map_err(|e| SkillError::ExecutionFailed(format!("Wait for Node.js: {e}")))?;
+    // Write stdin concurrently with draining bounded stdout/stderr, then wait.
+    let (stdout_bytes, stderr_bytes, status) = drive_skill_process(child, payload_bytes).await?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    if !status.success() {
+        let stderr = String::from_utf8_lossy(&stderr_bytes);
         return Ok(SkillToolResult {
             output: serde_json::json!({ "error": stderr.to_string() }),
             is_error: true,
         });
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = String::from_utf8_lossy(&stdout_bytes);
     match serde_json::from_str::<serde_json::Value>(&stdout) {
         Ok(value) => Ok(SkillToolResult {
             output: value,
@@ -254,6 +246,93 @@ async fn execute_node(
             is_error: false,
         }),
     }
+}
+
+/// Read from `reader` into `buf` until EOF or `MAX_SKILL_OUTPUT_BYTES`,
+/// whichever comes first. Returns `Ok(true)` if the cap was hit (output was
+/// truncated), `Ok(false)` otherwise.
+async fn read_capped<R>(reader: Option<R>, buf: &mut Vec<u8>) -> std::io::Result<bool>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    use tokio::io::AsyncReadExt;
+    let Some(mut reader) = reader else {
+        return Ok(false);
+    };
+    let mut chunk = [0u8; 8192];
+    loop {
+        let n = reader.read(&mut chunk).await?;
+        if n == 0 {
+            return Ok(false);
+        }
+        let remaining = MAX_SKILL_OUTPUT_BYTES.saturating_sub(buf.len());
+        if n > remaining {
+            buf.extend_from_slice(&chunk[..remaining]);
+            return Ok(true);
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+}
+
+/// Drive a spawned skill process to completion.
+///
+/// Writes the JSON `payload_bytes` to the child's stdin on a separate task so
+/// it runs *concurrently* with draining stdout/stderr — large payloads
+/// (>~64 KiB) would otherwise deadlock against a skill that writes stdout while
+/// still reading stdin. stdout/stderr are each capped at
+/// `MAX_SKILL_OUTPUT_BYTES`; if either exceeds the cap, the child is killed and
+/// its captured output is marked as truncated.
+///
+/// Returns `(stdout, stderr, exit_status)`.
+async fn drive_skill_process(
+    mut child: tokio::process::Child,
+    payload_bytes: Vec<u8>,
+) -> Result<(Vec<u8>, Vec<u8>, std::process::ExitStatus), SkillError> {
+    // Spawn the stdin writer so it cannot deadlock against output reads.
+    let stdin_task = child.stdin.take().map(|mut stdin| {
+        tokio::spawn(async move {
+            // Best-effort: a skill may legitimately exit before consuming all
+            // input. Dropping `stdin` afterwards closes the pipe (EOF).
+            let _ = stdin.write_all(&payload_bytes).await;
+        })
+    });
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let mut stdout_buf = Vec::new();
+    let mut stderr_buf = Vec::new();
+
+    let (out_res, err_res) = tokio::join!(
+        read_capped(stdout, &mut stdout_buf),
+        read_capped(stderr, &mut stderr_buf),
+    );
+    let out_truncated =
+        out_res.map_err(|e| SkillError::ExecutionFailed(format!("Read stdout: {e}")))?;
+    let err_truncated =
+        err_res.map_err(|e| SkillError::ExecutionFailed(format!("Read stderr: {e}")))?;
+
+    // Ensure the stdin writer has finished (it may already have).
+    if let Some(task) = stdin_task {
+        let _ = task.await;
+    }
+
+    // A skill that floods output past the cap is misbehaving — kill it so
+    // `wait()` returns promptly, and surface the truncation in stderr. The kill
+    // forces a non-success exit status, so callers report it via the error path.
+    if out_truncated || err_truncated {
+        let _ = child.kill().await;
+        stderr_buf.extend_from_slice(
+            format!("\n[rustyhand: skill output truncated at {MAX_SKILL_OUTPUT_BYTES} bytes]")
+                .as_bytes(),
+        );
+    }
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| SkillError::ExecutionFailed(format!("Wait for child: {e}")))?;
+
+    Ok((stdout_buf, stderr_buf, status))
 }
 
 /// Find Python 3 binary.

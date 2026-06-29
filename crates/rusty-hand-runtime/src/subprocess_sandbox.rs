@@ -136,6 +136,36 @@ fn extract_all_commands(command: &str) -> Vec<&str> {
     commands
 }
 
+/// Detect shell-evaluation constructs that must never reach `sh -c` when
+/// running in allowlist mode.
+///
+/// `extract_all_commands` only splits on `&&`, `||`, `|`, and `;`, so command
+/// substitution (`` ` ``, `$(...)`), parameter expansion (`${...}`), embedded
+/// newlines/carriage returns, and lone backgrounding `&` would all smuggle
+/// commands straight into `sh -c` without ever being allowlisted. Fail closed.
+fn contains_disallowed_shell_metachars(command: &str) -> bool {
+    if command.contains('`')
+        || command.contains("$(")
+        || command.contains("${")
+        || command.contains('\n')
+        || command.contains('\r')
+    {
+        return true;
+    }
+    // Reject a backgrounding `&` that is not part of `&&`.
+    let bytes = command.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'&' {
+            let part_of_and =
+                (i > 0 && bytes[i - 1] == b'&') || (i + 1 < bytes.len() && bytes[i + 1] == b'&');
+            if !part_of_and {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Validate a shell command against the exec policy.
 ///
 /// Returns `Ok(())` if the command is allowed, `Err(reason)` if blocked.
@@ -152,6 +182,14 @@ pub fn validate_command_allowlist(command: &str, policy: &ExecPolicy) -> Result<
             Ok(())
         }
         ExecSecurityMode::Allowlist => {
+            // Fail closed before the allowlist split: reject any shell-
+            // evaluation constructs that the `&& || | ;` splitter cannot see.
+            if contains_disallowed_shell_metachars(command) {
+                return Err(
+                    "command contains shell metacharacters not permitted in allowlist mode"
+                        .to_string(),
+                );
+            }
             let base_commands = extract_all_commands(command);
             for base in &base_commands {
                 // Check safe_bins first

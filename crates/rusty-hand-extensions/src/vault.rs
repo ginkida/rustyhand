@@ -401,6 +401,13 @@ impl CredentialVault {
         // Decrypt
         let cipher = Aes256Gcm::new_from_slice(derived_key.as_ref())
             .map_err(|e| ExtensionError::Vault(format!("Cipher init failed: {e}")))?;
+        if nonce_bytes.len() != NONCE_LEN {
+            return Err(ExtensionError::Vault(format!(
+                "Invalid nonce length: expected {}, got {}",
+                NONCE_LEN,
+                nonce_bytes.len()
+            )));
+        }
         let nonce = Nonce::from_slice(&nonce_bytes);
         let plaintext = Zeroizing::new(
             cipher

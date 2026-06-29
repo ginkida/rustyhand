@@ -434,6 +434,11 @@ impl ClawHubClient {
         slug: &str,
         target_dir: &Path,
     ) -> Result<ClawHubInstallResult, SkillError> {
+        // Reject path-traversal slugs before any `target_dir.join(slug)` so a
+        // malicious registry/user slug ("..", "../../x") can't escape the
+        // skills dir for an out-of-tree write or recursive delete.
+        validate_slug(slug)?;
+
         // Use /api/v1/download?slug=... endpoint
         let url = format!("{}/download?slug={}", self.base_url, urlencoded(slug));
 
@@ -572,9 +577,36 @@ impl ClawHubClient {
 
     /// Check if a ClawHub skill is already installed locally.
     pub fn is_installed(&self, slug: &str, skills_dir: &Path) -> bool {
+        // A traversal slug must never be joined onto `skills_dir`; treat it as
+        // "not installed" rather than probing an out-of-tree path.
+        if validate_slug(slug).is_err() {
+            return false;
+        }
         let skill_dir = skills_dir.join(slug);
         skill_dir.join("skill.toml").exists()
     }
+}
+
+/// Validate that a ClawHub slug is a single safe path component.
+///
+/// The slug is supplied by the registry (or a caller) and is joined directly
+/// onto the skills directory. A slug of `..` or `../../x` would escape that
+/// directory, enabling out-of-tree writes and arbitrary recursive deletes via
+/// `remove_dir_all`. Reject anything that isn't a short, plain identifier and,
+/// as defense in depth, assert it is exactly one path component.
+fn validate_slug(slug: &str) -> Result<(), SkillError> {
+    if slug.is_empty()
+        || slug.len() > 128
+        || !slug
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(SkillError::InvalidManifest("invalid slug".into()));
+    }
+    if Path::new(slug).components().count() != 1 {
+        return Err(SkillError::InvalidManifest("invalid slug".into()));
+    }
+    Ok(())
 }
 
 /// Extract a ZIP archive from in-memory bytes into `target_dir`.

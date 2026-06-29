@@ -41,6 +41,7 @@ impl MarketplaceClient {
             config,
             http: reqwest::Client::builder()
                 .user_agent("rusty-hand-skills/0.1")
+                .timeout(std::time::Duration::from_secs(60))
                 .build()
                 .expect("Failed to build HTTP client"),
         }
@@ -153,10 +154,35 @@ impl MarketplaceClient {
             )));
         }
 
-        let bytes = tar_resp
-            .bytes()
+        // Bound the compressed download. extract_targz only caps the
+        // DECOMPRESSED output, so an unbounded body could exhaust RAM before
+        // decompression even begins. Reject on the advertised Content-Length
+        // when present, then stream chunks with a running-total cap so a lying
+        // or chunked-encoded response can't blow past the limit either.
+        const MAX_TARBALL_BYTES: u64 = 128 * 1024 * 1024;
+
+        if let Some(len) = tar_resp.content_length() {
+            if len > MAX_TARBALL_BYTES {
+                return Err(SkillError::Network(format!(
+                    "Tarball is {len} bytes, exceeds download cap {MAX_TARBALL_BYTES}"
+                )));
+            }
+        }
+
+        let mut tar_resp = tar_resp;
+        let mut bytes: Vec<u8> = Vec::new();
+        while let Some(chunk) = tar_resp
+            .chunk()
             .await
-            .map_err(|e| SkillError::Network(format!("Read tarball body: {e}")))?;
+            .map_err(|e| SkillError::Network(format!("Read tarball body: {e}")))?
+        {
+            if bytes.len() as u64 + chunk.len() as u64 > MAX_TARBALL_BYTES {
+                return Err(SkillError::Network(format!(
+                    "Tarball exceeds download cap {MAX_TARBALL_BYTES}"
+                )));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
 
         extract_targz(&bytes, &skill_dir)?;
 

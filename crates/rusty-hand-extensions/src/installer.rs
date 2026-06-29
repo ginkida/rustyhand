@@ -51,10 +51,13 @@ pub fn install_integration(
     }
 
     // 2. Store provided keys in vault
+    let mut failed_keys: Vec<String> = Vec::new();
     for (key, value) in provided_keys {
         if let Err(e) = resolver.store_in_vault(key, Zeroizing::new(value.clone())) {
             warn!("Could not store {} in vault: {}", key, e);
-            // Fall through — the key is still in the provided_keys map
+            // The secret was NOT persisted — remember it so we don't report
+            // the integration as Ready when a provided key was dropped.
+            failed_keys.push(key.clone());
         }
     }
 
@@ -64,13 +67,10 @@ pub fn install_integration(
         .iter()
         .map(|e| e.name.as_str())
         .collect();
-    let missing = resolver.missing_credentials(&required_keys);
-
-    // For provided keys, check them too
-    let actually_missing: Vec<String> = missing
-        .into_iter()
-        .filter(|k| !provided_keys.contains_key(k))
-        .collect();
+    // Re-check vault/.env/env AFTER the store loop. A key the caller provided
+    // but that failed to persist is still missing here, so it correctly
+    // surfaces as Setup rather than being masked by `provided_keys`.
+    let actually_missing: Vec<String> = resolver.missing_credentials(&required_keys);
 
     let status = if actually_missing.is_empty() {
         IntegrationStatus::Ready
@@ -110,11 +110,18 @@ pub fn install_integration(
                         .map(|e| format!("{} ({})", e.label, e.name))
                 })
                 .collect();
-            format!(
+            let mut msg = format!(
                 "{} installed but needs credentials: {}",
                 template.name,
                 missing_labels.join(", ")
-            )
+            );
+            if !failed_keys.is_empty() {
+                msg.push_str(&format!(
+                    " (failed to store in vault: {})",
+                    failed_keys.join(", ")
+                ));
+            }
+            msg
         }
         _ => format!("{} installed.", template.name),
     };

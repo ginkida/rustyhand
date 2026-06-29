@@ -97,6 +97,16 @@ impl ProcessManager {
         // SECURITY: Sandbox environment to prevent API key leakage
         crate::subprocess_sandbox::sandbox_command(&mut cmd, allowed_env_vars);
 
+        // On Unix, make the child its own process-group leader so that
+        // `kill_process_tree` (which signals the negative PID) reaches the
+        // whole descendant tree, not just the immediate child. tokio's
+        // `Command` exposes `process_group` directly, so no extra trait
+        // import is needed.
+        #[cfg(unix)]
+        {
+            cmd.process_group(0);
+        }
+
         let mut child = cmd
             .spawn()
             .map_err(|e| format!("Failed to start process '{}': {}", command, e))?;
