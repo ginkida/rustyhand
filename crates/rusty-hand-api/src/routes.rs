@@ -3460,6 +3460,13 @@ pub async fn logs_stream(
         let mut first_poll = true;
 
         loop {
+            // Bail if the client disconnected — in the steady state (no new log
+            // entries) the loop never calls tx.send(), so without this check it
+            // would never notice the dropped receiver and would leak the task.
+            if tx.is_closed() {
+                return;
+            }
+
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
             // First poll: bounded backfill of recent history. After that, tail
@@ -5995,7 +6002,8 @@ pub async fn list_agent_memories(
     let offset: usize = params
         .get("offset")
         .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .min(MEMORY_SCAN_CAP);
 
     let filter = rusty_hand_types::memory::MemoryFilter {
         agent_id: Some(agent_id),
@@ -6007,7 +6015,7 @@ pub async fn list_agent_memories(
     // was capped at limit+offset, so the client could never tell there were
     // more pages. (No dedicated count query exists for semantic recall.)
     const MEMORY_SCAN_CAP: usize = 1000;
-    let scan = (limit + offset).max(MEMORY_SCAN_CAP);
+    let scan = limit.saturating_add(offset).min(MEMORY_SCAN_CAP).max(limit);
     match state
         .kernel
         .memory
@@ -8045,6 +8053,13 @@ pub async fn approvals_stream(State(state): State<Arc<AppState>>) -> axum::respo
         let mut last_ids: Vec<String> = Vec::new();
         let mut first_emit = true;
         loop {
+            // Bail if the client disconnected — in the steady state (no approval
+            // changes) the loop never calls tx.send(), so without this check it
+            // would never notice the dropped receiver and would leak the task.
+            if tx.is_closed() {
+                return;
+            }
+
             let pending = state.kernel.approval_manager.list_pending();
             let mut ids: Vec<String> = pending.iter().map(|p| p.id.to_string()).collect();
             ids.sort();

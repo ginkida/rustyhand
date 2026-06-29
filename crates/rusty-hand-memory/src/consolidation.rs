@@ -31,6 +31,17 @@ impl ConsolidationEngine {
             .lock()
             .map_err(|e| RustyHandError::Internal(e.to_string()))?;
 
+        // Wrap the decay + merge in a single transaction so a mid-operation
+        // failure rolls back cleanly. Without this, an aborted merge can leave
+        // the survivor having absorbed the group's total access_count while some
+        // losers stay live, so the next cycle re-merges and double-counts.
+        // We only hold `&Connection` (via the MutexGuard), so use
+        // `unchecked_transaction()` rather than `transaction()` (which needs
+        // `&mut self`). Dropping `tx` on an early return rolls back.
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| RustyHandError::Memory(e.to_string()))?;
+
         // Decay confidence of memories not accessed in the last 7 days
         let cutoff = (Utc::now() - chrono::Duration::days(7)).to_rfc3339();
         let decay_factor = 1.0 - self.decay_rate as f64;
@@ -45,6 +56,11 @@ impl ConsolidationEngine {
 
         // Merge exact-duplicate memories (same agent + scope + content).
         let merged = Self::merge_exact_duplicates(&conn)?;
+
+        // Commit only after both decay and merge succeed; any earlier `?`
+        // return drops `tx` and rolls back the whole cycle.
+        tx.commit()
+            .map_err(|e| RustyHandError::Memory(e.to_string()))?;
 
         let duration_ms = start.elapsed().as_millis() as u64;
 

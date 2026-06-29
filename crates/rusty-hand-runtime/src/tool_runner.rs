@@ -1527,12 +1527,25 @@ fn resolve_file_path_allow_missing(
     }
 }
 
+/// Cap for `file_read` — guards against slurping a huge file fully into memory
+/// (OOM). Stat is cheap; reject before reading.
+const MAX_FILE_READ_BYTES: usize = 16 * 1024 * 1024;
+
 async fn tool_file_read(
     input: &serde_json::Value,
     workspace_root: Option<&Path>,
 ) -> Result<String, String> {
     let raw_path = input["path"].as_str().ok_or("Missing 'path' parameter")?;
     let resolved = resolve_file_path(raw_path, workspace_root)?;
+    let meta = tokio::fs::metadata(&resolved)
+        .await
+        .map_err(|e| format!("Failed to read file: {e}"))?;
+    if meta.len() > MAX_FILE_READ_BYTES as u64 {
+        return Err(format!(
+            "File too large ({} bytes, max {MAX_FILE_READ_BYTES})",
+            meta.len()
+        ));
+    }
     tokio::fs::read_to_string(&resolved)
         .await
         .map_err(|e| format!("Failed to read file: {e}"))
@@ -2434,14 +2447,22 @@ fn chunk_text(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> {
             }
         }
 
+        // Guard against zero forward progress (e.g. a tiny chunk_size landing
+        // inside a leading multibyte char). Without this the while-loop would
+        // spin forever pushing empty strings (CPU + memory DoS).
+        if end <= start {
+            break;
+        }
+
         chunks.push(text[start..end].to_string());
 
-        // Advance with overlap
+        // Advance with overlap, always moving forward by at least one byte.
         let step = if end - start > overlap {
             end - start - overlap
         } else {
             end - start
         };
+        let step = step.max(1);
         start += step;
     }
     chunks
@@ -2474,6 +2495,10 @@ async fn tool_doc_ingest(
         .as_u64()
         .map(|v| v as usize)
         .unwrap_or(DOC_CHUNK_OVERLAP);
+    // Clamp to sane bounds: a tiny/zero chunk_size or an overlap >= chunk_size
+    // would stall forward progress in chunk_text (CPU/memory DoS).
+    let chunk_size = chunk_size.max(64);
+    let overlap = overlap.min(chunk_size.saturating_sub(1));
 
     let chunks = chunk_text(content, chunk_size, overlap);
     if chunks.is_empty() {
@@ -3277,6 +3302,11 @@ async fn tool_a2a_send(
 // Image analysis tool
 // ---------------------------------------------------------------------------
 
+/// Cap for media tools that base64/slurp a whole file into memory (image
+/// analysis, media describe/transcribe, speech-to-text). Stat first, reject
+/// oversized files before reading to avoid OOM.
+const MAX_MEDIA_BYTES: usize = 32 * 1024 * 1024;
+
 async fn tool_image_analyze(
     input: &serde_json::Value,
     workspace_root: Option<&Path>,
@@ -3288,6 +3318,15 @@ async fn tool_image_analyze(
     // sandbox is configured). Without this, image_analyze — which is in the MCP
     // safe-default allowlist — would read and base64-return ANY host file.
     let resolved = resolve_file_path(path, workspace_root)?;
+    let meta = tokio::fs::metadata(&resolved)
+        .await
+        .map_err(|e| format!("Failed to stat image '{path}': {e}"))?;
+    if meta.len() > MAX_MEDIA_BYTES as u64 {
+        return Err(format!(
+            "Image too large ({} bytes, max {MAX_MEDIA_BYTES})",
+            meta.len()
+        ));
+    }
     let data = tokio::fs::read(&resolved)
         .await
         .map_err(|e| format!("Failed to read image '{path}': {e}"))?;
@@ -3507,6 +3546,15 @@ async fn tool_media_describe(
     let prompt = input["prompt"].as_str();
 
     // Read image file
+    let meta = tokio::fs::metadata(&resolved)
+        .await
+        .map_err(|e| format!("Failed to stat image file: {e}"))?;
+    if meta.len() > MAX_MEDIA_BYTES as u64 {
+        return Err(format!(
+            "Image too large ({} bytes, max {MAX_MEDIA_BYTES})",
+            meta.len()
+        ));
+    }
     let data = tokio::fs::read(&resolved)
         .await
         .map_err(|e| format!("Failed to read image file: {e}"))?;
@@ -3557,6 +3605,15 @@ async fn tool_media_transcribe(
     let resolved = resolve_file_path(path, workspace_root)?;
 
     // Read audio file
+    let meta = tokio::fs::metadata(&resolved)
+        .await
+        .map_err(|e| format!("Failed to stat audio file: {e}"))?;
+    if meta.len() > MAX_MEDIA_BYTES as u64 {
+        return Err(format!(
+            "Audio too large ({} bytes, max {MAX_MEDIA_BYTES})",
+            meta.len()
+        ));
+    }
     let data = tokio::fs::read(&resolved)
         .await
         .map_err(|e| format!("Failed to read audio file: {e}"))?;
@@ -3734,6 +3791,15 @@ async fn tool_speech_to_text(
     let resolved = resolve_file_path(raw_path, workspace_root)?;
 
     // Read the audio file
+    let meta = tokio::fs::metadata(&resolved)
+        .await
+        .map_err(|e| format!("Failed to stat audio file: {e}"))?;
+    if meta.len() > MAX_MEDIA_BYTES as u64 {
+        return Err(format!(
+            "Audio too large ({} bytes, max {MAX_MEDIA_BYTES})",
+            meta.len()
+        ));
+    }
     let data = tokio::fs::read(&resolved)
         .await
         .map_err(|e| format!("Failed to read audio file: {e}"))?;

@@ -29,6 +29,38 @@ pub fn is_local_provider(provider: &str) -> bool {
 /// Probe timeout for local provider health checks.
 const PROBE_TIMEOUT_SECS: u64 = 5;
 
+/// Maximum size (in bytes) of a provider health-probe response body we will
+/// buffer and parse. A model listing (or a tiny probe completion) is small, so
+/// this cap is safe — it exists only to stop a rogue/compromised local provider
+/// from exhausting kernel memory with an unbounded body.
+const MAX_PROBE_BODY_BYTES: usize = 4 * 1024 * 1024;
+
+/// Read an HTTP response body into a `Vec<u8>`, enforcing a hard size cap.
+///
+/// Rejects early if a known `Content-Length` exceeds `max`, then streams the
+/// body while accumulating a running total, aborting if it exceeds `max`
+/// (covers chunked responses that omit `Content-Length`).
+async fn read_capped_bytes(resp: reqwest::Response, max: usize) -> Result<Vec<u8>, String> {
+    if let Some(len) = resp.content_length() {
+        if len > max as u64 {
+            return Err(format!("response too large: {len} bytes (max {max})"));
+        }
+    }
+
+    let mut bytes = Vec::new();
+    let mut stream = resp.bytes_stream();
+    use futures::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("failed to read response body: {e}"))?;
+        bytes.extend_from_slice(&chunk);
+        if bytes.len() > max {
+            return Err(format!("response body exceeded {max} byte limit"));
+        }
+    }
+
+    Ok(bytes)
+}
+
 /// Probe a provider's health by hitting its model listing endpoint.
 ///
 /// - **Ollama**: `GET {base_url_root}/api/tags` → parses `.models[].name`
@@ -87,7 +119,21 @@ pub async fn probe_provider(provider: &str, base_url: &str) -> ProbeResult {
         };
     }
 
-    let body: serde_json::Value = match resp.json().await {
+    // Cap the body before parsing — a rogue/compromised local provider must not
+    // be able to OOM the kernel with an unbounded model listing.
+    let bytes = match read_capped_bytes(resp, MAX_PROBE_BODY_BYTES).await {
+        Ok(b) => b,
+        Err(e) => {
+            return ProbeResult {
+                reachable: true, // server responded, body read/size failed
+                latency_ms: start.elapsed().as_millis() as u64,
+                error: Some(e),
+                ..Default::default()
+            };
+        }
+    };
+
+    let body: serde_json::Value = match serde_json::from_slice(&bytes) {
         Ok(v) => v,
         Err(e) => {
             return ProbeResult {
@@ -182,10 +228,12 @@ pub async fn probe_model(
         Ok(latency)
     } else {
         let status = resp.status().as_u16();
-        let body = resp
-            .text()
-            .await
-            .unwrap_or_else(|e| format!("<failed to read body: {e}>"));
+        // Cap the error body before buffering — a rogue provider must not be
+        // able to OOM the kernel via a giant error response.
+        let body = match read_capped_bytes(resp, MAX_PROBE_BODY_BYTES).await {
+            Ok(b) => String::from_utf8_lossy(&b).into_owned(),
+            Err(e) => format!("<failed to read body: {e}>"),
+        };
         Err(format!(
             "HTTP {status}: {}",
             rusty_hand_types::text::truncate_bytes(&body, 200)
