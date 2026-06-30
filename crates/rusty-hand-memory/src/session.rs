@@ -386,12 +386,34 @@ impl SessionStore {
         let like_pat = format!("%{}%", crate::sql_util::escape_like_pattern(&q_lower));
         let cap = (limit * 5).clamp(50, 500) as i64;
 
+        // SQLite's built-in lower() is ASCII-only, so the fast-path filter
+        // `lower(content_text) LIKE ?1` (with a Rust-lowercased pattern) misses
+        // EVERY capitalized non-ASCII match — e.g. searching "привет" never
+        // matches stored "Привет" (П stays uppercase). Register a Unicode-aware
+        // `rh_lower` UDF (delegates to Rust's full-Unicode to_lowercase) so both
+        // sides fold consistently. Registered per-call so it works regardless of
+        // how the connection was opened (incl. test connections); overwriting an
+        // existing registration is a no-op.
+        conn.create_scalar_function(
+            "rh_lower",
+            1,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8
+                | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+            |ctx| {
+                Ok(ctx
+                    .get::<Option<String>>(0)?
+                    .unwrap_or_default()
+                    .to_lowercase())
+            },
+        )
+        .map_err(|e| RustyHandError::Memory(e.to_string()))?;
+
         // Fast path: query rows whose content_text index is already populated.
         let mut stmt = conn
             .prepare(
                 "SELECT id, agent_id, content_text, label \
                  FROM sessions \
-                 WHERE content_text IS NOT NULL AND lower(content_text) LIKE ?1 ESCAPE '\\' \
+                 WHERE content_text IS NOT NULL AND rh_lower(content_text) LIKE ?1 ESCAPE '\\' \
                  ORDER BY updated_at DESC \
                  LIMIT ?2",
             )
@@ -566,11 +588,19 @@ impl SessionStore {
                 let created_at: String = row.get(2)?;
                 let updated_at: String = row.get(3)?;
                 let label: Option<String> = row.get(4)?;
-                // Use stored column (O(1)); fall back to blob count for pre-v8 rows.
-                let stored_count: Option<i64> = row.get(5)?;
+                // message_count is `NOT NULL DEFAULT 0` with no v8 backfill, so
+                // `row.get::<_, Option<i64>>` is ALWAYS Some(0) for an un-re-saved
+                // pre-v8 row — the `Option::unwrap_or(blob)` fallback was dead and
+                // reported message_count=0 for populated sessions. Mirror
+                // list_sessions: use the stored column when >0, else the blob.
+                let stored_count: i64 = row.get(5)?;
                 let msgs =
                     rmp_serde::from_slice::<Vec<Message>>(&messages_blob).unwrap_or_default();
-                let msg_count = stored_count.unwrap_or(msgs.len() as i64) as usize;
+                let msg_count = if stored_count > 0 {
+                    stored_count as usize
+                } else {
+                    msgs.len()
+                };
                 // First user message as a short preview for the session picker.
                 let first_preview: Option<String> = msgs.iter().find_map(|m| {
                     if m.role != rusty_hand_types::message::Role::User {
@@ -1182,6 +1212,26 @@ mod tests {
         // After fix: cut cleanly, length within bound.
         assert!(out.len() <= 64 * 1024);
         assert!(out.starts_with('a'));
+    }
+
+    /// Regression: case-insensitive session search used SQLite's ASCII-only
+    /// `lower()` in the fast-path filter, so a capitalized non-ASCII query
+    /// (ubiquitous in Russian/Greek) never matched its lowercase form. The
+    /// Unicode-aware `rh_lower` UDF fixes it.
+    #[test]
+    fn search_sessions_matches_capitalized_non_ascii_case_insensitively() {
+        let store = setup();
+        let agent_id = AgentId::new();
+        let mut session = store.create_session(agent_id).unwrap();
+        // Capitalized Cyrillic — SQLite lower() leaves "П" uncased.
+        session
+            .messages
+            .push(Message::user("Привет, как дела сегодня?"));
+        store.save_session(&session).unwrap();
+
+        // Lowercase query must still match the capitalized stored word.
+        let results = store.search_sessions("привет", 5).unwrap();
+        assert_eq!(results.len(), 1, "lowercase query must match 'Привет'");
     }
 
     /// Regression: `search_sessions` built excerpts via

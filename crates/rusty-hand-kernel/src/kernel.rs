@@ -3177,9 +3177,46 @@ impl RustyHandKernel {
             "ok",
         );
 
+        // Enforce the autonomous restart limit (default 10). Non-autonomous
+        // agents pass max_restarts=0 = unlimited. The agent's runtime state was
+        // already torn down above, so exceeding the limit leaves it permanently
+        // stopped (sessions preserved) instead of re-spawning a crash-looping
+        // agent. Without this, AutonomousConfig.max_restarts was dead code.
+        let max_restarts = entry
+            .manifest
+            .autonomous
+            .as_ref()
+            .map(|a| a.max_restarts)
+            .unwrap_or(0);
+        if let Err(count) = self.supervisor.record_agent_restart(agent_id, max_restarts) {
+            self.audit_log.record(
+                agent_id.to_string(),
+                rusty_hand_runtime::audit::AuditAction::AgentKill,
+                format!(
+                    "name={} reason=max_restarts_exceeded count={count} max={max_restarts}",
+                    entry.name
+                ),
+                "denied",
+            );
+            warn!(
+                agent = %entry.name,
+                old_id = %agent_id,
+                count,
+                max = max_restarts,
+                "Agent exceeded max restart limit — leaving permanently stopped"
+            );
+            return Err(KernelError::RustyHand(RustyHandError::Internal(format!(
+                "Agent '{}' exceeded its max restart limit ({count} > {max_restarts}) and was permanently stopped",
+                entry.name
+            ))));
+        }
+
         info!(agent = %entry.name, old_id = %agent_id, "Agent stopped for restart (sessions preserved)");
 
         let new_id = self.spawn_agent(entry.manifest)?;
+        // Carry the restart count onto the new id so the limit accumulates
+        // across restarts (each restart assigns a fresh AgentId).
+        self.supervisor.carry_agent_restarts(agent_id, new_id);
 
         // Re-point the agent's cron jobs to the new id, or they'd keep firing
         // against the dead old id and silently auto-disable after failures.
@@ -3505,19 +3542,34 @@ impl RustyHandKernel {
         // SECURITY: Global workflow timeout to prevent runaway execution.
         const MAX_WORKFLOW_SECS: u64 = 3600; // 1 hour
 
-        let output = tokio::time::timeout(
+        let timed = tokio::time::timeout(
             std::time::Duration::from_secs(MAX_WORKFLOW_SECS),
             self.workflows.execute_run(run_id, resolver, send_message),
         )
-        .await
-        .map_err(|_| {
-            KernelError::RustyHand(RustyHandError::Internal(format!(
-                "Workflow timed out after {MAX_WORKFLOW_SECS}s"
-            )))
-        })?
-        .map_err(|e| {
-            KernelError::RustyHand(RustyHandError::Internal(format!("Workflow failed: {e}")))
-        })?;
+        .await;
+
+        let output = match timed {
+            // Timeout cancels the execution future before it can finalize its
+            // own state — mark the run Failed explicitly so it doesn't leak as
+            // perpetually Running (which would also defeat the eviction cap).
+            Err(_) => {
+                self.workflows
+                    .mark_run_failed(
+                        run_id,
+                        format!("Workflow timed out after {MAX_WORKFLOW_SECS}s"),
+                    )
+                    .await;
+                return Err(KernelError::RustyHand(RustyHandError::Internal(format!(
+                    "Workflow timed out after {MAX_WORKFLOW_SECS}s"
+                ))));
+            }
+            Ok(Err(e)) => {
+                return Err(KernelError::RustyHand(RustyHandError::Internal(format!(
+                    "Workflow failed: {e}"
+                ))));
+            }
+            Ok(Ok(out)) => out,
+        };
 
         Ok((run_id, output))
     }
@@ -4920,8 +4972,26 @@ async fn cron_deliver_response(
                 );
                 return;
             }
+            // SECURITY: the pre-flight check above only validates the initial
+            // URL. Install a redirect policy that re-runs the same SSRF check
+            // (with the operator's configured allowlist) on every hop, so a
+            // public webhook URL can't 3xx-redirect to localhost / 169.254.169.254
+            // / RFC1918. Mirrors http_client::build_with_proxy.
+            let redirect_allowlist: Vec<String> = kernel.web_ctx.fetch.ssrf_allowlist().to_vec();
             let client = match reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
+                .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+                    if attempt.previous().len() >= 10 {
+                        return attempt.error("too many redirects");
+                    }
+                    match rusty_hand_runtime::check_ssrf_with_allowlist(
+                        attempt.url().as_str(),
+                        &redirect_allowlist,
+                    ) {
+                        Ok(()) => attempt.follow(),
+                        Err(_) => attempt.error("SSRF blocked: redirect to a restricted target"),
+                    }
+                }))
                 .build()
             {
                 Ok(c) => c,
@@ -6307,17 +6377,17 @@ mod tests {
     /// buried. Mirror the Slack/Discord status discipline: `2xx` →
     /// debug, anything else → warn with the response body.
     #[test]
-    // Window enlarged from 2500 to 3500 chars: the SSRF guard
-    // (added later) pushes the body-parsing block further down
-    // inside the Webhook branch, so the original 2500-byte slice
-    // no longer reaches the assertion targets.
+    // Window enlarged 2500 → 3500 → 4500 chars: first the SSRF guard, then the
+    // per-hop SSRF-revalidating redirect policy (added later) push the
+    // body-parsing block further down inside the Webhook branch, so the earlier
+    // slices no longer reach the assertion targets.
     fn cron_webhook_delivery_warns_on_non_success_status() {
         let src = include_str!("kernel.rs");
         let start = src
             .find("CronDelivery::Webhook { url } => {")
             .expect("Webhook delivery branch must exist");
-        // 2 KB window covers the whole branch.
-        let window = &src[start..start + 3500];
+        // Window covers the whole branch.
+        let window = &src[start..start + 4500];
 
         // Must distinguish 2xx via .is_success().
         assert!(

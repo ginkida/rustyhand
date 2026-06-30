@@ -393,10 +393,11 @@ impl A2aClient {
     /// Create a new A2A client.
     pub fn new() -> Self {
         Self {
-            client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .unwrap_or_default(),
+            // SECURITY: A2A discovery/send URLs are attacker-influenced. Build a
+            // client that re-validates every redirect hop against the SSRF rules
+            // so a public agent card can't 3xx-redirect to an internal/loopback/
+            // cloud-metadata host (the pre-flight check only covers the initial URL).
+            client: crate::http_client::build_ssrf_safe_client(std::time::Duration::from_secs(30)),
         }
     }
 

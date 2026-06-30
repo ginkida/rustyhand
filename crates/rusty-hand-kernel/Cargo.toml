@@ -20,6 +20,7 @@ toml = { workspace = true }
 dashmap = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
+chrono-tz = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }

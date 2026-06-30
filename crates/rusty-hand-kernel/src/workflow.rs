@@ -14,8 +14,10 @@ use chrono::{DateTime, Utc};
 use rusty_hand_types::agent::AgentId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -212,6 +214,20 @@ pub struct WorkflowEngine {
     /// Optional persistence file for definitions. When set, every register
     /// or remove rewrites the file via atomic .tmp + rename.
     persist_path: Option<std::path::PathBuf>,
+    /// Serializes async persists so concurrent register/remove calls don't
+    /// race on snapshot→write→rename (lost-update / corrupt file).
+    persist_lock: Arc<Mutex<()>>,
+}
+
+/// A process-unique temp path for an atomic write. Using a fixed `*.tmp`
+/// name lets two concurrent writers `O_TRUNC` the same file from separate
+/// fds (corrupting it) and makes the second `rename` fail; a unique suffix
+/// per write avoids both.
+fn unique_tmp_path(path: &Path) -> PathBuf {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let pid = std::process::id();
+    path.with_extension(format!("json.tmp.{pid}.{n}"))
 }
 
 impl WorkflowEngine {
@@ -221,6 +237,7 @@ impl WorkflowEngine {
             workflows: Arc::new(RwLock::new(HashMap::new())),
             runs: Arc::new(RwLock::new(HashMap::new())),
             persist_path: None,
+            persist_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -235,6 +252,7 @@ impl WorkflowEngine {
             workflows: Arc::new(RwLock::new(HashMap::new())),
             runs: Arc::new(RwLock::new(HashMap::new())),
             persist_path: Some(path.clone()),
+            persist_lock: Arc::new(Mutex::new(())),
         };
 
         if path.exists() {
@@ -285,6 +303,11 @@ impl WorkflowEngine {
             Some(p) => p.clone(),
             None => return,
         };
+        // Hold the persist lock across snapshot→write→rename so concurrent
+        // register/remove calls serialize: the last committed snapshot always
+        // lands on disk (no lost update), and the unique temp name below means
+        // two writers never clobber the same `.tmp`.
+        let _persist_guard = self.persist_lock.lock().await;
         let workflows: Vec<Workflow> = self.workflows.read().await.values().cloned().collect();
         let data = match serde_json::to_string_pretty(&workflows) {
             Ok(d) => d,
@@ -293,13 +316,15 @@ impl WorkflowEngine {
                 return;
             }
         };
-        let tmp = path.with_extension("json.tmp");
+        let tmp = unique_tmp_path(&path);
         if let Err(e) = std::fs::write(&tmp, data.as_bytes()) {
             tracing::warn!(path = %tmp.display(), error = %e, "Failed to write workflows temp file");
+            let _ = std::fs::remove_file(&tmp);
             return;
         }
         if let Err(e) = std::fs::rename(&tmp, &path) {
             tracing::warn!(path = %path.display(), error = %e, "Failed to rename workflows file");
+            let _ = std::fs::remove_file(&tmp);
         }
     }
 
@@ -367,13 +392,15 @@ impl WorkflowEngine {
                 return;
             }
         };
-        let tmp = path.with_extension("json.tmp");
+        let tmp = unique_tmp_path(&path);
         if let Err(e) = std::fs::write(&tmp, data.as_bytes()) {
             tracing::warn!(path = %tmp.display(), error = %e, "Failed to write workflows temp file");
+            let _ = std::fs::remove_file(&tmp);
             return;
         }
         if let Err(e) = std::fs::rename(&tmp, &path) {
             tracing::warn!(path = %path.display(), error = %e, "Failed to rename workflows file");
+            let _ = std::fs::remove_file(&tmp);
         }
     }
 
@@ -613,11 +640,69 @@ impl WorkflowEngine {
         }
     }
 
+    /// Force a run into the `Failed` state from outside `execute_run`.
+    ///
+    /// Used when the caller's own timeout cancels the execution future, which
+    /// then cannot finalize its own state — without this the run would leak as
+    /// perpetually `Running` and defeat the eviction cap. No-op if the run is
+    /// already terminal.
+    pub async fn mark_run_failed(&self, run_id: WorkflowRunId, error: impl Into<String>) {
+        if let Some(r) = self.runs.write().await.get_mut(&run_id) {
+            if matches!(
+                r.state,
+                WorkflowRunState::Running | WorkflowRunState::Pending
+            ) {
+                r.state = WorkflowRunState::Failed;
+                if r.error.is_none() {
+                    r.error = Some(error.into());
+                }
+                r.completed_at = Some(Utc::now());
+            }
+        }
+    }
+
     /// Execute a workflow run step-by-step.
     ///
     /// This method takes a closure that sends messages to agents,
     /// so the workflow engine remains decoupled from the kernel.
+    ///
+    /// Thin wrapper over [`execute_run_inner`] that guarantees a run never
+    /// leaks as perpetually `Running`: any early-return error (e.g. an
+    /// agent-resolution failure or a missing workflow definition) finalizes the
+    /// run as `Failed`. Without this, such runs stayed `Running` forever, which
+    /// also defeats the eviction cap (only `Completed`/`Failed` runs are evicted)
+    /// and leaks one retained slot per failed invocation.
     pub async fn execute_run<F, Fut>(
+        &self,
+        run_id: WorkflowRunId,
+        agent_resolver: impl Fn(&StepAgent) -> Option<(AgentId, String)>,
+        send_message: F,
+    ) -> Result<String, String>
+    where
+        F: Fn(AgentId, String) -> Fut,
+        Fut: std::future::Future<Output = Result<(String, u64, u64), String>>,
+    {
+        let result = self
+            .execute_run_inner(run_id, agent_resolver, send_message)
+            .await;
+        if let Err(ref e) = result {
+            if let Some(r) = self.runs.write().await.get_mut(&run_id) {
+                if matches!(
+                    r.state,
+                    WorkflowRunState::Running | WorkflowRunState::Pending
+                ) {
+                    r.state = WorkflowRunState::Failed;
+                    if r.error.is_none() {
+                        r.error = Some(e.clone());
+                    }
+                    r.completed_at = Some(Utc::now());
+                }
+            }
+        }
+        result
+    }
+
+    async fn execute_run_inner<F, Fut>(
         &self,
         run_id: WorkflowRunId,
         agent_resolver: impl Fn(&StepAgent) -> Option<(AgentId, String)>,

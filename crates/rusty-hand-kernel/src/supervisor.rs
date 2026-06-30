@@ -99,6 +99,17 @@ impl Supervisor {
         self.agent_restarts.get(&agent_id).map(|r| *r).unwrap_or(0)
     }
 
+    /// Carry an agent's restart count to its new id after a restart.
+    ///
+    /// A restart assigns a fresh `AgentId`, so the per-id counter must follow
+    /// the agent — otherwise the `max_restarts` limit would reset on every
+    /// restart and never trigger.
+    pub fn carry_agent_restarts(&self, old_id: AgentId, new_id: AgentId) {
+        if let Some((_, count)) = self.agent_restarts.remove(&old_id) {
+            self.agent_restarts.insert(new_id, count);
+        }
+    }
+
     /// Reset restart counter for an agent (e.g., on manual intervention).
     pub fn reset_agent_restarts(&self, agent_id: AgentId) {
         self.agent_restarts.remove(&agent_id);

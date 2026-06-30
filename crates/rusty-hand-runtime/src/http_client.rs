@@ -110,6 +110,33 @@ pub fn build_with_proxy(cfg: &ProxyConfig, timeout: Duration) -> reqwest::Client
     })
 }
 
+/// Build a one-off `reqwest::Client` that re-validates every redirect hop
+/// against the SSRF rules (empty allowlist — redirects don't inherit the
+/// initial URL's trust). Use for outbound clients that fetch
+/// attacker-influenced URLs but don't need proxy support (e.g. A2A discovery).
+///
+/// Mirrors the redirect policy installed by `build_with_proxy`. Without this,
+/// a public URL that passes a pre-flight SSRF check could 3xx-redirect to an
+/// internal/loopback/cloud-metadata host and reqwest's default policy would
+/// silently follow it.
+pub fn build_ssrf_safe_client(timeout: Duration) -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(timeout)
+        .pool_idle_timeout(Duration::from_secs(60))
+        .pool_max_idle_per_host(10)
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 10 {
+                return attempt.error("too many redirects");
+            }
+            match crate::web_fetch::check_ssrf_with_allowlist(attempt.url().as_str(), &[]) {
+                Ok(()) => attempt.follow(),
+                Err(_) => attempt.error("SSRF blocked: redirect to a restricted target"),
+            }
+        }))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

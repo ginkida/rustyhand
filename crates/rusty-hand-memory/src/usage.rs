@@ -113,8 +113,14 @@ impl UsageStore {
             .map_err(|e| RustyHandError::Internal(e.to_string()))?;
         let cost: f64 = conn
             .query_row(
+                // Normalize the stored RFC3339 timestamp (T separator, +00:00
+                // offset) through datetime() before comparing — a raw lexical
+                // `timestamp > datetime('now','-1 hour')` compares the stored 'T'
+                // (0x54) against the threshold's space (0x20) and matches every
+                // same-calendar-day event, collapsing the hourly window into a
+                // midnight-resetting daily cap (~24x over-count).
                 "SELECT COALESCE(SUM(cost_usd), 0.0) FROM usage_events
-                 WHERE agent_id = ?1 AND timestamp > datetime('now', '-1 hour')",
+                 WHERE agent_id = ?1 AND datetime(timestamp) > datetime('now', '-1 hour')",
                 rusqlite::params![agent_id.0.to_string()],
                 |row| row.get(0),
             )
@@ -164,8 +170,10 @@ impl UsageStore {
             .map_err(|e| RustyHandError::Internal(e.to_string()))?;
         let cost: f64 = conn
             .query_row(
+                // datetime(timestamp) normalizes RFC3339 before comparison — see
+                // query_hourly: a raw lexical compare collapses the hourly window.
                 "SELECT COALESCE(SUM(cost_usd), 0.0) FROM usage_events
-                 WHERE timestamp > datetime('now', '-1 hour')",
+                 WHERE datetime(timestamp) > datetime('now', '-1 hour')",
                 [],
                 |row| row.get(0),
             )
@@ -360,6 +368,42 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         run_migrations(&conn).unwrap();
         UsageStore::new(Arc::new(Mutex::new(conn)))
+    }
+
+    #[test]
+    fn test_query_hourly_excludes_events_older_than_an_hour_same_day() {
+        // Regression for the RFC3339-vs-datetime() lexical-compare bug: a
+        // same-calendar-day event older than an hour must NOT count toward the
+        // hourly window (it previously did, collapsing the hourly cap into a
+        // midnight-resetting daily cap).
+        let store = setup();
+        let agent_id = AgentId::new();
+        let conn = store.conn.lock().unwrap();
+        // 90 minutes ago, stored in the production RFC3339 shape.
+        let ninety_min_ago = (Utc::now() - chrono::Duration::minutes(90)).to_rfc3339();
+        conn.execute(
+            "INSERT INTO usage_events (id, agent_id, timestamp, model, input_tokens, output_tokens, cost_usd, tool_calls)
+             VALUES (?1, ?2, ?3, 'm', 1, 1, 5.0, 0)",
+            rusqlite::params!["e1", agent_id.0.to_string(), ninety_min_ago],
+        )
+        .unwrap();
+        drop(conn);
+
+        // A fresh event recorded now.
+        store
+            .record(&UsageRecord {
+                agent_id,
+                model: "m".to_string(),
+                input_tokens: 1,
+                output_tokens: 1,
+                cost_usd: 2.0,
+                tool_calls: 0,
+            })
+            .unwrap();
+
+        // Hourly window must include ONLY the fresh $2 event, excluding the
+        // 90-min-old $5 one (which the buggy lexical compare would have counted).
+        assert_eq!(store.query_hourly(agent_id).unwrap(), 2.0);
     }
 
     #[test]

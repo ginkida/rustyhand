@@ -147,11 +147,18 @@ fn forwarded_ip<B>(request: &Request<B>) -> Option<IpAddr> {
         .and_then(parse_ip_token)
 }
 
-pub(crate) fn client_ip<B>(request: &Request<B>) -> Option<IpAddr> {
-    let peer_ip = request
+/// The raw transport peer IP from `ConnectInfo`, ignoring any forwarded
+/// headers. Use this for trust decisions that must not be spoofable — e.g. the
+/// no-API-key localhost gate. Returns `None` when `ConnectInfo` is absent.
+pub(crate) fn raw_peer_ip<B>(request: &Request<B>) -> Option<IpAddr> {
+    request
         .extensions()
         .get::<axum::extract::ConnectInfo<SocketAddr>>()
-        .map(|ci| ci.0.ip());
+        .map(|ci| ci.0.ip())
+}
+
+pub(crate) fn client_ip<B>(request: &Request<B>) -> Option<IpAddr> {
+    let peer_ip = raw_peer_ip(request);
 
     match peer_ip {
         Some(peer_ip) if is_trusted_proxy(peer_ip) => forwarded_ip(request).or(Some(peer_ip)),
@@ -214,7 +221,13 @@ pub async fn auth(
     let path = request.uri().path().to_string();
 
     if !auth_enabled(&state) {
-        let is_loopback = client_ip(&request)
+        // SECURITY: base the localhost decision on the REAL transport peer IP,
+        // never on proxy headers. `client_ip` honors X-Forwarded-For/Forwarded/
+        // X-Real-IP when the peer is a "trusted proxy" (any RFC1918/link-local
+        // address, including the Docker bridge), so a private-net peer could
+        // spoof `X-Forwarded-For: 127.0.0.1` and obtain unauthenticated Owner
+        // access. A legitimate same-host reverse proxy is itself a loopback peer.
+        let is_loopback = raw_peer_ip(&request)
             .map(|ip| ip.is_loopback())
             .unwrap_or(false);
 

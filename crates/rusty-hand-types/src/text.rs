@@ -54,22 +54,42 @@ pub fn floor_char_boundary(s: &str, idx: usize) -> usize {
 /// shape and both used to leak tokens via tracing::warn on send
 /// failure.
 pub fn redact_telegram_token(s: &str) -> String {
-    const HOST: &str = "telegram.org/bot";
+    // Telegram embeds the token after `/bot` in two URL shapes:
+    //   api.telegram.org/bot{TOKEN}/sendMessage      (Bot API)
+    //   api.telegram.org/file/bot{TOKEN}/{path}      (file download)
+    // Anchor on the host, then redact the segment between the next `/bot` and
+    // the following `/` (or end of string). This covers both shapes; a plain
+    // `telegram.org/bot` prefix match would miss the `/file/bot` download URL.
+    const DOMAIN: &str = "telegram.org";
+    const BOT: &str = "/bot";
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
-    while let Some(idx) = rest.find(HOST) {
-        let marker_end = idx + HOST.len();
-        out.push_str(&rest[..marker_end]);
-        let after = &rest[marker_end..];
-        match after.find('/') {
-            Some(slash) => {
-                out.push_str("<redacted>");
-                rest = &after[slash..];
+    while let Some(dom_idx) = rest.find(DOMAIN) {
+        let after_dom_start = dom_idx + DOMAIN.len();
+        let after_dom = &rest[after_dom_start..];
+        match after_dom.find(BOT) {
+            Some(bot_rel) => {
+                // Emit everything up to and including the `/bot` marker.
+                let token_start = bot_rel + BOT.len();
+                out.push_str(&rest[..after_dom_start + token_start]);
+                let after_bot = &after_dom[token_start..];
+                match after_bot.find('/') {
+                    Some(slash) => {
+                        out.push_str("<redacted>");
+                        rest = &after_bot[slash..];
+                    }
+                    None => {
+                        out.push_str("<redacted>");
+                        rest = "";
+                        break;
+                    }
+                }
             }
             None => {
-                out.push_str("<redacted>");
-                rest = "";
-                break;
+                // Domain with no `/bot` after it — emit through the domain and
+                // continue scanning (advances `rest`, so no infinite loop).
+                out.push_str(&rest[..after_dom_start]);
+                rest = after_dom;
             }
         }
     }
@@ -178,6 +198,17 @@ mod tests {
         assert!(!red.contains("1234567890:ABCDEF_secret_token"));
         assert!(red.contains("api.telegram.org/bot<redacted>/sendMessage"));
         assert!(red.contains("connection refused"));
+    }
+
+    #[test]
+    fn redact_telegram_token_strips_token_from_file_download_url() {
+        // The file-download URL shape is .../file/bot{TOKEN}/{path} — the old
+        // `telegram.org/bot` prefix matcher missed it, leaking the token.
+        let raw = "Media download failed: error sending request for url (https://api.telegram.org/file/bot1234567890:ABCDEF_secret/photos/file_1.jpg): timed out";
+        let red = redact_telegram_token(raw);
+        assert!(!red.contains("1234567890:ABCDEF_secret"));
+        assert!(red.contains("api.telegram.org/file/bot<redacted>/photos/file_1.jpg"));
+        assert!(red.contains("timed out"));
     }
 
     #[test]

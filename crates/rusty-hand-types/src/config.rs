@@ -1285,7 +1285,9 @@ impl McpServerConfig {
     /// Deliberately excluded (must be opted in via `extra_allowed_tools`):
     /// shell_exec, file_write, apply_patch, skill_install, agent_spawn,
     /// agent_kill, browser_*, image_generate, media_transcribe (can leak
-    /// audio content), self_update, config_set, config_replace, cron_*.
+    /// audio content), self_update, config_set, config_replace, cron_*,
+    /// schedule_create, schedule_delete (these persist recurring agent turns —
+    /// an Admin-gated operation over REST; see the cron_* exclusion).
     pub fn safe_default_tools() -> &'static [&'static str] {
         &[
             // Read-only filesystem
@@ -1319,10 +1321,10 @@ impl McpServerConfig {
             "task_complete",
             "task_list",
             "event_publish",
-            // Scheduling — read/create own (cron_cancel needs opt-in)
-            "schedule_create",
+            // Scheduling — read-only only. schedule_create/schedule_delete are
+            // excluded: they persist recurring agent turns (an Admin-gated REST
+            // op) and would let a User-role MCP caller escalate to persistence.
             "schedule_list",
-            "schedule_delete",
             "cron_list",
             // Read-only config inspection (secrets masked as <redacted>)
             "config_get",
@@ -1706,6 +1708,12 @@ pub struct NetworkConfig {
     /// Maximum number of connected peers.
     pub max_peers: u32,
     /// Pre-shared secret for RHP HMAC authentication (required when network is enabled).
+    ///
+    /// SECURITY: never serialize the PSK — like `api_key` and `proxy.password`,
+    /// it must not leak through any serde path (e.g. the InProcess MCP
+    /// `config_get` tool serializes the whole config). The custom Debug impl
+    /// below already redacts it.
+    #[serde(skip_serializing)]
     pub shared_secret: String,
 }
 
@@ -2062,6 +2070,13 @@ impl KernelConfig {
             self.web.fetch.timeout_secs = 30;
         } else if self.web.fetch.timeout_secs > 120 {
             self.web.fetch.timeout_secs = 120;
+        }
+
+        // Shell exec timeout: a 0 here would make tokio::time::timeout fire
+        // immediately, so every shell_exec without a per-call timeout returns
+        // "Command timed out after 0s". Reset 0 -> default 30s.
+        if self.exec_policy.timeout_secs == 0 {
+            self.exec_policy.timeout_secs = 30;
         }
     }
 }

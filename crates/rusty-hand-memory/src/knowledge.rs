@@ -8,9 +8,17 @@ use rusty_hand_types::error::{RustyHandError, RustyHandResult};
 use rusty_hand_types::memory::{
     Entity, EntityType, GraphMatch, GraphPattern, Relation, RelationType,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
+
+/// Upper bound on edges returned from a single graph query (single- or
+/// multi-hop), to bound response size and memory.
+const MAX_GRAPH_MATCHES: usize = 500;
+
+/// Upper bound on entities materialized by `list_entities`, to bound memory on
+/// large graphs.
+const MAX_GRAPH_ENTITIES: usize = 1000;
 
 /// Knowledge graph store backed by SQLite.
 #[derive(Clone)]
@@ -143,14 +151,19 @@ impl KnowledgeStore {
         Ok(affected > 0)
     }
 
-    /// List all entities in the knowledge graph.
+    /// List entities in the knowledge graph (capped at [`MAX_GRAPH_ENTITIES`]
+    /// to bound memory — an unbounded `SELECT` materializes the entire table on
+    /// every render of the graph view).
     pub fn list_entities(&self) -> RustyHandResult<Vec<Entity>> {
         let conn = self
             .conn
             .lock()
             .map_err(|e| RustyHandError::Internal(e.to_string()))?;
         let mut stmt = conn
-            .prepare("SELECT id, entity_type, name, properties, created_at, updated_at FROM entities ORDER BY name")
+            .prepare(&format!(
+                "SELECT id, entity_type, name, properties, created_at, updated_at \
+                 FROM entities ORDER BY name LIMIT {MAX_GRAPH_ENTITIES}"
+            ))
             .map_err(|e| RustyHandError::Memory(e.to_string()))?;
         let rows = stmt
             .query_map([], |row| {
@@ -196,13 +209,128 @@ impl KnowledgeStore {
         Ok(entities)
     }
 
+    /// Total number of relations (edges) in the graph — for reporting the true
+    /// edge count when a query result is capped at [`MAX_GRAPH_MATCHES`].
+    pub fn count_relations(&self) -> RustyHandResult<usize> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| RustyHandError::Internal(e.to_string()))?;
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM relations", [], |row| row.get(0))
+            .map_err(|e| RustyHandError::Memory(e.to_string()))?;
+        Ok(n.max(0) as usize)
+    }
+
     /// Query the knowledge graph with a pattern.
+    ///
+    /// Honors `pattern.max_depth`: depth <= 1 (or no `source` anchor) does a
+    /// single-hop direct match; depth > 1 does a breadth-first neighborhood
+    /// expansion outward from `source`, following the same `relation` filter at
+    /// each hop. Previously `max_depth` was silently ignored, so advertised
+    /// multi-hop traversal only ever returned direct (1-hop) edges. The result
+    /// is capped at [`MAX_GRAPH_MATCHES`] to bound memory.
     pub fn query_graph(&self, pattern: GraphPattern) -> RustyHandResult<Vec<GraphMatch>> {
         let conn = self
             .conn
             .lock()
             .map_err(|e| RustyHandError::Internal(e.to_string()))?;
 
+        let relation_json = match pattern.relation.as_ref() {
+            Some(r) => Some(
+                serde_json::to_string(r)
+                    .map_err(|e| RustyHandError::Serialization(e.to_string()))?,
+            ),
+            None => None,
+        };
+
+        let max_depth = pattern.max_depth.max(1);
+        // Single-hop: direct pattern match honoring all three filters. Also the
+        // path when there is no `source` anchor to expand outward from.
+        if max_depth <= 1 || pattern.source.is_none() {
+            return Self::fetch_hop(
+                &conn,
+                pattern.source.as_deref(),
+                relation_json.as_deref(),
+                pattern.target.as_deref(),
+                MAX_GRAPH_MATCHES,
+            );
+        }
+
+        // Multi-hop BFS neighborhood from `source`. Expand `relation`-filtered
+        // edges hop-by-hop up to max_depth; `target` (if any) is applied as a
+        // post-filter on the endpoint so it doesn't prune intermediate hops.
+        let mut matches: Vec<GraphMatch> = Vec::new();
+        let mut seen_edges: HashSet<String> = HashSet::new();
+        let mut visited_nodes: HashSet<String> = HashSet::new();
+        if let Some(s) = pattern.source.as_deref() {
+            visited_nodes.insert(s.to_string());
+        }
+
+        let seed = Self::fetch_hop(
+            &conn,
+            pattern.source.as_deref(),
+            relation_json.as_deref(),
+            None,
+            MAX_GRAPH_MATCHES,
+        )?;
+        let mut frontier: Vec<String> = Vec::new();
+        for m in seed {
+            if seen_edges.insert(m.relation.id.clone()) {
+                frontier.push(m.target.id.clone());
+                matches.push(m);
+            }
+        }
+
+        let mut hop = 1u32;
+        while hop < max_depth && matches.len() < MAX_GRAPH_MATCHES {
+            let mut next_frontier = Vec::new();
+            for node in std::mem::take(&mut frontier) {
+                if !visited_nodes.insert(node.clone()) {
+                    continue;
+                }
+                if matches.len() >= MAX_GRAPH_MATCHES {
+                    break;
+                }
+                let edges = Self::fetch_hop(
+                    &conn,
+                    Some(&node),
+                    relation_json.as_deref(),
+                    None,
+                    MAX_GRAPH_MATCHES,
+                )?;
+                for m in edges {
+                    if matches.len() >= MAX_GRAPH_MATCHES {
+                        break;
+                    }
+                    if seen_edges.insert(m.relation.id.clone()) {
+                        next_frontier.push(m.target.id.clone());
+                        matches.push(m);
+                    }
+                }
+            }
+            if next_frontier.is_empty() {
+                break;
+            }
+            frontier = next_frontier;
+            hop += 1;
+        }
+
+        if let Some(target) = pattern.target.as_deref() {
+            matches.retain(|m| m.target.id == target || m.target.name == target);
+        }
+
+        Ok(matches)
+    }
+
+    /// Fetch a single hop of graph edges matching the given filters.
+    fn fetch_hop(
+        conn: &Connection,
+        source: Option<&str>,
+        relation_json: Option<&str>,
+        target: Option<&str>,
+        limit: usize,
+    ) -> RustyHandResult<Vec<GraphMatch>> {
         let mut sql = String::from(
             "SELECT
                 s.id, s.entity_type, s.name, s.properties, s.created_at, s.updated_at,
@@ -216,25 +344,23 @@ impl KnowledgeStore {
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         let mut idx = 1;
 
-        if let Some(ref source) = pattern.source {
+        if let Some(source) = source {
             sql.push_str(&format!(" AND (s.id = ?{idx} OR s.name = ?{idx})"));
-            params.push(Box::new(source.clone()));
+            params.push(Box::new(source.to_string()));
             idx += 1;
         }
-        if let Some(ref relation) = pattern.relation {
-            let rel_str = serde_json::to_string(relation)
-                .map_err(|e| RustyHandError::Serialization(e.to_string()))?;
+        if let Some(relation_json) = relation_json {
             sql.push_str(&format!(" AND r.relation_type = ?{idx}"));
-            params.push(Box::new(rel_str));
+            params.push(Box::new(relation_json.to_string()));
             idx += 1;
         }
-        if let Some(ref target) = pattern.target {
+        if let Some(target) = target {
             sql.push_str(&format!(" AND (t.id = ?{idx} OR t.name = ?{idx})"));
-            params.push(Box::new(target.clone()));
+            params.push(Box::new(target.to_string()));
             let _ = idx;
         }
 
-        sql.push_str(" LIMIT 100");
+        sql.push_str(&format!(" LIMIT {limit}"));
 
         let mut stmt = conn
             .prepare(&sql)
@@ -452,5 +578,67 @@ mod tests {
             .unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].target.name, "Acme Corp");
+    }
+
+    #[test]
+    fn test_query_graph_honors_max_depth_multi_hop() {
+        // A -RelatedTo-> B -RelatedTo-> C. A depth-1 query from A returns only
+        // the A→B edge; a depth-2 query must also traverse B→C (previously
+        // max_depth was ignored and only direct edges were ever returned).
+        let store = setup();
+        let mk = |id: &str| {
+            store
+                .add_entity(Entity {
+                    id: id.to_string(),
+                    entity_type: EntityType::Concept,
+                    name: id.to_string(),
+                    properties: HashMap::new(),
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                })
+                .unwrap()
+        };
+        let a = mk("A");
+        let _b = mk("B");
+        let _c = mk("C");
+        let edge = |s: &str, t: &str| {
+            store
+                .add_relation(Relation {
+                    id: String::new(),
+                    source: s.to_string(),
+                    relation: RelationType::RelatedTo,
+                    target: t.to_string(),
+                    properties: HashMap::new(),
+                    confidence: 1.0,
+                    created_at: Utc::now(),
+                })
+                .unwrap();
+        };
+        edge("A", "B");
+        edge("B", "C");
+
+        let depth1 = store
+            .query_graph(GraphPattern {
+                source: Some(a.clone()),
+                relation: Some(RelationType::RelatedTo),
+                target: None,
+                max_depth: 1,
+            })
+            .unwrap();
+        assert_eq!(depth1.len(), 1, "depth-1 returns only the direct A→B edge");
+
+        let depth2 = store
+            .query_graph(GraphPattern {
+                source: Some(a),
+                relation: Some(RelationType::RelatedTo),
+                target: None,
+                max_depth: 2,
+            })
+            .unwrap();
+        assert_eq!(depth2.len(), 2, "depth-2 must also traverse B→C");
+        assert!(
+            depth2.iter().any(|m| m.target.name == "C"),
+            "depth-2 result must include node C"
+        );
     }
 }

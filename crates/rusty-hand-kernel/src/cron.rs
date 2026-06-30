@@ -107,7 +107,17 @@ impl CronScheduler {
         let metas: Vec<JobMeta> = serde_json::from_str(&data)
             .map_err(|e| RustyHandError::Internal(format!("Failed to parse cron jobs: {e}")))?;
         let count = metas.len();
-        for meta in metas {
+        for mut meta in metas {
+            // Reconcile a crash-orphaned claim: claim_due_jobs clears next_run
+            // to None while a job executes, rescheduling deferred to
+            // record_success/failure. If the periodic persist() snapshotted the
+            // job in that claimed state and the process then hard-crashed
+            // (SIGKILL/OOM/power loss), it would load with next_run=None — and
+            // claim_due_jobs never re-fires a None job, so the recurring job
+            // would be stuck forever. Recompute next_run so it resumes.
+            if meta.job.enabled && meta.job.next_run.is_none() {
+                meta.job.next_run = Some(compute_next_run(&meta.job.schedule));
+            }
             self.jobs.insert(meta.job.id, meta);
         }
         info!(count, "Loaded cron jobs from disk");
@@ -157,6 +167,11 @@ impl CronScheduler {
         // CronJob.validate returns Result<(), String>
         job.validate(agent_count)
             .map_err(RustyHandError::InvalidInput)?;
+        // The types-crate validator only checks the 5-field shape; reject
+        // semantically-invalid cron exprs / unknown timezones here (the kernel
+        // owns the `cron` parser) so they fail loudly at creation instead of
+        // silently re-arming hourly forever in compute_next_run.
+        validate_schedule_parses(&job.schedule).map_err(RustyHandError::InvalidInput)?;
 
         // Compute initial next_run
         job.next_run = Some(compute_next_run(&job.schedule));
@@ -254,6 +269,26 @@ impl CronScheduler {
         mut updated: CronJob,
         one_shot: bool,
     ) -> RustyHandResult<()> {
+        if !self.jobs.contains_key(&id) {
+            return Err(RustyHandError::Internal(format!("Cron job {id} not found")));
+        }
+
+        // SECURITY/correctness: a PUT must enforce the SAME caps as add_job —
+        // otherwise it bypasses CronJob::validate (schedule floor/ceiling,
+        // payload-size caps, At horizon) and could install a fire-every-tick
+        // job or trigger a chrono overflow panic on a huge Every interval.
+        // Count the agent's OTHER jobs (this one is already tracked); compute
+        // the count OUTSIDE any get_mut to avoid a DashMap shard self-deadlock.
+        let agent_count = self
+            .jobs
+            .iter()
+            .filter(|r| r.value().job.agent_id == updated.agent_id && *r.key() != id)
+            .count();
+        updated
+            .validate(agent_count)
+            .map_err(RustyHandError::InvalidInput)?;
+        validate_schedule_parses(&updated.schedule).map_err(RustyHandError::InvalidInput)?;
+
         match self.jobs.get_mut(&id) {
             Some(mut meta) => {
                 // Preserve identity and history
@@ -443,16 +478,22 @@ pub fn compute_next_run(schedule: &CronSchedule) -> chrono::DateTime<Utc> {
     match schedule {
         CronSchedule::At { at } => *at,
         CronSchedule::Every { every_secs } => Utc::now() + Duration::seconds(*every_secs as i64),
-        CronSchedule::Cron { expr, .. } => {
+        CronSchedule::Cron { expr, tz } => {
             // The `cron` crate expects 7 fields (sec min hour dom mon dow year)
             // but standard cron uses 5 (min hour dom mon dow). Prepend "0 " for
             // seconds and append " *" for year.
             let seven_field = format!("0 {expr} *");
             match cron::Schedule::from_str(&seven_field) {
-                Ok(sched) => sched
-                    .upcoming(Utc)
-                    .next()
-                    .unwrap_or_else(|| Utc::now() + Duration::hours(1)),
+                Ok(sched) => {
+                    // Honor the optional IANA timezone (e.g. America/New_York):
+                    // compute the next fire time in that zone, then convert back
+                    // to UTC. Falls back to UTC for None/unknown zones.
+                    let next = match tz.as_ref().and_then(|t| t.parse::<chrono_tz::Tz>().ok()) {
+                        Some(zone) => sched.upcoming(zone).next().map(|t| t.with_timezone(&Utc)),
+                        None => sched.upcoming(Utc).next(),
+                    };
+                    next.unwrap_or_else(|| Utc::now() + Duration::hours(1))
+                }
                 Err(e) => {
                     warn!(expr, error = %e, "Invalid cron expression, falling back to 1h");
                     Utc::now() + Duration::hours(1)
@@ -460,6 +501,36 @@ pub fn compute_next_run(schedule: &CronSchedule) -> chrono::DateTime<Utc> {
             }
         }
     }
+}
+
+/// Verify a schedule that the kernel can actually realize. The types-crate
+/// `validate_cron_expr` only checks the 5-field shape and character set; this
+/// runs the real `cron` parser (and IANA timezone parser) so semantically
+/// invalid schedules — hour 25, Feb 30, an unknown timezone — are rejected at
+/// the create/update boundary rather than silently re-arming hourly forever.
+fn validate_schedule_parses(schedule: &CronSchedule) -> Result<(), String> {
+    if let CronSchedule::Cron { expr, tz } = schedule {
+        let seven_field = format!("0 {expr} *");
+        let sched = cron::Schedule::from_str(&seven_field)
+            .map_err(|e| format!("invalid cron expression \"{expr}\": {e}"))?;
+        if let Some(t) = tz {
+            if t.parse::<chrono_tz::Tz>().is_err() {
+                return Err(format!("unknown IANA timezone \"{t}\""));
+            }
+        }
+        // A parseable-but-never-matching expression (e.g. `0 0 30 2 *` — Feb 30)
+        // would otherwise re-arm +1h forever. Reject it.
+        let matches = match tz.as_ref().and_then(|t| t.parse::<chrono_tz::Tz>().ok()) {
+            Some(zone) => sched.upcoming(zone).next().is_some(),
+            None => sched.upcoming(Utc).next().is_some(),
+        };
+        if !matches {
+            return Err(format!(
+                "cron expression \"{expr}\" never matches any future time"
+            ));
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -495,6 +566,92 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let sched = CronScheduler::new(tmp.path(), max_total);
         (sched, tmp)
+    }
+
+    // -- validation regressions ---------------------------------------------
+
+    #[test]
+    fn test_update_job_enforces_validate() {
+        // A PUT must not bypass add_job's caps: an Every interval below the
+        // 60s floor must be rejected on update, not silently installed.
+        let (sched, _tmp) = make_scheduler(100);
+        let agent = AgentId::new();
+        let id = sched.add_job(make_job(agent), false).unwrap();
+        let mut bad = make_job(agent);
+        bad.schedule = CronSchedule::Every { every_secs: 1 };
+        let err = sched.update_job(id, bad, false).unwrap_err();
+        assert!(
+            format!("{err}").contains("every_secs"),
+            "update_job must reject a sub-minute Every interval"
+        );
+    }
+
+    #[test]
+    fn test_add_job_rejects_unparseable_cron() {
+        // The types-crate validator accepts "0 25 * * *" (hour 25) by shape;
+        // the kernel's parse-check must reject it instead of re-arming hourly.
+        let (sched, _tmp) = make_scheduler(100);
+        let mut job = make_job(AgentId::new());
+        job.schedule = CronSchedule::Cron {
+            expr: "0 25 * * *".into(),
+            tz: None,
+        };
+        assert!(sched.add_job(job, false).is_err());
+    }
+
+    #[test]
+    fn test_add_job_rejects_unknown_timezone() {
+        let (sched, _tmp) = make_scheduler(100);
+        let mut job = make_job(AgentId::new());
+        job.schedule = CronSchedule::Cron {
+            expr: "0 9 * * *".into(),
+            tz: Some("Mars/Olympus_Mons".into()),
+        };
+        assert!(sched.add_job(job, false).is_err());
+    }
+
+    #[test]
+    fn test_compute_next_run_honors_timezone() {
+        // Same daily expr in UTC vs a non-UTC zone must differ (the tz was
+        // previously dropped and everything fired at UTC).
+        let utc = compute_next_run(&CronSchedule::Cron {
+            expr: "0 9 * * *".into(),
+            tz: None,
+        });
+        let ny = compute_next_run(&CronSchedule::Cron {
+            expr: "0 9 * * *".into(),
+            tz: Some("America/New_York".into()),
+        });
+        assert_ne!(
+            utc, ny,
+            "a non-UTC timezone must shift the computed fire time"
+        );
+    }
+
+    #[test]
+    fn test_load_reschedules_crash_orphaned_claim() {
+        // A job persisted while claimed (next_run=None) must be rescheduled on
+        // load, not left stuck forever.
+        let tmp = tempfile::tempdir().unwrap();
+        let agent = AgentId::new();
+        {
+            let sched = CronScheduler::new(tmp.path(), 100);
+            let id = sched.add_job(make_job(agent), false).unwrap();
+            // Simulate a crash mid-execution: claim_due_jobs cleared next_run and
+            // the periodic persist() snapshotted it before reschedule.
+            if let Some(mut m) = sched.jobs.get_mut(&id) {
+                m.job.next_run = None;
+            }
+            sched.persist().unwrap();
+        }
+        // Reopen from disk.
+        let sched2 = CronScheduler::new(tmp.path(), 100);
+        sched2.load().unwrap();
+        let job = sched2.list_jobs(agent).into_iter().next().unwrap();
+        assert!(
+            job.next_run.is_some(),
+            "crash-orphaned claimed job must be rescheduled on load"
+        );
     }
 
     // -- test_add_job_and_list ----------------------------------------------

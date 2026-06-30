@@ -145,8 +145,14 @@ pub fn build_reload_plan(old: &KernelConfig, new: &KernelConfig) -> ReloadPlan {
             .push("network_enabled changed".to_string());
     }
 
-    // Network config (shared_secret, listen_addresses, etc.)
-    if field_changed(&old.network, &new.network) {
+    // Network config (shared_secret, listen_addresses, etc.). NOTE:
+    // `shared_secret` is `#[serde(skip_serializing)]` so it never leaks through
+    // config serialization, which means `field_changed` (serde-based) cannot see
+    // a shared_secret-only change — compare it explicitly so rotating the PSK
+    // still flags a required restart.
+    if field_changed(&old.network, &new.network)
+        || old.network.shared_secret != new.network.shared_secret
+    {
         plan.restart_required = true;
         plan.restart_reasons
             .push("network config changed".to_string());

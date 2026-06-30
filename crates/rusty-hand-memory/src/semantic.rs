@@ -16,6 +16,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, warn};
 
+/// Backstop cap on candidates scanned for a brute-force vector recall, to bound
+/// memory on an unscoped corpus. High enough that normal per-agent/per-document
+/// queries scan their entire (smaller) candidate set, so cosine ranking sees
+/// every relevant memory rather than just the most-recently-accessed ones.
+const VECTOR_SCAN_CAP: usize = 10_000;
+
 /// Semantic store backed by SQLite with optional vector search.
 #[derive(Clone)]
 pub struct SemanticStore {
@@ -116,13 +122,10 @@ impl SemanticStore {
             .lock()
             .map_err(|e| RustyHandError::Internal(e.to_string()))?;
 
-        // Build SQL: fetch candidates (broader than limit for vector re-ranking)
-        let fetch_limit = if query_embedding.is_some() {
-            // Fetch more candidates for vector search re-ranking
-            (limit * 10).max(100)
-        } else {
-            limit
-        };
+        // For the non-embedding (recency/text) path, fetch exactly `limit` rows
+        // ordered by recency. The embedding path is handled separately below: it
+        // must NOT pre-select candidates by recency (see the ORDER BY/LIMIT note).
+        let fetch_limit = limit;
 
         let mut sql = String::from(
             "SELECT id, agent_id, content, source, scope, confidence, metadata, created_at, accessed_at, access_count, embedding
@@ -170,8 +173,20 @@ impl SemanticStore {
             }
         }
 
-        sql.push_str(" ORDER BY accessed_at DESC, access_count DESC");
-        sql.push_str(&format!(" LIMIT {fetch_limit}"));
+        if query_embedding.is_some() {
+            // Vector search re-ranks the candidate pool by cosine similarity in
+            // Rust below. The pool therefore must NOT be pre-selected by recency
+            // — `ORDER BY accessed_at DESC LIMIT N` would silently drop a
+            // best-matching but not-recently-accessed memory before it is ever
+            // scored (e.g. an old RAG chunk that perfectly answers the query).
+            // With no ANN index, correctness requires scanning all structurally
+            // matching rows; a high backstop cap bounds memory on an unscoped
+            // corpus (queries are normally scoped per agent/document anyway).
+            sql.push_str(&format!(" LIMIT {VECTOR_SCAN_CAP}"));
+        } else {
+            sql.push_str(" ORDER BY accessed_at DESC, access_count DESC");
+            sql.push_str(&format!(" LIMIT {fetch_limit}"));
+        }
 
         let mut stmt = conn
             .prepare(&sql)

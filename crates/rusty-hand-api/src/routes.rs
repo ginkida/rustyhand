@@ -2373,10 +2373,11 @@ pub async fn import_memory_backup(
     }
 }
 
-/// GET /api/memory/agents/:id/kv — List KV pairs for an agent.
+/// GET /api/memory/agents/:id/kv — List KV pairs for an agent (paginated).
 pub async fn get_agent_kv(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
+    Query(pagination): Query<PaginationQuery>,
 ) -> impl IntoResponse {
     let agent_id: AgentId = match id.parse() {
         Ok(id) => id,
@@ -2388,13 +2389,29 @@ pub async fn get_agent_kv(
         }
     };
 
+    let offset = pagination.offset();
+    let limit = pagination.limit();
     match state.kernel.memory.list_kv(agent_id) {
         Ok(pairs) => {
+            // Paginate: an agent's KV store has no per-count cap, so returning
+            // the whole thing in one response (and cloning it into a second Vec)
+            // is an unbounded memory/response amplifier for a large store.
+            let total = pairs.len();
             let kv: Vec<serde_json::Value> = pairs
                 .into_iter()
+                .skip(offset)
+                .take(limit)
                 .map(|(k, v)| serde_json::json!({"key": k, "value": v}))
                 .collect();
-            (StatusCode::OK, Json(serde_json::json!({"kv_pairs": kv})))
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "kv_pairs": kv,
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                })),
+            )
         }
         Err(e) => {
             tracing::warn!("Memory list_kv failed for agent {id}: {e}");
@@ -3648,6 +3665,12 @@ async fn execute_knowledge_query(
     state: &AppState,
     pattern: rusty_hand_types::memory::GraphPattern,
 ) -> serde_json::Value {
+    // A full-graph query (no filters) may be capped by query_graph, so its
+    // matched-edge count under-reports the real total. Capture whether this is
+    // the unfiltered case so total_edges can reflect the true relation count.
+    let is_full_graph =
+        pattern.source.is_none() && pattern.relation.is_none() && pattern.target.is_none();
+
     let matches = state
         .kernel
         .memory
@@ -3716,11 +3739,26 @@ async fn execute_knowledge_query(
         }
     }
 
+    // Report the true edge total for the full-graph view (the returned `edges`
+    // may be capped by query_graph); for filtered queries the matched count is
+    // the right total.
+    let total_edges = if is_full_graph {
+        state
+            .kernel
+            .memory
+            .count_relations()
+            .await
+            .unwrap_or(edges.len())
+            .max(edges.len())
+    } else {
+        edges.len()
+    };
+
     serde_json::json!({
         "nodes": nodes,
         "edges": edges,
         "total_nodes": nodes.len(),
-        "total_edges": edges.len(),
+        "total_edges": total_edges,
     })
 }
 
@@ -5779,6 +5817,14 @@ pub async fn mcp_http(
         // Execute the tool via the kernel's tool runner
         let kernel_handle: Arc<dyn rusty_hand_runtime::kernel_handle::KernelHandle> =
             state.kernel.clone() as Arc<dyn rusty_hand_runtime::kernel_handle::KernelHandle>;
+        // SECURITY: confine MCP file_read/file_list/file_stat to the agent
+        // workspaces dir. Passing None for workspace_root resolves relative
+        // paths against the daemon's PROCESS CWD, letting a remote MCP caller
+        // recursively read any file under it (config.toml, .env, .ssh, …),
+        // bypassing per-agent workspace confinement. A missing root fails closed
+        // in the sandbox resolver.
+        let mcp_workspace = state.kernel.config.effective_workspaces_dir();
+        let _ = std::fs::create_dir_all(&mcp_workspace);
         let result = rusty_hand_runtime::tool_runner::execute_tool(
             "mcp-http",
             tool_name,
@@ -5791,7 +5837,7 @@ pub async fn mcp_http(
             Some(&state.kernel.web_ctx),
             Some(&state.kernel.browser_ctx),
             None,
-            None,
+            Some(mcp_workspace.as_path()),
             Some(&state.kernel.media_engine),
             None, // exec_policy
             if state.kernel.config.tts.enabled {

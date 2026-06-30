@@ -611,7 +611,12 @@ async fn send_response_reply(
     };
 
     if let Err(e) = result {
-        error!("Failed to send response: {e}");
+        // SECURITY: adapter errors propagated via `?` can be raw reqwest errors
+        // whose Display includes the request URL — Telegram embeds the bot token
+        // in the URL path, so log through the token redactor. No-op for other
+        // channels/errors.
+        let safe = rusty_hand_types::text::redact_telegram_token(&e.to_string());
+        error!("Failed to send response: {safe}");
     }
 }
 
@@ -822,7 +827,11 @@ async fn dispatch_message(
                     }
                 }
                 Err(e) => {
-                    warn!("Media download failed for file_id={file_id}: {e}");
+                    // SECURITY: redact any embedded Telegram bot token (the file
+                    // download URL is .../file/bot{TOKEN}/... and a raw reqwest
+                    // error Display includes it).
+                    let safe = rusty_hand_types::text::redact_telegram_token(&e.to_string());
+                    warn!("Media download failed for file_id={file_id}: {safe}");
                     send_response(
                         adapter,
                         &message.sender,

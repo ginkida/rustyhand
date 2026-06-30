@@ -247,6 +247,15 @@ impl MemorySubstrate {
             .map_err(|e| RustyHandError::Internal(e.to_string()))?
     }
 
+    /// Total number of relations (edges) in the knowledge graph — for reporting
+    /// the true edge count when a graph query result is capped.
+    pub async fn count_relations(&self) -> RustyHandResult<usize> {
+        let store = self.knowledge.clone();
+        tokio::task::spawn_blocking(move || store.count_relations())
+            .await
+            .map_err(|e| RustyHandError::Internal(e.to_string()))?
+    }
+
     /// Delete a session by ID.
     pub fn delete_session(&self, session_id: SessionId) -> RustyHandResult<()> {
         self.sessions.delete_session(session_id)

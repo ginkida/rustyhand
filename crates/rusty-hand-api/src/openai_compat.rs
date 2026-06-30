@@ -15,7 +15,7 @@ use axum::Json;
 use rusty_hand_runtime::kernel_handle::KernelHandle;
 use rusty_hand_runtime::llm_driver::StreamEvent;
 use rusty_hand_types::agent::AgentId;
-use rusty_hand_types::message::{ContentBlock, Message, MessageContent, Role, StopReason};
+use rusty_hand_types::message::{ContentBlock, Message, MessageContent, Role};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -179,9 +179,13 @@ fn resolve_agent(state: &AppState, model: &str) -> Option<(AgentId, String)> {
         return Some((entry.id, entry.name.clone()));
     }
 
-    // 4. Fallback → first registered agent
-    let agents = state.kernel.registry.list();
-    agents.first().map(|e| (e.id, e.name.clone()))
+    // 4. Unrecognized model → no match. Return None so the caller responds with
+    //    a deterministic 404 model_not_found. Previously this fell back to
+    //    `registry.list().first()`, but the registry is a DashMap whose
+    //    iteration order is hash/shard-based, so an unknown/typo'd model was
+    //    silently routed to an arbitrary, non-deterministic agent (with whatever
+    //    tools/permissions/prompt it happens to have) instead of erroring.
+    None
 }
 
 // ── Message conversion ──────────────────────────────────────────────────────
@@ -266,10 +270,37 @@ pub async fn chat_completions(
 
     // Extract the last user message as the input
     let messages = convert_messages(&req.messages);
-    let last_user_msg = messages
-        .iter()
-        .rev()
-        .find(|m| m.role == Role::User)
+    let last_user = messages.iter().rev().find(|m| m.role == Role::User);
+
+    // The agent send path is text-only, so any image content would be silently
+    // dropped. Reject it explicitly rather than parsing the image and discarding
+    // it — a client sending an image_url part deserves an error, not a confusing
+    // text-only answer.
+    if let Some(m) = last_user {
+        let has_image = matches!(
+            &m.content,
+            rusty_hand_types::message::MessageContent::Blocks(blocks)
+                if blocks.iter().any(|b| matches!(
+                    b,
+                    rusty_hand_types::message::ContentBlock::Image { .. }
+                ))
+        );
+        if has_image {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": {
+                        "message": "Image content is not supported on /v1/chat/completions (text only)",
+                        "type": "invalid_request_error",
+                        "code": "unsupported_content"
+                    }
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    let last_user_msg = last_user
         .map(|m| m.content.text_content())
         .unwrap_or_default();
 
@@ -493,12 +524,15 @@ async fn stream_response(
                         None,
                     )
                 }
-                StreamEvent::ContentComplete { stop_reason, .. } => {
-                    // ToolUse → reset tool index for next iteration, do NOT finish.
-                    // EndTurn/MaxTokens/StopSequence → continue, wait for channel close.
-                    if matches!(stop_reason, StopReason::ToolUse) {
-                        tool_index = 0;
-                    }
+                StreamEvent::ContentComplete { .. } => {
+                    // Do NOT finish here — wait for the channel to close. We must
+                    // NOT reset tool_index between iterations either: the whole
+                    // multi-iteration agent loop is flattened into ONE OpenAI
+                    // completion (single id, choice index 0), so tool_call indices
+                    // must stay globally monotonic. Resetting to 0 made a 2nd-round
+                    // tool call collide with index 0 from the 1st round, and OpenAI
+                    // streaming clients (which accumulate delta.tool_calls by index)
+                    // would merge them into one corrupted call.
                     continue;
                 }
                 // ToolUseEnd, ToolExecutionResult, ThinkingDelta, PhaseChange — skip

@@ -44,12 +44,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
 
 # IDs
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # Database
-rusqlite = { version = "0.31", features = ["bundled", "serde_json"] }
+rusqlite = { version = "0.31", features = ["bundled", "serde_json", "functions"] }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
