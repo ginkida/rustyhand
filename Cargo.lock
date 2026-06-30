@@ -3153,7 +3153,7 @@ checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
 name = "rusty-hand-api"
-version = "0.7.86"
+version = "0.7.87"
 dependencies = [
  "argon2",
  "async-trait",
@@ -3189,7 +3189,7 @@ dependencies = [
 
 [[package]]
 name = "rusty-hand-channels"
-version = "0.7.86"
+version = "0.7.87"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3210,7 +3210,7 @@ dependencies = [
 
 [[package]]
 name = "rusty-hand-cli"
-version = "0.7.86"
+version = "0.7.87"
 dependencies = [
  "argon2",
  "clap",
@@ -3239,7 +3239,7 @@ dependencies = [
 
 [[package]]
 name = "rusty-hand-extensions"
-version = "0.7.86"
+version = "0.7.87"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -3265,7 +3265,7 @@ dependencies = [
 
 [[package]]
 name = "rusty-hand-kernel"
-version = "0.7.86"
+version = "0.7.87"
 dependencies = [
  "argon2",
  "async-trait",
@@ -3300,7 +3300,7 @@ dependencies = [
 
 [[package]]
 name = "rusty-hand-memory"
-version = "0.7.86"
+version = "0.7.87"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3318,7 +3318,7 @@ dependencies = [
 
 [[package]]
 name = "rusty-hand-runtime"
-version = "0.7.86"
+version = "0.7.87"
 dependencies = [
  "async-trait",
  "base64",
@@ -3349,7 +3349,7 @@ dependencies = [
 
 [[package]]
 name = "rusty-hand-skills"
-version = "0.7.86"
+version = "0.7.87"
 dependencies = [
  "chrono",
  "flate2",
@@ -3372,7 +3372,7 @@ dependencies = [
 
 [[package]]
 name = "rusty-hand-types"
-version = "0.7.86"
+version = "0.7.87"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3391,7 +3391,7 @@ dependencies = [
 
 [[package]]
 name = "rusty-hand-wire"
-version = "0.7.86"
+version = "0.7.87"
 dependencies = [
  "async-trait",
  "chrono",
