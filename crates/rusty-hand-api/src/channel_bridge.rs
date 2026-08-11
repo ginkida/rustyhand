@@ -444,7 +444,7 @@ impl ChannelBridgeHandle for KernelBridgeAdapter {
                 let job = rusty_hand_types::scheduler::CronJob {
                     id: rusty_hand_types::scheduler::CronJobId::new(),
                     agent_id: agent.id,
-                    name: format!("chat-{}", &agent.name),
+                    name: format!("chat-{}", agent.name),
                     enabled: true,
                     schedule: rusty_hand_types::scheduler::CronSchedule::Cron {
                         expr: cron_expr.clone(),

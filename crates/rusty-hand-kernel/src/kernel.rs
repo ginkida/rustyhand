@@ -1271,7 +1271,7 @@ impl RustyHandKernel {
         let workspace_dir = manifest.workspace.clone().unwrap_or_else(|| {
             self.config.effective_workspaces_dir().join(format!(
                 "{}-{}",
-                &name,
+                name,
                 &agent_id.0.to_string()[..8]
             ))
         });
@@ -1624,7 +1624,7 @@ impl RustyHandKernel {
         if manifest.workspace.is_none() {
             let workspace_dir = self.config.effective_workspaces_dir().join(format!(
                 "{}-{}",
-                &manifest.name,
+                manifest.name,
                 &agent_id.0.to_string()[..8]
             ));
             if let Err(e) = ensure_workspace(&workspace_dir) {
@@ -2130,7 +2130,7 @@ impl RustyHandKernel {
         if manifest.workspace.is_none() {
             let workspace_dir = self.config.effective_workspaces_dir().join(format!(
                 "{}-{}",
-                &manifest.name,
+                manifest.name,
                 &agent_id.0.to_string()[..8]
             ));
             if let Err(e) = ensure_workspace(&workspace_dir) {

@@ -104,8 +104,13 @@ jobs:
           curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin
       - name: Scan for secrets
         run: |
+          # Lob is excluded: its regex is `\b(live|test)_[a-zA-Z0-9_]{35}\b`, which
+          # matches any 40-char Rust test fn name (`test_bridge_stop_completes_...`),
+          # and Lob's sandbox endpoint "verifies" every `test_` key, so even
+          # --only-verified reports them. 21 such false positives, zero real hits.
           trufflehog filesystem . \
             --no-update \
             --fail \
             --only-verified \
+            --exclude-detectors=Lob \
             --exclude-paths=<(echo -e "target/\n.git/\nCargo.lock")

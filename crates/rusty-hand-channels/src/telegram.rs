@@ -1174,14 +1174,12 @@ fn parse_telegram_update(
                 HashMap::new(),
             )
         }
-    } else if let Some(location) = message.get("location") {
-        // Location sharing
+    } else {
+        // Location sharing, or truly unsupported (contact, dice, poll, etc.)
+        let location = message.get("location")?;
         let lat = location["latitude"].as_f64().unwrap_or(0.0);
         let lon = location["longitude"].as_f64().unwrap_or(0.0);
         (ChannelContent::Location { lat, lon }, HashMap::new())
-    } else {
-        // Truly unsupported (contact, dice, poll, etc.)
-        return None;
     };
 
     // Add caption as metadata if present (for media with captions)
