@@ -211,6 +211,43 @@ pub async fn create_sandbox(
     })
 }
 
+/// `(stdout_kept, stdout_total, stderr_kept, stderr_total, status)` from one
+/// capped `docker exec` capture.
+type CapturedExec = (Vec<u8>, usize, Vec<u8>, usize, std::process::ExitStatus);
+
+/// Read `reader` to EOF, keeping at most `cap` bytes in `buf` and DISCARDING the
+/// rest. Returns the total number of bytes the stream produced.
+///
+/// Draining past the cap is load-bearing, not tidiness: an OS pipe holds ~64 KiB,
+/// so a reader that simply stopped at the cap would leave the child blocked
+/// writing into a full pipe forever. `child.wait()` would then never return and
+/// EVERY over-cap command would burn the full timeout and report a timeout error
+/// instead of its (truncated) output — strictly worse than the unbounded
+/// `cmd.output()` this replaced. Reading-and-discarding bounds host memory while
+/// still letting the child finish and yield a real exit code.
+async fn read_capped<R: tokio::io::AsyncRead + Unpin>(
+    reader: &mut R,
+    buf: &mut Vec<u8>,
+    cap: usize,
+) -> usize {
+    use tokio::io::AsyncReadExt;
+    let mut chunk = [0u8; 8192];
+    let mut total = 0usize;
+    loop {
+        match reader.read(&mut chunk).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                total += n;
+                if buf.len() < cap {
+                    let take = n.min(cap - buf.len());
+                    buf.extend_from_slice(&chunk[..take]);
+                }
+            }
+        }
+    }
+    total
+}
+
 /// Execute a command inside an existing sandbox container.
 pub async fn exec_in_sandbox(
     container: &SandboxContainer,
@@ -227,28 +264,71 @@ pub async fn exec_in_sandbox(
         .arg(command);
 
     cmd.stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
 
     debug!(container = %container.container_id, "Executing in Docker sandbox");
 
-    let output = tokio::time::timeout(timeout, cmd.output())
-        .await
-        .map_err(|_| format!("Docker exec timed out after {}s", timeout.as_secs()))?
-        .map_err(|e| format!("Docker exec failed: {e}"))?;
+    // SECURITY: `cmd.output()` buffers the container's ENTIRE stdout/stderr into
+    // host memory with no cap (the cgroup --memory limit covers the in-container
+    // process, not the host-side drain), so a high-output command (`yes`,
+    // `cat /dev/zero`) could OOM the daemon. Stream both pipes with a per-stream
+    // host cap instead, draining (and discarding) the remainder so the child can
+    // still exit normally. On timeout the child is killed via kill_on_drop.
+    //
+    // NOTE: kill_on_drop reaps the `docker exec` CLIENT process. The process
+    // inside the container is not signalled by that alone — callers rely on
+    // destroy_sandbox (which `docker rm -f`s the container) for that, and
+    // tool_docker_exec always does so after this returns.
+    const MAX_CAPTURE_BYTES: usize = 5 * 1024 * 1024;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Docker exec spawn failed: {e}"))?;
+    let mut stdout_pipe = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Docker exec: no stdout pipe".to_string())?;
+    let mut stderr_pipe = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Docker exec: no stderr pipe".to_string())?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let exit_code = output.status.code().unwrap_or(-1);
+    let collect = async {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let (out_total, err_total) = tokio::join!(
+            read_capped(&mut stdout_pipe, &mut out, MAX_CAPTURE_BYTES),
+            read_capped(&mut stderr_pipe, &mut err, MAX_CAPTURE_BYTES),
+        );
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| format!("Docker exec wait failed: {e}"))?;
+        Ok::<CapturedExec, String>((out, out_total, err, err_total, status))
+    };
+
+    let (stdout_bytes, stdout_total, stderr_bytes, stderr_total, status) =
+        tokio::time::timeout(timeout, collect)
+            .await
+            .map_err(|_| format!("Docker exec timed out after {}s", timeout.as_secs()))??;
+
+    let stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
+    let stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
+    let exit_code = status.code().unwrap_or(-1);
 
     // Truncate large outputs. Container stdout/stderr is frequently
     // non-ASCII — use a char-boundary-safe truncation so byte `max_output`
     // never splits a multi-byte char (raw `&s[..max_output]` panics).
+    //
+    // Report the stream's TRUE total (from read_capped), not the retained
+    // length: past MAX_CAPTURE_BYTES the tail was discarded, so `stdout.len()`
+    // would understate a 100 MiB stream as exactly 5 MiB.
     let max_output = 50_000;
     let stdout = if stdout.len() > max_output {
         format!(
             "{}... [truncated, {} total bytes]",
             rusty_hand_types::text::truncate_bytes(&stdout, max_output),
-            stdout.len()
+            stdout_total
         )
     } else {
         stdout
@@ -257,7 +337,7 @@ pub async fn exec_in_sandbox(
         format!(
             "{}... [truncated, {} total bytes]",
             rusty_hand_types::text::truncate_bytes(&stderr, max_output),
-            stderr.len()
+            stderr_total
         )
     } else {
         stderr
@@ -303,18 +383,70 @@ pub async fn destroy_sandbox(container: &SandboxContainer) -> Result<(), String>
     Err(format!("Docker rm failed: {last_err}"))
 }
 
+/// Decide whether one `docker ps` line describes a container this process may
+/// force-remove. Returns the container id when it is safe to reap.
+///
+/// Expects the `{{.ID}} {{.State}} {{.CreatedAt}}` format, where `CreatedAt`
+/// looks like `2026-06-30 14:23:01 +0000 UTC`.
+///
+/// The rules encode who might still own the container:
+///   * A container that is **not running** (exited/created/dead) cannot belong
+///     to a live sibling instance's in-flight exec, so it is reaped regardless
+///     of age. This is the crash-recovery case the reaper exists for — gating it
+///     behind an age threshold would leave a just-crashed run's container in
+///     place, and since sandbox names are derived from the agent id, that stale
+///     container makes every later exec for that agent fail on a name conflict.
+///   * A **running** container may be a sibling's, so it is only reaped once it
+///     is older than `min_age`.
+///   * An **unparseable** timestamp is never reaped — we don't force-remove a
+///     container whose age we can't establish.
+///
+/// Split out as a pure function so the parsing and the policy are unit-testable
+/// without a Docker daemon.
+fn reap_decision(
+    line: &str,
+    now: chrono::DateTime<chrono::Utc>,
+    min_age: chrono::Duration,
+) -> Option<String> {
+    let mut parts = line.split_whitespace();
+    let id = match parts.next() {
+        Some(id) if !id.is_empty() => id.to_string(),
+        _ => return None,
+    };
+    let state = parts.next()?.to_ascii_lowercase();
+    // "paused" and "restarting" are live states — treat them like "running".
+    if !matches!(state.as_str(), "running" | "paused" | "restarting") {
+        return Some(id);
+    }
+
+    let rest: Vec<&str> = parts.collect();
+    if rest.len() < 3 {
+        return None;
+    }
+    let ts = format!("{} {} {}", rest[0], rest[1], rest[2]);
+    let created = chrono::DateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S %z").ok()?;
+    if now.signed_duration_since(created.with_timezone(&chrono::Utc)) >= min_age {
+        Some(id)
+    } else {
+        None
+    }
+}
+
 /// Reap orphaned sandbox containers left over from a previous rustyhand
 /// run (e.g. after a crash). Lists containers whose name matches the
-/// configured prefix and removes any older than 1 hour. Non-fatal.
+/// configured prefix and removes the ones [`reap_decision`] deems unowned.
+/// Non-fatal.
 pub async fn reap_orphan_sandboxes(prefix: &str) {
-    let filter = format!("name={prefix}");
+    // Anchor the filter: Docker's `name=` filter is an unanchored regex, so a
+    // bare prefix also matches any container that merely CONTAINS it.
+    let filter = format!("name=^{prefix}");
     let output = match tokio::process::Command::new("docker")
         .arg("ps")
         .arg("-a")
         .arg("--filter")
         .arg(&filter)
         .arg("--format")
-        .arg("{{.ID}} {{.CreatedAt}}")
+        .arg("{{.ID}} {{.State}} {{.CreatedAt}}")
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .output()
@@ -332,16 +464,17 @@ pub async fn reap_orphan_sandboxes(prefix: &str) {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let now = chrono::Utc::now();
+    let min_age = chrono::Duration::hours(1);
     let mut reaped = 0usize;
     for line in stdout.lines() {
-        let id = match line.split_whitespace().next() {
-            Some(id) if !id.is_empty() => id,
-            _ => continue,
+        let Some(id) = reap_decision(line, now, min_age) else {
+            continue;
         };
         let rm = tokio::process::Command::new("docker")
             .arg("rm")
             .arg("-f")
-            .arg(id)
+            .arg(&id)
             .output()
             .await;
         if matches!(rm, Ok(o) if o.status.success()) {
@@ -539,6 +672,143 @@ pub fn config_hash(config: &DockerSandboxConfig) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── read_capped ─────────────────────────────────────────────────────────
+
+    /// The whole point of draining past the cap: the reader must reach EOF even
+    /// when the stream is far larger than the cap, so the child can exit and
+    /// `wait()` can return. A reader that stopped at the cap would leave the
+    /// writer blocked on a full pipe and every over-cap command would hit the
+    /// caller's timeout instead of returning its (truncated) output.
+    #[tokio::test]
+    async fn read_capped_drains_past_the_cap_and_reports_the_true_total() {
+        let data = vec![b'x'; 200_000];
+        let mut reader = std::io::Cursor::new(data.clone());
+        let mut buf = Vec::new();
+        let total = read_capped(&mut reader, &mut buf, 1_000).await;
+
+        assert_eq!(buf.len(), 1_000, "must retain exactly the cap");
+        assert_eq!(total, 200_000, "must report the full stream length");
+    }
+
+    #[tokio::test]
+    async fn read_capped_keeps_everything_under_the_cap() {
+        let mut reader = std::io::Cursor::new(b"hello".to_vec());
+        let mut buf = Vec::new();
+        let total = read_capped(&mut reader, &mut buf, 1_000).await;
+        assert_eq!(buf, b"hello");
+        assert_eq!(total, 5);
+    }
+
+    /// End-to-end guard on the deadlock this replaced: a real child that writes
+    /// far more than the cap must still be reaped, and quickly.
+    #[tokio::test]
+    async fn over_cap_child_still_exits() {
+        let mut child = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg("head -c 2000000 /dev/zero")
+            .stdout(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn");
+        let mut pipe = child.stdout.take().expect("stdout");
+        let mut buf = Vec::new();
+
+        let total = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            read_capped(&mut pipe, &mut buf, 4096),
+        )
+        .await
+        .expect("read_capped must finish, not block on a full pipe");
+
+        assert_eq!(buf.len(), 4096);
+        assert_eq!(total, 2_000_000);
+        let status = tokio::time::timeout(std::time::Duration::from_secs(10), child.wait())
+            .await
+            .expect("child must be reapable once its pipe is drained")
+            .expect("wait");
+        assert!(status.success());
+    }
+
+    // ── reap_decision ───────────────────────────────────────────────────────
+
+    fn now() -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339("2026-06-30T15:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+    }
+
+    /// The crash-recovery case the reaper exists for. A container left behind by
+    /// a crashed run is `exited`; gating it behind an age threshold (as the
+    /// first version of this fix did) meant a restart within the hour never
+    /// cleaned it up — and since sandbox names derive from the agent id, the
+    /// stale container then broke every later exec with a name conflict.
+    #[test]
+    fn reaps_non_running_containers_regardless_of_age() {
+        let line = "abc123 exited 2026-06-30 14:59:30 +0000 UTC";
+        assert_eq!(
+            reap_decision(line, now(), chrono::Duration::hours(1)),
+            Some("abc123".to_string())
+        );
+    }
+
+    /// A running container may belong to a live sibling instance sharing the
+    /// default prefix, so it is only reaped once it is old enough.
+    #[test]
+    fn spares_young_running_containers() {
+        let line = "abc123 running 2026-06-30 14:59:30 +0000 UTC";
+        assert_eq!(reap_decision(line, now(), chrono::Duration::hours(1)), None);
+    }
+
+    #[test]
+    fn reaps_old_running_containers() {
+        let line = "abc123 running 2026-06-30 13:00:00 +0000 UTC";
+        assert_eq!(
+            reap_decision(line, now(), chrono::Duration::hours(1)),
+            Some("abc123".to_string())
+        );
+    }
+
+    /// "paused" / "restarting" are live states, not orphans.
+    #[test]
+    fn treats_paused_and_restarting_as_live() {
+        for state in ["paused", "restarting"] {
+            let line = format!("abc123 {state} 2026-06-30 14:59:30 +0000 UTC");
+            assert_eq!(
+                reap_decision(&line, now(), chrono::Duration::hours(1)),
+                None,
+                "{state} must not be reaped while young"
+            );
+        }
+    }
+
+    /// Never force-remove a container whose age we cannot establish.
+    #[test]
+    fn skips_unparseable_and_malformed_lines() {
+        for line in [
+            "abc123 running not-a-timestamp",
+            "abc123 running",
+            "abc123",
+            "",
+            "   ",
+        ] {
+            assert_eq!(
+                reap_decision(line, now(), chrono::Duration::hours(1)),
+                None,
+                "must not reap on line {line:?}"
+            );
+        }
+    }
+
+    /// Docker renders CreatedAt with a real offset on non-UTC hosts.
+    #[test]
+    fn parses_non_utc_offsets() {
+        let line = "abc123 running 2026-06-30 18:00:00 +0500 MSK"; // == 13:00Z
+        assert_eq!(
+            reap_decision(line, now(), chrono::Duration::hours(1)),
+            Some("abc123".to_string())
+        );
+    }
 
     #[test]
     fn test_sanitize_container_name_valid() {

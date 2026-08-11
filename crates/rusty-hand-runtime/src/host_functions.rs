@@ -234,52 +234,100 @@ fn host_net_fetch(state: &GuestState, params: &serde_json::Value) -> serde_json:
         .unwrap_or("GET");
     let body = params.get("body").and_then(|b| b.as_str()).unwrap_or("");
 
-    // SECURITY: SSRF protection — check resolved IP against private ranges
-    if let Err(e) = is_ssrf_target(url) {
-        return e;
-    }
-
-    // Extract host:port from URL for capability check
-    let host = extract_host_from_url(url);
-    if let Err(e) = check_capability(&state.capabilities, &Capability::NetConnect(host)) {
-        return e;
-    }
-
     state.tokio_handle.block_on(async {
-        let client = crate::http_client::shared();
-        let request = match method.to_uppercase().as_str() {
-            "POST" => client.post(url).body(body.to_string()),
-            "PUT" => client.put(url).body(body.to_string()),
-            "DELETE" => client.delete(url),
-            _ => client.get(url),
-        };
-        match request.send().await {
-            Ok(resp) => {
-                let status = resp.status().as_u16();
-                // SECURITY: cap the response body — resp.text() is unbounded, so
-                // a large/endless endpoint could OOM the daemon.
-                const MAX_NET_FETCH_BYTES: usize = 8 * 1024 * 1024;
-                use futures::StreamExt;
-                let mut stream = resp.bytes_stream();
-                let mut buf: Vec<u8> = Vec::new();
-                while let Some(chunk) = stream.next().await {
-                    match chunk {
-                        Ok(bytes) => {
-                            if buf.len() + bytes.len() > MAX_NET_FETCH_BYTES {
-                                return json!({"error": format!(
-                                    "Response too large (exceeds {MAX_NET_FETCH_BYTES} bytes)"
-                                )});
-                            }
-                            buf.extend_from_slice(&bytes);
-                        }
-                        Err(e) => return json!({"error": format!("Failed to read response: {e}")}),
-                    }
-                }
-                let text = String::from_utf8_lossy(&buf).to_string();
-                json!({"ok": {"status": status, "body": text}})
+        // Redirects are followed MANUALLY here, one hop at a time.
+        //
+        // SECURITY: both gates below must run against every hop, not just the
+        // URL the guest passed in. A `redirect::Policy` closure can re-run the
+        // SSRF check but has no access to this agent's capability set, so with
+        // an automatic-redirect client a guest granted only
+        // NetConnect("api.example.com:443") could POST its body to
+        // api.example.com and have the response's 302 carry that body to any
+        // other public host — escaping the per-agent network allowlist. Driving
+        // the hops here lets each one go through the exact same
+        // is_ssrf_target + NetConnect pair as the first request.
+        const MAX_REDIRECTS: usize = 10;
+        const MAX_NET_FETCH_BYTES: usize = 8 * 1024 * 1024;
+
+        let client = crate::http_client::no_redirect_shared();
+        let mut current = url.to_string();
+        let mut method = method.to_uppercase();
+        let mut body = body.to_string();
+
+        for _ in 0..=MAX_REDIRECTS {
+            // SSRF protection — check resolved IP against private ranges.
+            if let Err(e) = is_ssrf_target(&current) {
+                return e;
             }
-            Err(e) => json!({"error": format!("Request failed: {e}")}),
+            // Per-agent network allowlist.
+            let host = extract_host_from_url(&current);
+            if let Err(e) = check_capability(&state.capabilities, &Capability::NetConnect(host)) {
+                return e;
+            }
+
+            let request = match method.as_str() {
+                "POST" => client.post(&current).body(body.clone()),
+                "PUT" => client.put(&current).body(body.clone()),
+                "DELETE" => client.delete(&current),
+                _ => client.get(&current),
+            };
+
+            let resp = match request.send().await {
+                Ok(r) => r,
+                Err(e) => return json!({"error": format!("Request failed: {e}")}),
+            };
+            let status = resp.status();
+
+            // A 3xx WITHOUT a usable Location isn't a redirect we can follow, so
+            // it falls through and is returned to the guest like any other
+            // response (body included).
+            let location = resp
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned);
+            if let (true, Some(location)) = (status.is_redirection(), location) {
+                // Location may be relative; resolve it against the current URL.
+                let next = match reqwest::Url::parse(&current).and_then(|base| base.join(&location))
+                {
+                    Ok(u) => u,
+                    Err(e) => return json!({"error": format!("Invalid redirect target: {e}")}),
+                };
+                // 307/308 preserve the method and body; 301/302/303 degrade to
+                // GET, which also drops the body — matching what reqwest's own
+                // redirect handling does, so behavior is unchanged apart from
+                // the extra checks.
+                if status.as_u16() != 307 && status.as_u16() != 308 {
+                    method = "GET".to_string();
+                    body.clear();
+                }
+                current = next.to_string();
+                continue;
+            }
+
+            // SECURITY: cap the response body — resp.text() is unbounded, so
+            // a large/endless endpoint could OOM the daemon.
+            use futures::StreamExt;
+            let mut stream = resp.bytes_stream();
+            let mut buf: Vec<u8> = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                match chunk {
+                    Ok(bytes) => {
+                        if buf.len() + bytes.len() > MAX_NET_FETCH_BYTES {
+                            return json!({"error": format!(
+                                "Response too large (exceeds {MAX_NET_FETCH_BYTES} bytes)"
+                            )});
+                        }
+                        buf.extend_from_slice(&bytes);
+                    }
+                    Err(e) => return json!({"error": format!("Failed to read response: {e}")}),
+                }
+            }
+            let text = String::from_utf8_lossy(&buf).to_string();
+            return json!({"ok": {"status": status.as_u16(), "body": text}});
         }
+
+        json!({"error": format!("Too many redirects (max {MAX_REDIRECTS})")})
     })
 }
 
@@ -536,6 +584,15 @@ mod tests {
             agent_id: "test-agent".to_string(),
             tokio_handle: tokio::runtime::Handle::current(),
             exec_policy: None,
+            // Mirror the production limiter (sandbox.rs execute_sync) rather
+            // than the unlimited default, so the fixture represents a real store.
+            limits: wasmtime::StoreLimitsBuilder::new()
+                .memory_size(16 * 1024 * 1024)
+                .table_elements(16 * 1024 * 1024 / 8)
+                .instances(1)
+                .memories(1)
+                .tables(4)
+                .build(),
         }
     }
 

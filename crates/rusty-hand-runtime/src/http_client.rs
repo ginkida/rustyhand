@@ -110,6 +110,29 @@ pub fn build_with_proxy(cfg: &ProxyConfig, timeout: Duration) -> reqwest::Client
     })
 }
 
+static NO_REDIRECT_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+/// Shared client that does **not** follow redirects, so the caller sees each
+/// 3xx itself.
+///
+/// Use this when following a redirect requires re-running caller-specific
+/// authorization that a `redirect::Policy` closure cannot express — e.g. the
+/// WASM `net_fetch` host call, where every hop must be re-checked against the
+/// *calling agent's* `Capability::NetConnect` grants, not just the SSRF rules.
+/// Driving the hops manually also keeps the (blocking, DNS-resolving) SSRF check
+/// out of reqwest's redirect callback, which is polled on a tokio worker.
+pub fn no_redirect_shared() -> &'static reqwest::Client {
+    NO_REDIRECT_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(60))
+            .pool_idle_timeout(Duration::from_secs(60))
+            .pool_max_idle_per_host(10)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
 /// Build a one-off `reqwest::Client` that re-validates every redirect hop
 /// against the SSRF rules (empty allowlist — redirects don't inherit the
 /// initial URL's trust). Use for outbound clients that fetch

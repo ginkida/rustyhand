@@ -111,6 +111,67 @@ struct EmbedResponse {
 #[derive(Deserialize)]
 struct EmbedData {
     embedding: Vec<f32>,
+    /// Position of this embedding in the input batch. OpenAI-compatible
+    /// endpoints carry it precisely so consumers don't rely on array order.
+    ///
+    /// `Option<i64>` rather than `usize` on purpose: `#[serde(default)]` only
+    /// applies when the key is ABSENT, so a provider that sends `"index": null`
+    /// (or a float, or -1) would fail to deserialize the ENTIRE response and
+    /// break embedding for that endpoint outright — where before this field
+    /// existed the value was simply ignored. Tolerate anything unusable and
+    /// fall back to array order.
+    #[serde(default, deserialize_with = "deserialize_opt_index")]
+    index: Option<i64>,
+}
+
+/// Deserialize `index` leniently: any value that isn't a non-negative integer
+/// becomes `None` so a single odd field can't fail the whole response.
+fn deserialize_opt_index<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = serde_json::Value::deserialize(deserializer)?;
+    Ok(v.as_i64().filter(|i| *i >= 0))
+}
+
+/// Return the embeddings in INPUT order, using each item's `index` when the set
+/// of indices is trustworthy.
+///
+/// Placement rather than `sort_by_key`: a sort silently accepts duplicate or
+/// out-of-range indices and still produces a full-length vector, so a
+/// non-conformant provider would yield a confidently wrong chunk↔vector pairing.
+/// Here the indices must form an exact permutation of `0..expected` before they
+/// are trusted; anything else (missing, duplicated, out of range, wrong count)
+/// falls back to array order, which is what every provider that omits `index`
+/// relies on anyway.
+fn order_embeddings(items: Vec<EmbedData>, expected: usize) -> Vec<Vec<f32>> {
+    let usable = items.len() == expected && items.iter().all(|d| d.index.is_some());
+    if usable {
+        let mut slots: Vec<Option<Vec<f32>>> = (0..expected).map(|_| None).collect();
+        let mut ok = true;
+        for item in &items {
+            match item.index.and_then(|i| usize::try_from(i).ok()) {
+                Some(i) if i < expected && slots[i].is_none() => {
+                    slots[i] = Some(item.embedding.clone());
+                }
+                _ => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if ok {
+            // Every slot is filled: `expected` distinct in-range indices over
+            // `expected` slots leaves no gaps.
+            return slots.into_iter().flatten().collect();
+        }
+        warn!(
+            expected,
+            "Embedding response indices are not a permutation of 0..n — \
+             falling back to array order"
+        );
+    }
+    items.into_iter().map(|d| d.embedding).collect()
 }
 
 impl OpenAIEmbeddingDriver {
@@ -278,8 +339,12 @@ impl EmbeddingDriver for OpenAIEmbeddingDriver {
             .await
             .map_err(|e| EmbeddingError::Parse(e.to_string()))?;
 
-        // Update dimensions from actual response if available
-        let embeddings: Vec<Vec<f32>> = data.data.into_iter().map(|d| d.embedding).collect();
+        // Restore input order from the response `index` before collecting: some
+        // OpenAI-compatible endpoints return embeddings out of input order, and
+        // the ingest path pairs them positionally with chunks — a mismatch
+        // silently attaches each chunk to the wrong vector (corrupt RAG search
+        // that no error surface reveals).
+        let embeddings = order_embeddings(data.data, texts.len());
 
         debug!(
             "Embedded {} texts (dims={})",
@@ -392,6 +457,94 @@ pub fn embedding_from_bytes(bytes: &[u8]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── order_embeddings / index handling ───────────────────────────────────
+
+    fn item(index: Option<i64>, tag: f32) -> EmbedData {
+        EmbedData {
+            embedding: vec![tag],
+            index,
+        }
+    }
+
+    /// The bug this guards: some OpenAI-compatible endpoints return the data
+    /// array out of input order, and the ingest path pairs it positionally with
+    /// chunks — so every chunk silently gets the wrong vector and RAG search is
+    /// corrupted with no error anywhere.
+    #[test]
+    fn reorders_by_index() {
+        let items = vec![item(Some(2), 2.0), item(Some(0), 0.0), item(Some(1), 1.0)];
+        let out = order_embeddings(items, 3);
+        assert_eq!(out, vec![vec![0.0], vec![1.0], vec![2.0]]);
+    }
+
+    /// Providers that omit `index` rely on array order — it must be preserved.
+    #[test]
+    fn preserves_array_order_when_index_is_absent() {
+        let items = vec![item(None, 0.0), item(None, 1.0), item(None, 2.0)];
+        let out = order_embeddings(items, 3);
+        assert_eq!(out, vec![vec![0.0], vec![1.0], vec![2.0]]);
+    }
+
+    /// Placement rather than a blind sort: duplicate or out-of-range indices
+    /// must NOT produce a confidently-wrong pairing. Falling back to array order
+    /// is the honest answer.
+    #[test]
+    fn falls_back_to_array_order_on_bad_indices() {
+        // Duplicate index.
+        let out = order_embeddings(vec![item(Some(0), 7.0), item(Some(0), 8.0)], 2);
+        assert_eq!(out, vec![vec![7.0], vec![8.0]]);
+
+        // Out of range.
+        let out = order_embeddings(vec![item(Some(0), 7.0), item(Some(9), 8.0)], 2);
+        assert_eq!(out, vec![vec![7.0], vec![8.0]]);
+
+        // Partially present.
+        let out = order_embeddings(vec![item(Some(1), 7.0), item(None, 8.0)], 2);
+        assert_eq!(out, vec![vec![7.0], vec![8.0]]);
+    }
+
+    #[test]
+    fn falls_back_when_count_does_not_match() {
+        let out = order_embeddings(vec![item(Some(0), 7.0)], 2);
+        assert_eq!(
+            out,
+            vec![vec![7.0]],
+            "length is reported to the caller as-is"
+        );
+    }
+
+    /// `index` is `Option<i64>` with a lenient deserializer on purpose:
+    /// `#[serde(default)]` only fires when the key is ABSENT, so a provider
+    /// sending `"index": null` (or a float, or -1) would otherwise fail to
+    /// deserialize the ENTIRE response and break embedding for that endpoint.
+    #[test]
+    fn tolerates_unusable_index_values() {
+        let parsed: EmbedResponse = serde_json::from_str(
+            r#"{"data":[
+                {"embedding":[1.0],"index":null},
+                {"embedding":[2.0],"index":1.5},
+                {"embedding":[3.0],"index":-1},
+                {"embedding":[4.0]}
+            ]}"#,
+        )
+        .expect("odd index values must not fail the whole response");
+        assert_eq!(parsed.data.len(), 4);
+        assert!(parsed.data.iter().all(|d| d.index.is_none()));
+        // ...and the fallback keeps array order.
+        let out = order_embeddings(parsed.data, 4);
+        assert_eq!(out, vec![vec![1.0], vec![2.0], vec![3.0], vec![4.0]]);
+    }
+
+    #[test]
+    fn parses_well_formed_indices() {
+        let parsed: EmbedResponse = serde_json::from_str(
+            r#"{"data":[{"embedding":[1.0],"index":1},{"embedding":[0.0],"index":0}]}"#,
+        )
+        .unwrap();
+        let out = order_embeddings(parsed.data, 2);
+        assert_eq!(out, vec![vec![0.0], vec![1.0]]);
+    }
 
     /// Regression: when the embedding endpoint is down, the driver must
     /// short-circuit subsequent calls instead of issuing fresh HTTP

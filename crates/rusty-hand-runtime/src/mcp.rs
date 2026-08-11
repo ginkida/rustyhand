@@ -95,10 +95,17 @@ struct JsonRpcRequest {
 struct JsonRpcResponse {
     #[allow(dead_code)]
     jsonrpc: String,
-    #[allow(dead_code)]
     id: Option<u64>,
     result: Option<serde_json::Value>,
     error: Option<JsonRpcError>,
+    /// Present only on server-initiated **requests**/notifications, never on a
+    /// response. MCP servers may call back to the client (`sampling/createMessage`,
+    /// `roots/list`, `ping`), and those use the SERVER's id space — which also
+    /// starts at 1 and therefore collides with ours. Without this field a
+    /// server request carrying id 3 would be consumed as the answer to our
+    /// request 3, yielding `Ok(None)` and desyncing the stream.
+    #[serde(default)]
+    method: Option<String>,
 }
 
 /// JSON-RPC 2.0 error object.
@@ -197,6 +204,86 @@ where
 
     Err(format!(
         "MCP server emitted {MAX_NOISE_LINES} non-JSON-RPC lines before any valid response"
+    ))
+}
+
+/// Maximum number of unrelated frames tolerated while waiting for our response.
+const MAX_SKIPPED_FRAMES: usize = 64;
+
+/// Read frames from `reader` until the JSON-RPC **response** carrying `id`
+/// arrives, discarding unrelated ones.
+///
+/// Why the skipping is needed: the stdio stream is persistent and shared across
+/// every call on the connection, so a previous request that timed out can leave
+/// its late response sitting in the buffer. Returning that stale frame would
+/// answer the current call with the previous call's payload and desync every
+/// subsequent request.
+///
+/// Two bounds keep the skipping from becoming a hang. `deadline` is computed
+/// ONCE by the caller and each read gets only the remaining time — passing the
+/// full `timeout` per iteration would re-arm it forever, so a server emitting a
+/// frame slightly faster than `timeout` could hold the call indefinitely (the
+/// pre-drain code was hard-bounded by `timeout`, so that would have been a
+/// regression). `MAX_SKIPPED_FRAMES` additionally caps a fast flood.
+///
+/// Free function generic over the reader so it is unit-testable against
+/// in-memory byte slices, without a live MCP child process.
+async fn read_response_for_id<R>(
+    reader: &mut R,
+    id: u64,
+    deadline: tokio::time::Instant,
+) -> Result<Option<serde_json::Value>, String>
+where
+    R: AsyncBufReadExt + Unpin,
+{
+    for _ in 0..MAX_SKIPPED_FRAMES {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("MCP request timed out".to_string());
+        }
+        let line = read_next_jsonrpc_line(reader, remaining).await?;
+
+        // A JSON object that isn't a JSON-RPC frame is noise, not a fatal error:
+        // `read_next_jsonrpc_line` already filters non-`{` lines, but a server can
+        // still print a structured log object. Aborting here would fail the call
+        // even though the real response is on the very next line.
+        let Ok(response) = serde_json::from_str::<JsonRpcResponse>(line.trim()) else {
+            debug!(noise = %line.trim(), "Skipping non-JSON-RPC object on MCP stdout");
+            continue;
+        };
+
+        // Server-initiated request/notification — uses the server's id space.
+        if let Some(method) = &response.method {
+            debug!(method = %method, "Skipping server-initiated MCP frame");
+            continue;
+        }
+
+        match response.id {
+            Some(rid) if rid == id => {
+                if let Some(err) = response.error {
+                    return Err(format!("{err}"));
+                }
+                return Ok(response.result);
+            }
+            // JSON-RPC 2.0 mandates `id: null` when the server cannot associate
+            // an error with a request (e.g. our line failed to parse on its
+            // side). That error is terminal for this call, so surface it rather
+            // than skipping it and stalling until the deadline with a generic
+            // timeout message.
+            None if response.error.is_some() => {
+                return Err(format!("{}", response.error.expect("checked is_some")));
+            }
+            other => {
+                debug!(
+                    expected = id,
+                    got = ?other,
+                    "Skipping MCP response with non-matching id (stale/notification)"
+                );
+            }
+        }
+    }
+    Err(format!(
+        "MCP server sent {MAX_SKIPPED_FRAMES} frames without answering request id {id}"
     ))
 }
 
@@ -398,16 +485,11 @@ impl McpConnection {
                     .await
                     .map_err(|e| format!("Failed to flush stdin: {e}"))?;
 
-                let timeout = tokio::time::Duration::from_secs(self.config.timeout_secs);
-                let line = read_next_jsonrpc_line(stdout, timeout).await?;
-                let response: JsonRpcResponse = serde_json::from_str(line.trim())
-                    .map_err(|e| format!("Invalid MCP JSON-RPC response: {e}"))?;
-
-                if let Some(err) = response.error {
-                    return Err(format!("{err}"));
-                }
-
-                Ok(response.result)
+                // ONE deadline for the whole exchange, including any frames we
+                // skip along the way — see read_response_for_id.
+                let deadline = tokio::time::Instant::now()
+                    + tokio::time::Duration::from_secs(self.config.timeout_secs);
+                read_response_for_id(stdout, id, deadline).await
             }
             McpTransportHandle::Sse { client, url } => {
                 let mut response = client
@@ -622,6 +704,124 @@ pub fn normalize_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── read_response_for_id ────────────────────────────────────────────────
+
+    fn deadline(secs: u64) -> tokio::time::Instant {
+        tokio::time::Instant::now() + std::time::Duration::from_secs(secs)
+    }
+
+    /// The reason id-matching exists: a request that timed out earlier can leave
+    /// its late response buffered on the persistent stdio stream. Returning that
+    /// frame would answer this call with the previous call's payload and desync
+    /// every request after it.
+    #[tokio::test]
+    async fn skips_stale_response_and_returns_the_matching_one() {
+        let stream = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"stale\"}\n\
+            {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":\"mine\"}\n";
+        let mut reader = BufReader::new(&stream[..]);
+        let got = read_response_for_id(&mut reader, 2, deadline(2))
+            .await
+            .expect("must find id 2");
+        assert_eq!(got, Some(serde_json::json!("mine")));
+    }
+
+    /// Notifications carry no id and must not be mistaken for our answer.
+    #[tokio::test]
+    async fn skips_notifications() {
+        let stream = b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{}}\n\
+            {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"mine\"}\n";
+        let mut reader = BufReader::new(&stream[..]);
+        let got = read_response_for_id(&mut reader, 1, deadline(2))
+            .await
+            .expect("must skip the notification");
+        assert_eq!(got, Some(serde_json::json!("mine")));
+    }
+
+    /// Server-initiated REQUESTS use the server's own id space, which also
+    /// starts at 1. Matching on id alone would consume this frame as the answer
+    /// to our request 1 and return Ok(None).
+    #[tokio::test]
+    async fn does_not_match_a_server_request_with_a_colliding_id() {
+        let stream = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n\
+            {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"mine\"}\n";
+        let mut reader = BufReader::new(&stream[..]);
+        let got = read_response_for_id(&mut reader, 1, deadline(2))
+            .await
+            .expect("must skip the server-initiated request");
+        assert_eq!(got, Some(serde_json::json!("mine")));
+    }
+
+    /// A structured log object on stdout is noise, not a fatal error — the real
+    /// response is on the next line.
+    #[tokio::test]
+    async fn skips_json_objects_that_are_not_jsonrpc_frames() {
+        let stream = b"{\"level\":\"info\",\"msg\":\"starting\"}\n\
+            {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"mine\"}\n";
+        let mut reader = BufReader::new(&stream[..]);
+        let got = read_response_for_id(&mut reader, 1, deadline(2))
+            .await
+            .expect("must skip the non-JSON-RPC object");
+        assert_eq!(got, Some(serde_json::json!("mine")));
+    }
+
+    #[tokio::test]
+    async fn surfaces_an_error_for_our_id() {
+        let stream =
+            b"{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32601,\"message\":\"nope\"}}\n";
+        let mut reader = BufReader::new(&stream[..]);
+        let err = read_response_for_id(&mut reader, 1, deadline(2))
+            .await
+            .expect_err("an error frame must surface");
+        assert!(err.contains("nope"), "got: {err}");
+    }
+
+    /// JSON-RPC 2.0 mandates `id: null` when the server cannot associate an
+    /// error with a request. Skipping it would stall the caller until the
+    /// deadline and report a generic timeout instead of the server's message.
+    #[tokio::test]
+    async fn surfaces_a_null_id_error_instead_of_stalling() {
+        let stream =
+            b"{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32700,\"message\":\"parse error\"}}\n";
+        let mut reader = BufReader::new(&stream[..]);
+        let err = read_response_for_id(&mut reader, 1, deadline(2))
+            .await
+            .expect_err("a null-id error frame must surface");
+        assert!(err.contains("parse error"), "got: {err}");
+    }
+
+    /// A server that streams unrelated frames must not hold the call open
+    /// forever. Before the frame cap and the single shared deadline, each read
+    /// re-armed its own timeout, so a steady trickle was unbounded.
+    #[tokio::test]
+    async fn gives_up_after_too_many_unrelated_frames() {
+        let mut stream = Vec::new();
+        for i in 0..(MAX_SKIPPED_FRAMES + 10) {
+            stream.extend_from_slice(
+                format!(
+                    "{{\"jsonrpc\":\"2.0\",\"id\":{},\"result\":null}}\n",
+                    9000 + i
+                )
+                .as_bytes(),
+            );
+        }
+        let mut reader = BufReader::new(&stream[..]);
+        let err = read_response_for_id(&mut reader, 1, deadline(5))
+            .await
+            .expect_err("must give up rather than spin");
+        assert!(err.contains("without answering"), "got: {err}");
+    }
+
+    /// An already-elapsed deadline must fail immediately, not read.
+    #[tokio::test]
+    async fn respects_an_expired_deadline() {
+        let stream = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"mine\"}\n";
+        let mut reader = BufReader::new(&stream[..]);
+        let err = read_response_for_id(&mut reader, 1, tokio::time::Instant::now())
+            .await
+            .expect_err("expired deadline must error");
+        assert!(err.contains("timed out"), "got: {err}");
+    }
 
     #[test]
     fn test_mcp_tool_namespacing() {

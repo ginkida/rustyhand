@@ -2508,8 +2508,14 @@ async fn tool_doc_ingest(
         .unwrap_or(DOC_CHUNK_OVERLAP);
     // Clamp to sane bounds: a tiny/zero chunk_size or an overlap >= chunk_size
     // would stall forward progress in chunk_text (CPU/memory DoS).
+    //
+    // Half the chunk, not chunk_size-1: the window advances by
+    // chunk_size-overlap, so an agent-chosen overlap just below chunk_size
+    // advances one byte per chunk and turns a 512 KB document into ~500k chunks,
+    // each of which the caller then embeds. Halving guarantees the window moves
+    // by at least chunk_size/2. The defaults are far below this bound.
     let chunk_size = chunk_size.max(64);
-    let overlap = overlap.min(chunk_size.saturating_sub(1));
+    let overlap = overlap.min(chunk_size / 2);
 
     let chunks = chunk_text(content, chunk_size, overlap);
     if chunks.is_empty() {

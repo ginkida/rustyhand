@@ -27,16 +27,50 @@ use crate::host_functions;
 use crate::kernel_handle::KernelHandle;
 use rusty_hand_types::capability::Capability;
 use rusty_hand_types::config::ExecPolicy;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tracing::debug;
 use wasmtime::*;
+
+/// Resolve a guest `(ptr, len)` pair into a checked byte range within
+/// `data_len`. Rejects negative `i32` values (which `as usize` would
+/// sign-extend into a huge offset) and guards the addition against overflow
+/// before any slice, so a malicious guest can't bypass the bounds check.
+fn guest_range(ptr: i32, len: i32, data_len: usize) -> Result<std::ops::Range<usize>> {
+    let start = usize::try_from(ptr).map_err(|_| format_err!("negative guest pointer"))?;
+    let n = usize::try_from(len).map_err(|_| format_err!("negative guest length"))?;
+    let end = start
+        .checked_add(n)
+        .ok_or_else(|| format_err!("guest range overflow"))?;
+    if end > data_len {
+        bail!("guest range out of bounds");
+    }
+    Ok(start..end)
+}
+
+/// Same as [`guest_range`] but for a `usize` length the host already knows to
+/// be non-negative (e.g. `input_bytes.len()`), so only the pointer needs the
+/// negative-value rejection.
+fn guest_range_host_len(ptr: i32, len: usize, data_len: usize) -> Result<std::ops::Range<usize>> {
+    let start = usize::try_from(ptr).map_err(|_| format_err!("negative guest pointer"))?;
+    let end = start
+        .checked_add(len)
+        .ok_or_else(|| format_err!("guest range overflow"))?;
+    if end > data_len {
+        bail!("guest range out of bounds");
+    }
+    Ok(start..end)
+}
 
 /// Configuration for a WASM sandbox instance.
 #[derive(Debug, Clone)]
 pub struct SandboxConfig {
     /// Maximum fuel (CPU instruction budget). 0 = unlimited.
     pub fuel_limit: u64,
-    /// Maximum WASM linear memory in bytes (reserved for future enforcement).
+    /// Maximum WASM linear memory in bytes. Enforced via `StoreLimits` — a
+    /// `memory.grow` past this traps. Also budgets the guest's table elements
+    /// (`max_memory_bytes / 8`), since tables are host allocations that the
+    /// linear-memory cap does not cover.
     pub max_memory_bytes: usize,
     /// Capabilities granted to this sandbox instance.
     pub capabilities: Vec<Capability>,
@@ -74,6 +108,8 @@ pub struct GuestState {
     pub tokio_handle: tokio::runtime::Handle,
     /// Exec policy gating the `shell_exec` host call (see [`SandboxConfig::exec_policy`]).
     pub exec_policy: Option<ExecPolicy>,
+    /// Wasmtime resource limits — caps guest linear memory growth.
+    pub limits: StoreLimits,
 }
 
 /// Result of executing a WASM module.
@@ -106,6 +142,14 @@ pub enum SandboxError {
 /// is expensive to create but can compile/instantiate many modules.
 pub struct WasmSandbox {
     engine: Engine,
+    /// Signals the engine-wide epoch ticker thread to stop (set on drop).
+    epoch_stop: Arc<AtomicBool>,
+}
+
+impl Drop for WasmSandbox {
+    fn drop(&mut self) {
+        self.epoch_stop.store(true, Ordering::Relaxed);
+    }
 }
 
 impl WasmSandbox {
@@ -114,8 +158,39 @@ impl WasmSandbox {
         let mut config = Config::new();
         config.consume_fuel(true);
         config.epoch_interruption(true);
+        // Turn off proposals this ABI never uses. Multi-memory is ON by default
+        // in wasmtime 47, and `StoreLimits::memory_size` is documented as
+        // per-memory — so a multi-memory guest could multiply its linear-memory
+        // budget by the store's memory count. The ABI mandates a single exported
+        // `memory`, so refuse the proposal outright rather than rely on the count
+        // limit alone. Threads are likewise unused and would add shared-memory
+        // growth paths outside the limiter.
+        config.wasm_multi_memory(false);
+        config.wasm_threads(false);
         let engine = Engine::new(&config).map_err(|e| SandboxError::Compilation(e.to_string()))?;
-        Ok(Self { engine })
+
+        // A SINGLE monotonic epoch ticker for this engine (one tick per second).
+        // Each execution sets its deadline N ticks ahead (see execute_sync), so
+        // each gets an independent ~N-second wall-clock timeout. The previous
+        // per-execution watchdog incremented the SHARED engine epoch, which
+        // cross-interrupted other concurrent executions (a finished/short run's
+        // increment tripped a longer run's deadline early).
+        let epoch_stop = Arc::new(AtomicBool::new(false));
+        {
+            let engine = engine.clone();
+            let stop = Arc::clone(&epoch_stop);
+            std::thread::Builder::new()
+                .name("wasm-epoch-ticker".into())
+                .spawn(move || {
+                    while !stop.load(Ordering::Relaxed) {
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        engine.increment_epoch();
+                    }
+                })
+                .map_err(|e| SandboxError::Compilation(e.to_string()))?;
+        }
+
+        Ok(Self { engine, epoch_stop })
     }
 
     /// Execute a WASM module with the given JSON input.
@@ -174,8 +249,30 @@ impl WasmSandbox {
                 agent_id: agent_id.to_string(),
                 tokio_handle,
                 exec_policy: config.exec_policy.clone(),
+                limits: StoreLimitsBuilder::new()
+                    .memory_size(config.max_memory_bytes)
+                    // `memory_size` alone is NOT a memory budget: wasmtime's
+                    // defaults leave `table_elements` UNLIMITED, so a module
+                    // declaring `(table 200000000 funcref)` allocates ~1 GiB of
+                    // host RAM while nominally under a 1 MiB memory cap. Budget
+                    // tables against the same allowance (8 bytes per element is
+                    // the funcref slot size on 64-bit hosts).
+                    .table_elements(config.max_memory_bytes / 8)
+                    // Pin the per-store counts too — the defaults are 10_000
+                    // each, which would multiply every limit above by 10_000.
+                    // This sandbox instantiates exactly one module with one
+                    // linear memory.
+                    .instances(1)
+                    .memories(1)
+                    .tables(4)
+                    .build(),
             },
         );
+
+        // SECURITY: cap guest linear memory at the manifest's max_memory_bytes.
+        // Fuel/epoch bound CPU and wall-clock but NOT memory, so without this a
+        // wasm32 guest could grow to the 4 GiB architectural max and OOM the host.
+        store.limiter(|state| &mut state.limits);
 
         // Set fuel budget (deterministic metering)
         if config.fuel_limit > 0 {
@@ -184,14 +281,18 @@ impl WasmSandbox {
                 .map_err(|e| SandboxError::Execution(e.to_string()))?;
         }
 
-        // Set epoch deadline (wall-clock metering)
-        store.set_epoch_deadline(1);
-        let engine_clone = engine.clone();
-        let timeout = config.timeout_secs.unwrap_or(30);
-        let _watchdog = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(timeout));
-            engine_clone.increment_epoch();
-        });
+        // Set epoch deadline, counted in ticks of the engine's monotonic 1s epoch
+        // ticker (WasmSandbox::new). The deadline is relative to the CURRENT epoch,
+        // so it is independent per execution — a concurrent execution's deadline
+        // can't trip this store early.
+        //
+        // `+ 1` because the ticker runs on its own cadence, unsynchronized with
+        // store creation: a store created 1ms before a tick would otherwise get
+        // `timeout - 1` seconds of real budget. With the extra tick the guest is
+        // guaranteed at least `timeout` seconds and interrupted within
+        // `timeout + 1` — i.e. the timeout is a floor, as callers expect.
+        let timeout = config.timeout_secs.unwrap_or(30).max(1);
+        store.set_epoch_deadline(timeout + 1);
 
         // Build linker with host function imports
         let mut linker = Linker::new(engine);
@@ -228,14 +329,18 @@ impl WasmSandbox {
             .call(&mut store, input_bytes.len() as i32)
             .map_err(|e| SandboxError::AbiError(format!("alloc call failed: {e}")))?;
 
-        // Write input into guest memory
+        // Write input into guest memory.
+        //
+        // SECURITY: `alloc` is guest code, so `input_ptr` is guest-controlled and
+        // may be negative. A raw `input_ptr as usize` sign-extends to ~u64::MAX and
+        // the following `+ len` then WRAPS in a release build (overflow-checks are
+        // off), sliding past the `end > mem_data.len()` guard and panicking the
+        // blocking thread on `mem_data[start..end]` (start > end). Route it through
+        // the same checked helper the host_call/host_log ABI sites use.
         let mem_data = memory.data_mut(&mut store);
-        let start = input_ptr as usize;
-        let end = start + input_bytes.len();
-        if end > mem_data.len() {
-            return Err(SandboxError::AbiError("Input exceeds memory bounds".into()));
-        }
-        mem_data[start..end].copy_from_slice(&input_bytes);
+        let range = guest_range_host_len(input_ptr, input_bytes.len(), mem_data.len())
+            .map_err(|e| SandboxError::AbiError(format!("Input exceeds memory bounds: {e}")))?;
+        mem_data[range].copy_from_slice(&input_bytes);
 
         // Call guest execute
         let packed = match execute_fn.call(&mut store, (input_ptr, input_bytes.len() as i32)) {
@@ -256,18 +361,30 @@ impl WasmSandbox {
             }
         };
 
-        // Unpack result: high 32 bits = ptr, low 32 bits = len
-        let result_ptr = (packed >> 32) as usize;
+        // Unpack result: high 32 bits = ptr, low 32 bits = len.
+        //
+        // SECURITY: `packed` is whatever the guest's `execute` returned. Shift it
+        // as UNSIGNED — `packed >> 32` on an i64 is an *arithmetic* shift, so a
+        // guest returning e.g. 0xFFFF_FFFF_0000_0001 yields -1, and `as usize`
+        // sign-extends that to u64::MAX. The subsequent `result_ptr + result_len`
+        // then wraps in release and slips past the bounds check, panicking the
+        // blocking thread on the slice. Masking to u32 keeps both halves in the
+        // 32-bit range the ABI actually defines.
+        let packed = packed as u64;
+        let result_ptr = ((packed >> 32) & 0xFFFF_FFFF) as usize;
         let result_len = (packed & 0xFFFF_FFFF) as usize;
 
         // Read output JSON from guest memory
         let mem_data = memory.data(&store);
-        if result_ptr + result_len > mem_data.len() {
+        let end = result_ptr.checked_add(result_len).ok_or_else(|| {
+            SandboxError::AbiError("Result pointer out of bounds (overflow)".into())
+        })?;
+        if end > mem_data.len() {
             return Err(SandboxError::AbiError(
                 "Result pointer out of bounds".into(),
             ));
         }
-        let output_bytes = &mem_data[result_ptr..result_ptr + result_len];
+        let output_bytes = &mem_data[result_ptr..end];
 
         let output: serde_json::Value = serde_json::from_slice(output_bytes)
             .map_err(|e| SandboxError::AbiError(format!("Invalid JSON output from guest: {e}")))?;
@@ -304,12 +421,8 @@ impl WasmSandbox {
                         .ok_or_else(|| format_err!("no memory export"))?;
 
                     let data = memory.data(&caller);
-                    let start = request_ptr as usize;
-                    let end = start + request_len as usize;
-                    if end > data.len() {
-                        bail!("host_call: request out of bounds");
-                    }
-                    let request_bytes = data[start..end].to_vec();
+                    let range = guest_range(request_ptr, request_len, data.len())?;
+                    let request_bytes = data[range].to_vec();
 
                     // Parse request
                     let request: serde_json::Value =
@@ -346,8 +459,11 @@ impl WasmSandbox {
                         .and_then(|e| e.into_memory())
                         .ok_or_else(|| format_err!("no memory export"))?;
                     let mem_data = memory.data_mut(&mut caller);
-                    let dest_start = ptr as usize;
-                    let dest_end = dest_start + response_bytes.len();
+                    let dest_start =
+                        usize::try_from(ptr).map_err(|_| format_err!("negative alloc pointer"))?;
+                    let dest_end = dest_start
+                        .checked_add(response_bytes.len())
+                        .ok_or_else(|| format_err!("response range overflow"))?;
                     if dest_end > mem_data.len() {
                         bail!("host_call: response exceeds memory bounds");
                     }
@@ -375,12 +491,8 @@ impl WasmSandbox {
                         .ok_or_else(|| format_err!("no memory export"))?;
 
                     let data = memory.data(&caller);
-                    let start = msg_ptr as usize;
-                    let end = start + msg_len as usize;
-                    if end > data.len() {
-                        bail!("host_log: pointer out of bounds");
-                    }
-                    let msg = std::str::from_utf8(&data[start..end]).unwrap_or("<invalid utf8>");
+                    let range = guest_range(msg_ptr, msg_len, data.len())?;
+                    let msg = std::str::from_utf8(&data[range]).unwrap_or("<invalid utf8>");
                     let agent_id = &caller.data().agent_id;
 
                     match level {
@@ -470,6 +582,185 @@ mod tests {
             )
         )
     "#;
+
+    /// `alloc` returns -1. The host then computes `input_ptr as usize`, which
+    /// sign-extends to ~u64::MAX before the bounds check.
+    const EVIL_ALLOC_WAT: &str = r#"
+        (module
+            (memory (export "memory") 1)
+            (func (export "alloc") (param $size i32) (result i32)
+                (i32.const -1)
+            )
+            (func (export "execute") (param $ptr i32) (param $len i32) (result i64)
+                (i64.const 0)
+            )
+        )
+    "#;
+
+    /// `execute` returns a packed value whose high 32 bits are 0xFFFFFFFF, so an
+    /// arithmetic `>> 32` yields -1 and `as usize` sign-extends it.
+    const EVIL_RESULT_WAT: &str = r#"
+        (module
+            (memory (export "memory") 1)
+            (global $bump (mut i32) (i32.const 1024))
+            (func (export "alloc") (param $size i32) (result i32)
+                (local $ptr i32)
+                (local.set $ptr (global.get $bump))
+                (global.set $bump (i32.add (global.get $bump) (local.get $size)))
+                (local.get $ptr)
+            )
+            (func (export "execute") (param $ptr i32) (param $len i32) (result i64)
+                (i64.const 0xFFFFFFFF00000001)
+            )
+        )
+    "#;
+
+    /// Declares a table far larger than any memory budget. Tables are host
+    /// allocations that the linear-memory cap does not cover.
+    const HUGE_TABLE_WAT: &str = r#"
+        (module
+            (memory (export "memory") 1)
+            (table 200000000 funcref)
+            (func (export "alloc") (param $size i32) (result i32) (i32.const 1024))
+            (func (export "execute") (param $ptr i32) (param $len i32) (result i64)
+                (i64.const 0)
+            )
+        )
+    "#;
+
+    // ── guest_range ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn guest_range_accepts_in_bounds() {
+        assert_eq!(guest_range(0, 4, 16).unwrap(), 0..4);
+        assert_eq!(guest_range(12, 4, 16).unwrap(), 12..16);
+        assert_eq!(guest_range(16, 0, 16).unwrap(), 16..16);
+    }
+
+    /// The bug the helper exists for: `as usize` on a negative i32 sign-extends
+    /// to a huge offset, and the subsequent `+ len` wraps in a release build —
+    /// sliding past a naive `end > len` check.
+    #[test]
+    fn guest_range_rejects_negative_and_overflow() {
+        assert!(guest_range(-1, 4, 16).is_err(), "negative ptr");
+        assert!(guest_range(4, -1, 16).is_err(), "negative len");
+        assert!(guest_range(i32::MIN, 1, 16).is_err(), "i32::MIN ptr");
+        assert!(guest_range(8, 16, 16).is_err(), "past the end");
+        assert!(guest_range(17, 0, 16).is_err(), "start past the end");
+    }
+
+    #[test]
+    fn guest_range_host_len_rejects_negative_pointer() {
+        assert!(guest_range_host_len(-1, 4, 16).is_err());
+        assert!(guest_range_host_len(4, usize::MAX, 16).is_err(), "overflow");
+        assert_eq!(guest_range_host_len(4, 4, 16).unwrap(), 4..8);
+    }
+
+    // ── guest-controlled ABI values ─────────────────────────────────────────
+
+    /// Regression: a guest whose `alloc` returns -1 used to panic the host's
+    /// blocking thread on `mem_data[start..end]`. It must now come back as a
+    /// clean AbiError.
+    #[tokio::test]
+    async fn malicious_alloc_pointer_is_rejected_not_panicked() {
+        let sandbox = WasmSandbox::new().unwrap();
+        let err = sandbox
+            .execute(
+                EVIL_ALLOC_WAT.as_bytes(),
+                serde_json::json!({"hello": "world"}),
+                SandboxConfig::default(),
+                None,
+                "test-agent",
+            )
+            .await
+            .expect_err("a negative alloc pointer must be rejected");
+        assert!(
+            matches!(err, SandboxError::AbiError(_)),
+            "expected AbiError, got {err:?}"
+        );
+    }
+
+    /// Regression: `(packed >> 32) as usize` sign-extended a guest-chosen
+    /// negative i64 and panicked on the slice.
+    #[tokio::test]
+    async fn malicious_packed_result_is_rejected_not_panicked() {
+        let sandbox = WasmSandbox::new().unwrap();
+        let err = sandbox
+            .execute(
+                EVIL_RESULT_WAT.as_bytes(),
+                serde_json::json!({}),
+                SandboxConfig::default(),
+                None,
+                "test-agent",
+            )
+            .await
+            .expect_err("an out-of-range packed result must be rejected");
+        assert!(
+            matches!(err, SandboxError::AbiError(_)),
+            "expected AbiError, got {err:?}"
+        );
+    }
+
+    // ── resource limits ─────────────────────────────────────────────────────
+
+    /// `memory_size` alone is not a memory budget — wasmtime leaves
+    /// `table_elements` unlimited by default, so this module allocated ~1 GiB of
+    /// host RAM while nominally capped at 1 MiB.
+    #[tokio::test]
+    async fn oversized_table_is_refused() {
+        let sandbox = WasmSandbox::new().unwrap();
+        let config = SandboxConfig {
+            max_memory_bytes: 1024 * 1024,
+            ..Default::default()
+        };
+        let err = sandbox
+            .execute(
+                HUGE_TABLE_WAT.as_bytes(),
+                serde_json::json!({}),
+                config,
+                None,
+                "test-agent",
+            )
+            .await
+            .expect_err("a table far past the budget must not instantiate");
+        assert!(
+            matches!(err, SandboxError::Instantiation(_)),
+            "expected Instantiation error, got {err:?}"
+        );
+    }
+
+    /// A module whose declared initial memory exceeds the budget must be
+    /// refused rather than silently granted.
+    #[tokio::test]
+    async fn oversized_initial_memory_is_refused() {
+        let sandbox = WasmSandbox::new().unwrap();
+        // 100 pages = 6.4 MiB, against a 1 MiB budget.
+        let wat = r#"
+            (module
+                (memory (export "memory") 100)
+                (func (export "alloc") (param i32) (result i32) (i32.const 0))
+                (func (export "execute") (param i32) (param i32) (result i64) (i64.const 0))
+            )
+        "#;
+        let config = SandboxConfig {
+            max_memory_bytes: 1024 * 1024,
+            ..Default::default()
+        };
+        let err = sandbox
+            .execute(
+                wat.as_bytes(),
+                serde_json::json!({}),
+                config,
+                None,
+                "test-agent",
+            )
+            .await
+            .expect_err("initial memory past the budget must not instantiate");
+        assert!(
+            matches!(err, SandboxError::Instantiation(_)),
+            "expected Instantiation error, got {err:?}"
+        );
+    }
 
     #[test]
     fn test_sandbox_config_default() {

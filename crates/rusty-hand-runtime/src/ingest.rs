@@ -55,9 +55,23 @@ pub async fn ingest_text(
         )));
     }
 
-    let chunk_size = chunk_size.unwrap_or(DEFAULT_CHUNK_SIZE);
-    let chunk_overlap = chunk_overlap.unwrap_or(DEFAULT_CHUNK_OVERLAP);
-    let chunks = split_into_chunks(content, chunk_size, chunk_overlap);
+    // Clamp chunk_size to >= 1: a 0 makes split_into_chunks spin forever, since
+    // the advance is chunk_end-start = 0.
+    let chunk_size = chunk_size.unwrap_or(DEFAULT_CHUNK_SIZE).max(1);
+    // Clamp overlap to HALF the chunk, not chunk_size-1. The window advances by
+    // chunk_size-overlap, so an overlap of chunk_size-1 advances one character at
+    // a time and turns an N-char document into ~N chunks. Half guarantees the
+    // window advances by at least chunk_size/2 while still allowing generous
+    // overlap (the default 200/1600 is unaffected).
+    let chunk_overlap = chunk_overlap
+        .unwrap_or(DEFAULT_CHUNK_OVERLAP)
+        .min(chunk_size / 2);
+    // Bound the split itself, not just its result: splitting first and checking
+    // the length afterwards means a pathological (size, overlap) pair can
+    // materialize hundreds of megabytes of Strings before the MAX_CHUNKS check
+    // ever runs. Ask for one chunk past the limit so the check below can still
+    // tell "at the limit" from "over it".
+    let chunks = split_into_chunks_bounded(content, chunk_size, chunk_overlap, MAX_CHUNKS + 1);
 
     if chunks.len() > MAX_CHUNKS {
         return Err(RustyHandError::InvalidInput(format!(
@@ -80,9 +94,22 @@ pub async fn ingest_text(
     let embeddings: Vec<Option<Vec<f32>>> = if let Some(driver) = embedding_driver {
         let chunk_refs: Vec<&str> = chunks.iter().map(|c| c.as_str()).collect();
         match driver.embed(&chunk_refs).await {
-            Ok(vecs) => {
+            Ok(vecs) if vecs.len() == chunks.len() => {
                 embedded_count = vecs.len();
                 vecs.into_iter().map(Some).collect()
+            }
+            Ok(vecs) => {
+                // A non-conformant provider returned a different number of
+                // vectors than chunks. `zip` below would SILENTLY DROP the
+                // trailing chunks (never store them) while still reporting the
+                // full count, and any positional pairing is suspect. Store every
+                // chunk without a vector instead — no data loss, no misalignment.
+                tracing::warn!(
+                    expected = chunks.len(),
+                    got = vecs.len(),
+                    "Embedding provider returned a vector count != chunk count; storing chunks without vectors to avoid drop/misalignment"
+                );
+                vec![None; chunks.len()]
             }
             Err(e) => {
                 tracing::warn!("Embedding failed during ingestion, storing without vectors: {e}");
@@ -120,10 +147,28 @@ pub async fn ingest_text(
     })
 }
 
-/// Split text into overlapping chunks, respecting paragraph and sentence boundaries.
+/// Split text into overlapping chunks, respecting paragraph and sentence
+/// boundaries. Unbounded — prefer [`split_into_chunks_bounded`] on any path
+/// where `chunk_size`/`overlap` are caller-supplied.
+#[cfg(test)]
 fn split_into_chunks(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> {
+    split_into_chunks_bounded(text, chunk_size, overlap, usize::MAX)
+}
+
+/// Split text into overlapping chunks, stopping once `max_chunks` are produced.
+///
+/// The cap bounds peak memory during the split: without it a small chunk_size or
+/// a large overlap can generate one chunk per character, so a 5 MB document
+/// materializes millions of `String`s before any post-hoc length check can
+/// reject them.
+fn split_into_chunks_bounded(
+    text: &str,
+    chunk_size: usize,
+    overlap: usize,
+    max_chunks: usize,
+) -> Vec<String> {
     let text = text.trim();
-    if text.is_empty() {
+    if text.is_empty() || max_chunks == 0 {
         return vec![];
     }
     if text.len() <= chunk_size {
@@ -176,6 +221,9 @@ fn split_into_chunks(text: &str, chunk_size: usize, overlap: usize) -> Vec<Strin
         let chunk: String = chars[start..chunk_end].iter().collect();
         if !chunk.trim().is_empty() {
             chunks.push(chunk.trim().to_string());
+            if chunks.len() >= max_chunks {
+                break;
+            }
         }
 
         // Once the window reaches end-of-text all content is covered by the
@@ -191,6 +239,10 @@ fn split_into_chunks(text: &str, chunk_size: usize, overlap: usize) -> Vec<Strin
         } else {
             chunk_end - start
         };
+        // Defensive: a zero advance (e.g. chunk_size==0) would spin forever.
+        if advance == 0 {
+            break;
+        }
         start += advance;
     }
 
@@ -200,6 +252,44 @@ fn split_into_chunks(text: &str, chunk_size: usize, overlap: usize) -> Vec<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `chunk_size == 0` made the window advance by zero and spin forever
+    /// (`chunk_end - start == 0`). `ingest_text` clamps it, but the splitter
+    /// must terminate on its own too.
+    #[test]
+    fn zero_chunk_size_terminates() {
+        let chunks = split_into_chunks_bounded("hello world, this is text", 0, 0, 100);
+        assert!(
+            chunks.len() <= 100,
+            "must not spin forever, got {}",
+            chunks.len()
+        );
+    }
+
+    /// The cap has to bound the SPLIT, not just its result. Checking the length
+    /// afterwards lets a pathological (size, overlap) pair materialize millions
+    /// of Strings first.
+    #[test]
+    fn bounded_split_stops_at_the_cap() {
+        let text = "a ".repeat(50_000);
+        let chunks = split_into_chunks_bounded(&text, 10, 9, 25);
+        assert_eq!(chunks.len(), 25, "must stop exactly at the cap");
+    }
+
+    /// An overlap just below chunk_size advances the window one unit at a time,
+    /// turning an N-char document into ~N chunks. `ingest_text` clamps overlap
+    /// to chunk_size/2 so the window always moves by at least half a chunk.
+    #[test]
+    fn half_overlap_keeps_the_chunk_count_proportional() {
+        let text = "x".repeat(4_000);
+        // overlap == chunk_size / 2 → advance == chunk_size / 2
+        let chunks = split_into_chunks_bounded(&text, 100, 50, 100_000);
+        assert!(
+            chunks.len() <= 4_000 / 50 + 2,
+            "expected ~80 chunks, got {}",
+            chunks.len()
+        );
+    }
 
     #[test]
     fn test_split_short_text() {
