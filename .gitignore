@@ -94,3 +94,8 @@ yarn.lock
 # Logs
 *.log
 logs/
+
+# Gokin working files. The `.gokin/` directory itself is already ignored above
+# (under "IDE & tools"), which covers everything inside it — only this
+# out-of-directory file needs its own rule.
+GOKIN.local.md

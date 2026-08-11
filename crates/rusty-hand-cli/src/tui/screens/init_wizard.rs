@@ -1345,7 +1345,7 @@ fn draw_routing_pick(f: &mut Frame, area: Rect, state: &mut State, tier: usize) 
                 .next_back()
                 .unwrap_or(&state.routing_models[t]);
             let display = if short.len() > 14 {
-                &short[..14]
+                rusty_hand_types::text::truncate_bytes(short, 14)
             } else {
                 short
             };

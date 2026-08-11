@@ -1,5 +1,6 @@
 //! Dashboard screen: system overview with stat cards and scrollable audit trail.
 
+use super::util::truncate;
 use crate::tui::theme;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -266,13 +267,5 @@ fn format_uptime(secs: u64) -> String {
         format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
     } else {
         format!("{}d {}h", secs / 86400, (secs % 86400) / 3600)
-    }
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}\u{2026}", &s[..max - 1])
     }
 }

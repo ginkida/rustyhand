@@ -24,6 +24,10 @@ pub enum ChannelStatus {
     Ready,
     MissingEnv,
     NotConfigured,
+    /// Configured and holding a token, but the bridge failed to start — the
+    /// daemon's `auth_status: "auth_failed"`. Only reachable from the API-backed
+    /// list; env-var detection alone cannot tell a good token from a bad one.
+    AuthFailed,
 }
 
 // ── Channel definitions — Telegram + Discord + Slack ────────────────────────
@@ -329,6 +333,7 @@ fn draw_list(f: &mut Frame, area: Rect, state: &mut ChannelState) {
                     ChannelStatus::Ready => ("[Ready]", theme::channel_ready()),
                     ChannelStatus::MissingEnv => ("[Missing env]", theme::channel_missing()),
                     ChannelStatus::NotConfigured => ("[Not configured]", theme::channel_off()),
+                    ChannelStatus::AuthFailed => ("[Auth failed]", theme::channel_auth_failed()),
                 };
                 let env_summary: String = ch
                     .env_vars

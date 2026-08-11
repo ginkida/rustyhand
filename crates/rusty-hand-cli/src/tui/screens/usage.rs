@@ -1,5 +1,6 @@
 //! Usage screen: token/cost analytics with summary, by-model, by-agent views.
 
+use super::util::truncate;
 use crate::tui::theme;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -432,13 +433,5 @@ fn format_tokens(n: u64) -> String {
         format!("{:.1}K", n as f64 / 1_000.0)
     } else {
         format!("{n}")
-    }
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}\u{2026}", &s[..max - 1])
     }
 }

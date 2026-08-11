@@ -1,5 +1,6 @@
 //! Memory screen: per-agent KV store browser and editor.
 
+use super::util::truncate;
 use crate::tui::theme;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -317,7 +318,10 @@ fn draw_agent_select(f: &mut Frame, area: Rect, state: &mut MemoryState) {
             .iter()
             .map(|a| {
                 let id_short = if a.id.len() > 12 {
-                    format!("{}\u{2026}", &a.id[..12])
+                    format!(
+                        "{}\u{2026}",
+                        rusty_hand_types::text::truncate_bytes(&a.id, 12)
+                    )
                 } else {
                     a.id.clone()
                 };
@@ -546,12 +550,4 @@ fn draw_edit(f: &mut Frame, area: Rect, state: &MemoryState) {
         )])),
         chunks[6],
     );
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}\u{2026}", &s[..max - 1])
-    }
 }

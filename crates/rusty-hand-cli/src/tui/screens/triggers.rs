@@ -1,5 +1,6 @@
 //! Triggers screen: CRUD with pattern type picker.
 
+use super::util::truncate;
 use crate::tui::theme;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -543,12 +544,4 @@ fn draw_trigger_review(f: &mut Frame, area: Rect, state: &TriggerState) {
         )]),
     ];
     f.render_widget(Paragraph::new(lines), area);
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}\u{2026}", &s[..max - 1])
-    }
 }

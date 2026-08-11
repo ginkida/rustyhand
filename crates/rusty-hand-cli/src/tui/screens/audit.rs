@@ -1,5 +1,6 @@
 //! Audit screen: audit log viewer with action filter and chain verification.
 
+use super::util::truncate;
 use crate::tui::theme;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -274,7 +275,7 @@ pub fn draw(f: &mut Frame, area: Rect, state: &mut AuditState) {
                     Style::default().fg(theme::YELLOW)
                 };
                 let hash_short = if e.tip_hash.len() > 8 {
-                    &e.tip_hash[..8]
+                    rusty_hand_types::text::truncate_bytes(&e.tip_hash, 8)
                 } else {
                     &e.tip_hash
                 };
@@ -335,12 +336,4 @@ pub fn draw(f: &mut Frame, area: Rect, state: &mut AuditState) {
     };
 
     f.render_widget(Paragraph::new(vec![chain_line, hints]), chunks[2]);
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}\u{2026}", &s[..max - 1])
-    }
 }

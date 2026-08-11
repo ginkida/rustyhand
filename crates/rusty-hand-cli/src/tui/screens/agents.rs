@@ -1,6 +1,7 @@
 //! Agent selection + creation: list running agents, template picker, custom builder.
 //! Overhauled with search/filter, state badges, detail view, and new actions.
 
+use super::util::truncate;
 use crate::templates::{self, AgentTemplate};
 use crate::tui::theme;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -1526,12 +1527,4 @@ fn draw_checkbox_list(
         theme::hint_style(),
     )]));
     f.render_widget(hints, chunks[2]);
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}\u{2026}", &s[..max - 1])
-    }
 }

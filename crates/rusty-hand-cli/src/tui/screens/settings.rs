@@ -1,5 +1,6 @@
 //! Settings screen: provider key management, model catalog, tools list.
 
+use super::util::truncate;
 use crate::tui::theme;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -597,14 +598,6 @@ fn draw_tools(f: &mut Frame, area: Rect, state: &mut SettingsState) {
             .highlight_style(theme::selected_style())
             .highlight_symbol("> ");
         f.render_stateful_widget(list, chunks[1], &mut state.tool_list);
-    }
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}\u{2026}", &s[..max - 1])
     }
 }
 

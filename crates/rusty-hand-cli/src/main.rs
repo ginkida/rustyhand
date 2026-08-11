@@ -5825,8 +5825,18 @@ fn cmd_logs(lines: usize, follow: bool) {
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 if let Ok(new_content) = std::fs::read_to_string(&log_path) {
+                    // Log rotation replaces the file, so a byte offset carried
+                    // over from the previous read is meaningless against the new
+                    // content: a shorter file must restart from 0, and for a
+                    // longer one the old offset can land mid-character and panic
+                    // the slice. Reset on shrink, and snap to a char boundary.
+                    if new_content.len() < last_len {
+                        last_len = 0;
+                    }
                     if new_content.len() > last_len {
-                        print!("{}", &new_content[last_len..]);
+                        let start =
+                            rusty_hand_types::text::floor_char_boundary(&new_content, last_len);
+                        print!("{}", &new_content[start..]);
                         last_len = new_content.len();
                     }
                 }

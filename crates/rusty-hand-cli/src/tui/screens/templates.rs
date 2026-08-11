@@ -1,5 +1,6 @@
 //! Templates screen: browse agent templates and spawn with one click.
 
+use super::util::truncate;
 use crate::tui::theme;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -392,13 +393,5 @@ pub fn draw(f: &mut Frame, area: Rect, state: &mut TemplatesState) {
             )])),
             chunks[3],
         );
-    }
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}\u{2026}", &s[..max - 1])
     }
 }

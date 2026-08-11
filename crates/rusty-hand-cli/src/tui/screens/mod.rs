@@ -20,6 +20,7 @@ pub mod skills;
 pub mod templates;
 pub mod triggers;
 pub mod usage;
+pub mod util;
 pub mod welcome;
 pub mod wizard;
 pub mod workflows;

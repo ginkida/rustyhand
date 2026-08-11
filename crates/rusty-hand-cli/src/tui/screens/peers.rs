@@ -1,5 +1,6 @@
 //! Peers screen: RHP peer network status with auto-refresh.
 
+use super::util::truncate;
 use crate::tui::theme;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -149,7 +150,10 @@ pub fn draw(f: &mut Frame, area: Rect, state: &mut PeersState) {
             .iter()
             .map(|p| {
                 let id_short = if p.node_id.len() > 12 {
-                    format!("{}\u{2026}", &p.node_id[..12])
+                    format!(
+                        "{}\u{2026}",
+                        rusty_hand_types::text::truncate_bytes(&p.node_id, 12)
+                    )
                 } else {
                     p.node_id.clone()
                 };
@@ -202,12 +206,4 @@ pub fn draw(f: &mut Frame, area: Rect, state: &mut PeersState) {
         )])),
         chunks[2],
     );
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}\u{2026}", &s[..max - 1])
-    }
 }

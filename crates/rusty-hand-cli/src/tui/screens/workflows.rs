@@ -1,5 +1,6 @@
 //! Workflows screen: CRUD, run input, run history.
 
+use super::util::truncate;
 use crate::tui::theme;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -691,12 +692,4 @@ fn draw_run_result(f: &mut Frame, area: Rect, state: &WorkflowState) {
         )])),
         chunks[2],
     );
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}\u{2026}", &s[..max - 1])
-    }
 }

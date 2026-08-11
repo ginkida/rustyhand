@@ -130,6 +130,13 @@ pub fn channel_off() -> Style {
     dim_style()
 }
 
+/// Configured with a token, but the bridge refused to start (bad token, API
+/// rejection). Distinct from `channel_missing` — the operator has to look at
+/// the credential itself, not add one.
+pub fn channel_auth_failed() -> Style {
+    Style::default().fg(RED).add_modifier(Modifier::BOLD)
+}
+
 // ── Spinner ─────────────────────────────────────────────────────────────────
 
 pub const SPINNER_FRAMES: &[&str] = &[

@@ -26,6 +26,24 @@ use super::screens::{
     workflows::{WorkflowInfo, WorkflowRun},
 };
 
+// ── Response helpers ────────────────────────────────────────────────────────
+
+/// Extract the item array from a list endpoint's response.
+///
+/// Every paginated route returns an envelope — `{"sessions": [...], "total": N,
+/// "offset": O, "limit": L}` — not a bare array. Calling `.as_array()` on that
+/// object yields `None`, so a screen that did so rendered a permanently empty
+/// list against a healthy daemon, with no error anywhere to explain it. Prefer
+/// the keyed field and fall back to a bare array for the routes that still
+/// return one.
+fn envelope_items<'a>(body: &'a serde_json::Value, key: &str) -> &'a [serde_json::Value] {
+    body.get(key)
+        .and_then(|v| v.as_array())
+        .or_else(|| body.as_array())
+        .map(|v| v.as_slice())
+        .unwrap_or(&[])
+}
+
 // ── BackendRef ──────────────────────────────────────────────────────────────
 
 /// Lightweight reference to the active backend, for passing to spawn functions.
@@ -524,19 +542,22 @@ pub fn spawn_fetch_dashboard(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
             // Try to fetch audit trail
             if let Ok(resp) = client.get(format!("{base_url}/api/audit/recent")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let rows: Vec<AuditRow> = body
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|r| AuditRow {
-                                    timestamp: r["timestamp"].as_str().unwrap_or("").to_string(),
-                                    agent: r["agent"].as_str().unwrap_or("").to_string(),
-                                    action: r["action"].as_str().unwrap_or("").to_string(),
-                                    detail: r["detail"].as_str().unwrap_or("").to_string(),
-                                })
-                                .collect()
+                    let rows: Vec<AuditRow> = envelope_items(&body, "entries")
+                        .iter()
+                        .map(|r| AuditRow {
+                            timestamp: r["timestamp"].as_str().unwrap_or("").to_string(),
+                            // The API emits `agent_name` / `agent_id`, never a
+                            // bare `agent`, so this column always rendered empty.
+                            agent: r["agent_name"]
+                                .as_str()
+                                .or_else(|| r["agent_id"].as_str())
+                                .or_else(|| r["agent"].as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            action: r["action"].as_str().unwrap_or("").to_string(),
+                            detail: r["detail"].as_str().unwrap_or("").to_string(),
                         })
-                        .unwrap_or_default();
+                        .collect();
                     let _ = tx.send(AppEvent::AuditLoaded(rows));
                 }
             }
@@ -567,32 +588,61 @@ pub fn spawn_fetch_channels(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
 
             if let Ok(resp) = client.get(format!("{base_url}/api/channels")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let channels: Vec<ChannelInfo> = body
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|ch| {
-                                    use super::screens::channels::ChannelStatus;
-                                    let status_str =
-                                        ch["status"].as_str().unwrap_or("not_configured");
-                                    let status = match status_str {
-                                        "ready" => ChannelStatus::Ready,
-                                        "missing_env" => ChannelStatus::MissingEnv,
-                                        _ => ChannelStatus::NotConfigured,
-                                    };
-                                    ChannelInfo {
-                                        name: ch["name"].as_str().unwrap_or("?").to_string(),
-                                        display_name: ch["display_name"]
-                                            .as_str()
-                                            .unwrap_or(ch["name"].as_str().unwrap_or("?"))
-                                            .to_string(),
-                                        status,
-                                        env_vars: Vec::new(),
-                                    }
+                    let channels: Vec<ChannelInfo> = envelope_items(&body, "channels")
+                        .iter()
+                        .map(|ch| {
+                            use super::screens::channels::ChannelStatus;
+                            // The daemon emits `auth_status`, never a bare
+                            // `status`, and its vocabulary is ok/missing_token/
+                            // auth_failed/not_configured — none of which matched
+                            // the old arms. So every channel fell to the `_`
+                            // catch-all and a live Telegram bridge rendered
+                            // "[Not configured]" with a ready-count of 0. This
+                            // list OVERWRITES the env-var-derived one (see
+                            // tui/mod.rs ChannelListLoaded), so the daemon being
+                            // up actively made the screen worse.
+                            let status = match ch["auth_status"]
+                                .as_str()
+                                .or_else(|| ch["status"].as_str())
+                                .unwrap_or("not_configured")
+                            {
+                                "ok" | "ready" => ChannelStatus::Ready,
+                                "missing_token" | "missing_env" => ChannelStatus::MissingEnv,
+                                "auth_failed" => ChannelStatus::AuthFailed,
+                                _ => ChannelStatus::NotConfigured,
+                            };
+                            // `fields[]` carries each secret's env var name and
+                            // whether the DAEMON sees a value for it — which is
+                            // the authoritative answer, since the daemon may run
+                            // under a different environment than this TUI.
+                            // Leaving this empty (as the first pass did) dropped
+                            // the ✔/✘ env summary from every row.
+                            let env_vars: Vec<(String, bool)> = ch["fields"]
+                                .as_array()
+                                .map(|fields| {
+                                    fields
+                                        .iter()
+                                        .filter_map(|f| {
+                                            let var = f["env_var"].as_str()?;
+                                            Some((
+                                                var.to_string(),
+                                                f["has_value"].as_bool().unwrap_or(false),
+                                            ))
+                                        })
+                                        .collect()
                                 })
-                                .collect()
+                                .unwrap_or_default();
+                            ChannelInfo {
+                                name: ch["name"].as_str().unwrap_or("?").to_string(),
+                                display_name: ch["display_name"]
+                                    .as_str()
+                                    .unwrap_or(ch["name"].as_str().unwrap_or("?"))
+                                    .to_string(),
+                                status,
+                                env_vars,
+                            }
                         })
-                        .unwrap_or_default();
+                        .collect();
                     let _ = tx.send(AppEvent::ChannelListLoaded(channels));
                 }
             }
@@ -1203,20 +1253,28 @@ pub fn spawn_fetch_sessions(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
             let client = daemon_client();
             if let Ok(resp) = client.get(format!("{base_url}/api/sessions")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let sessions: Vec<SessionInfo> = body
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|s| SessionInfo {
-                                    id: s["id"].as_str().unwrap_or("").to_string(),
-                                    agent_name: s["agent_name"].as_str().unwrap_or("").to_string(),
-                                    agent_id: s["agent_id"].as_str().unwrap_or("").to_string(),
-                                    message_count: s["message_count"].as_u64().unwrap_or(0),
-                                    created: s["created"].as_str().unwrap_or("").to_string(),
-                                })
-                                .collect()
+                    let sessions: Vec<SessionInfo> = envelope_items(&body, "sessions")
+                        .iter()
+                        .map(|s| SessionInfo {
+                            // The API emits `session_id`, not `id` — reading the
+                            // wrong key left every row with an empty id, so
+                            // selecting a session did nothing. Accept both.
+                            id: s["session_id"]
+                                .as_str()
+                                .or_else(|| s["id"].as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            agent_name: s["agent_name"].as_str().unwrap_or("").to_string(),
+                            agent_id: s["agent_id"].as_str().unwrap_or("").to_string(),
+                            message_count: s["message_count"].as_u64().unwrap_or(0),
+                            // The API emits `created_at`, not `created`.
+                            created: s["created_at"]
+                                .as_str()
+                                .or_else(|| s["created"].as_str())
+                                .unwrap_or("")
+                                .to_string(),
                         })
-                        .unwrap_or_default();
+                        .collect();
                     let _ = tx.send(AppEvent::SessionsLoaded(sessions));
                 }
             }
@@ -1261,17 +1319,13 @@ pub fn spawn_fetch_memory_agents(backend: BackendRef, tx: mpsc::Sender<AppEvent>
             let client = daemon_client();
             if let Ok(resp) = client.get(format!("{base_url}/api/agents")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let agents: Vec<AgentEntry> = body
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|a| AgentEntry {
-                                    id: a["id"].as_str().unwrap_or("").to_string(),
-                                    name: a["name"].as_str().unwrap_or("").to_string(),
-                                })
-                                .collect()
+                    let agents: Vec<AgentEntry> = envelope_items(&body, "agents")
+                        .iter()
+                        .map(|a| AgentEntry {
+                            id: a["id"].as_str().unwrap_or("").to_string(),
+                            name: a["name"].as_str().unwrap_or("").to_string(),
                         })
-                        .unwrap_or_default();
+                        .collect();
                     let _ = tx.send(AppEvent::MemoryAgentsLoaded(agents));
                 }
             }
@@ -1390,22 +1444,22 @@ pub fn spawn_fetch_skills(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
             let client = daemon_client();
             if let Ok(resp) = client.get(format!("{base_url}/api/skills")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let skills: Vec<SkillInfo> = body
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|s| SkillInfo {
-                                    name: s["name"].as_str().unwrap_or("").to_string(),
-                                    runtime: s["runtime"].as_str().unwrap_or("").to_string(),
-                                    source: s["source"].as_str().unwrap_or("").to_string(),
-                                    description: s["description"]
-                                        .as_str()
-                                        .unwrap_or("")
-                                        .to_string(),
-                                })
-                                .collect()
+                    let skills: Vec<SkillInfo> = envelope_items(&body, "skills")
+                        .iter()
+                        .map(|s| SkillInfo {
+                            name: s["name"].as_str().unwrap_or("").to_string(),
+                            runtime: s["runtime"].as_str().unwrap_or("").to_string(),
+                            // `source` is an OBJECT (`{"type": "bundled", …}`),
+                            // so `.as_str()` always yielded "". The kind is
+                            // what the column shows.
+                            source: s["source"]["type"]
+                                .as_str()
+                                .or_else(|| s["source"].as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            description: s["description"].as_str().unwrap_or("").to_string(),
                         })
-                        .unwrap_or_default();
+                        .collect();
                     let _ = tx.send(AppEvent::SkillsLoaded(skills));
                 }
             }
@@ -1539,18 +1593,28 @@ pub fn spawn_fetch_mcp_servers(backend: BackendRef, tx: mpsc::Sender<AppEvent>) 
             let client = daemon_client();
             if let Ok(resp) = client.get(format!("{base_url}/api/mcp/servers")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let servers: Vec<McpServerInfo> = body
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|s| McpServerInfo {
-                                    name: s["name"].as_str().unwrap_or("").to_string(),
-                                    connected: s["connected"].as_bool().unwrap_or(false),
-                                    tool_count: s["tool_count"].as_u64().unwrap_or(0) as usize,
-                                })
-                                .collect()
+                    // This route returns TWO arrays, not one list: `configured`
+                    // (every server in config.toml) and `connected` (the live
+                    // connections, with their tool counts under `tools_count`).
+                    // Reading `connected`/`tool_count` off a `configured` item
+                    // finds neither key, so every server rendered as
+                    // disconnected with 0 tools. Join the two by name instead.
+                    let live = envelope_items(&body, "connected");
+                    let servers: Vec<McpServerInfo> = envelope_items(&body, "configured")
+                        .iter()
+                        .map(|s| {
+                            let name = s["name"].as_str().unwrap_or("");
+                            let conn = live.iter().find(|c| c["name"].as_str() == Some(name));
+                            McpServerInfo {
+                                name: name.to_string(),
+                                connected: conn.is_some(),
+                                tool_count: conn
+                                    .and_then(|c| c["tools_count"].as_u64())
+                                    .unwrap_or(0)
+                                    as usize,
+                            }
                         })
-                        .unwrap_or_default();
+                        .collect();
                     let _ = tx.send(AppEvent::McpServersLoaded(servers));
                 }
             }
@@ -1679,20 +1743,30 @@ pub fn spawn_fetch_audit(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
                 .send()
             {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let entries: Vec<AuditEntry> = body
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|e| AuditEntry {
-                                    timestamp: e["timestamp"].as_str().unwrap_or("").to_string(),
-                                    action: e["action"].as_str().unwrap_or("").to_string(),
-                                    agent: e["agent"].as_str().unwrap_or("").to_string(),
-                                    detail: e["detail"].as_str().unwrap_or("").to_string(),
-                                    tip_hash: e["tip_hash"].as_str().unwrap_or("").to_string(),
-                                })
-                                .collect()
+                    let entries: Vec<AuditEntry> = envelope_items(&body, "entries")
+                        .iter()
+                        // Same field-shape trap as the dashboard's audit strip:
+                        // entries carry `agent_name`/`agent_id`, never `agent`,
+                        // and each entry's own chain hash is `hash` — `tip_hash`
+                        // is an envelope-level field, so the column showed the
+                        // empty string for every row.
+                        .map(|e| AuditEntry {
+                            timestamp: e["timestamp"].as_str().unwrap_or("").to_string(),
+                            action: e["action"].as_str().unwrap_or("").to_string(),
+                            agent: e["agent_name"]
+                                .as_str()
+                                .or_else(|| e["agent_id"].as_str())
+                                .or_else(|| e["agent"].as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            detail: e["detail"].as_str().unwrap_or("").to_string(),
+                            tip_hash: e["hash"]
+                                .as_str()
+                                .or_else(|| e["tip_hash"].as_str())
+                                .unwrap_or("")
+                                .to_string(),
                         })
-                        .unwrap_or_default();
+                        .collect();
                     let _ = tx.send(AppEvent::AuditEntriesLoaded(entries));
                 }
             }
@@ -1722,40 +1796,59 @@ pub fn spawn_fetch_usage(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
             // By model
             if let Ok(resp) = client.get(format!("{base_url}/api/usage/by-model")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let models: Vec<ModelUsage> = body
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|m| ModelUsage {
-                                    model_id: m["model_id"].as_str().unwrap_or("").to_string(),
-                                    input_tokens: m["input_tokens"].as_u64().unwrap_or(0),
-                                    output_tokens: m["output_tokens"].as_u64().unwrap_or(0),
-                                    cost_usd: m["cost_usd"].as_f64().unwrap_or(0.0),
-                                    calls: m["calls"].as_u64().unwrap_or(0),
-                                })
-                                .collect()
+                    let models: Vec<ModelUsage> = envelope_items(&body, "models")
+                        .iter()
+                        // Every one of these five keys was wrong: the route emits
+                        // `model` / `total_*` / `call_count`, so the by-model
+                        // table rendered a nameless row of zeros per model.
+                        .map(|m| ModelUsage {
+                            model_id: m["model"]
+                                .as_str()
+                                .or_else(|| m["model_id"].as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            input_tokens: m["total_input_tokens"]
+                                .as_u64()
+                                .or_else(|| m["input_tokens"].as_u64())
+                                .unwrap_or(0),
+                            output_tokens: m["total_output_tokens"]
+                                .as_u64()
+                                .or_else(|| m["output_tokens"].as_u64())
+                                .unwrap_or(0),
+                            cost_usd: m["total_cost_usd"]
+                                .as_f64()
+                                .or_else(|| m["cost_usd"].as_f64())
+                                .unwrap_or(0.0),
+                            calls: m["call_count"]
+                                .as_u64()
+                                .or_else(|| m["calls"].as_u64())
+                                .unwrap_or(0),
                         })
-                        .unwrap_or_default();
+                        .collect();
                     let _ = tx.send(AppEvent::UsageByModelLoaded(models));
                 }
             }
             // By agent
             if let Ok(resp) = client.get(format!("{base_url}/api/usage")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let agents: Vec<AgentUsage> = body
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|a| AgentUsage {
-                                    agent_name: a["agent_name"].as_str().unwrap_or("").to_string(),
-                                    agent_id: a["agent_id"].as_str().unwrap_or("").to_string(),
-                                    total_tokens: a["total_tokens"].as_u64().unwrap_or(0),
-                                    cost_usd: a["cost_usd"].as_f64().unwrap_or(0.0),
-                                    tool_calls: a["tool_calls"].as_u64().unwrap_or(0),
-                                })
-                                .collect()
+                    let agents: Vec<AgentUsage> = envelope_items(&body, "agents")
+                        .iter()
+                        // `/api/usage` emits the agent's name under `name`, not
+                        // `agent_name`, so this column read empty for every row.
+                        // It emits no per-agent cost at all — 0.0 is the honest
+                        // value until the route grows one.
+                        .map(|a| AgentUsage {
+                            agent_name: a["name"]
+                                .as_str()
+                                .or_else(|| a["agent_name"].as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            agent_id: a["agent_id"].as_str().unwrap_or("").to_string(),
+                            total_tokens: a["total_tokens"].as_u64().unwrap_or(0),
+                            cost_usd: a["cost_usd"].as_f64().unwrap_or(0.0),
+                            tool_calls: a["tool_calls"].as_u64().unwrap_or(0),
                         })
-                        .unwrap_or_default();
+                        .collect();
                     let _ = tx.send(AppEvent::UsageByAgentLoaded(agents));
                 }
             }
@@ -1826,21 +1919,28 @@ pub fn spawn_fetch_models(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
             let client = daemon_client();
             if let Ok(resp) = client.get(format!("{base_url}/api/models")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let models: Vec<ModelInfo> = body
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|m| ModelInfo {
-                                    id: m["id"].as_str().unwrap_or("").to_string(),
-                                    provider: m["provider"].as_str().unwrap_or("").to_string(),
-                                    tier: m["tier"].as_str().unwrap_or("").to_string(),
-                                    context_window: m["context_window"].as_u64().unwrap_or(0),
-                                    cost_input: m["cost_input"].as_f64().unwrap_or(0.0),
-                                    cost_output: m["cost_output"].as_f64().unwrap_or(0.0),
-                                })
-                                .collect()
+                    let models: Vec<ModelInfo> = envelope_items(&body, "models")
+                        .iter()
+                        .map(|m| ModelInfo {
+                            id: m["id"].as_str().unwrap_or("").to_string(),
+                            provider: m["provider"].as_str().unwrap_or("").to_string(),
+                            tier: m["tier"].as_str().unwrap_or("").to_string(),
+                            context_window: m["context_window"].as_u64().unwrap_or(0),
+                            // The catalog route emits per-million pricing under
+                            // `input_cost_per_m`/`output_cost_per_m`; the old
+                            // keys don't exist, so the cost column read $0.00
+                            // for every model. The `${:.2}` render in
+                            // settings.rs already expects per-million dollars.
+                            cost_input: m["input_cost_per_m"]
+                                .as_f64()
+                                .or_else(|| m["cost_input"].as_f64())
+                                .unwrap_or(0.0),
+                            cost_output: m["output_cost_per_m"]
+                                .as_f64()
+                                .or_else(|| m["cost_output"].as_f64())
+                                .unwrap_or(0.0),
                         })
-                        .unwrap_or_default();
+                        .collect();
                     let _ = tx.send(AppEvent::SettingsModelsLoaded(models));
                 }
             }
@@ -1858,20 +1958,13 @@ pub fn spawn_fetch_tools(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
             let client = daemon_client();
             if let Ok(resp) = client.get(format!("{base_url}/api/tools")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let tools: Vec<ToolInfo> = body
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|t| ToolInfo {
-                                    name: t["name"].as_str().unwrap_or("").to_string(),
-                                    description: t["description"]
-                                        .as_str()
-                                        .unwrap_or("")
-                                        .to_string(),
-                                })
-                                .collect()
+                    let tools: Vec<ToolInfo> = envelope_items(&body, "tools")
+                        .iter()
+                        .map(|t| ToolInfo {
+                            name: t["name"].as_str().unwrap_or("").to_string(),
+                            description: t["description"].as_str().unwrap_or("").to_string(),
                         })
-                        .unwrap_or_default();
+                        .collect();
                     let _ = tx.send(AppEvent::SettingsToolsLoaded(tools));
                 }
             }
@@ -2002,24 +2095,30 @@ pub fn spawn_fetch_peers(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
             let client = daemon_client();
             if let Ok(resp) = client.get(format!("{base_url}/api/peers")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let peers: Vec<PeerInfo> = body
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|p| PeerInfo {
-                                    node_id: p["node_id"].as_str().unwrap_or("").to_string(),
-                                    node_name: p["node_name"].as_str().unwrap_or("").to_string(),
-                                    address: p["address"].as_str().unwrap_or("").to_string(),
-                                    state: p["state"].as_str().unwrap_or("").to_string(),
-                                    agent_count: p["agent_count"].as_u64().unwrap_or(0),
-                                    protocol_version: p["protocol_version"]
-                                        .as_str()
-                                        .unwrap_or("")
-                                        .to_string(),
-                                })
-                                .collect()
+                    let peers: Vec<PeerInfo> = envelope_items(&body, "peers")
+                        .iter()
+                        .map(|p| PeerInfo {
+                            node_id: p["node_id"].as_str().unwrap_or("").to_string(),
+                            node_name: p["node_name"].as_str().unwrap_or("").to_string(),
+                            address: p["address"].as_str().unwrap_or("").to_string(),
+                            state: p["state"].as_str().unwrap_or("").to_string(),
+                            // The peer payload carries the `agents` array,
+                            // not a precomputed `agent_count` — the old key
+                            // never existed, so the column always read 0.
+                            agent_count: p["agents"]
+                                .as_array()
+                                .map(|a| a.len() as u64)
+                                .or_else(|| p["agent_count"].as_u64())
+                                .unwrap_or(0),
+                            // `protocol_version` is a u32 on the wire, so
+                            // `.as_str()` also always yielded "".
+                            protocol_version: p["protocol_version"]
+                                .as_u64()
+                                .map(|v| v.to_string())
+                                .or_else(|| p["protocol_version"].as_str().map(String::from))
+                                .unwrap_or_default(),
                         })
-                        .unwrap_or_default();
+                        .collect();
                     let _ = tx.send(AppEvent::PeersLoaded(peers));
                 }
             }
@@ -2040,29 +2139,28 @@ pub fn spawn_fetch_logs(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
                 .send()
             {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let entries: Vec<LogEntry> = body
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|e| {
-                                    let action = e["action"].as_str().unwrap_or("").to_string();
-                                    let detail = e["detail"].as_str().unwrap_or("").to_string();
-                                    let level =
-                                        super::screens::logs::classify_level(&action, &detail);
-                                    LogEntry {
-                                        timestamp: e["timestamp"]
-                                            .as_str()
-                                            .unwrap_or("")
-                                            .to_string(),
-                                        level,
-                                        action,
-                                        detail,
-                                        agent: e["agent"].as_str().unwrap_or("").to_string(),
-                                    }
-                                })
-                                .collect()
+                    let entries: Vec<LogEntry> = envelope_items(&body, "entries")
+                        .iter()
+                        .map(|e| {
+                            let action = e["action"].as_str().unwrap_or("").to_string();
+                            let detail = e["detail"].as_str().unwrap_or("").to_string();
+                            let level = super::screens::logs::classify_level(&action, &detail);
+                            LogEntry {
+                                timestamp: e["timestamp"].as_str().unwrap_or("").to_string(),
+                                level,
+                                action,
+                                detail,
+                                // `agent` is not a key the audit route emits —
+                                // same trap as the dashboard and audit screens.
+                                agent: e["agent_name"]
+                                    .as_str()
+                                    .or_else(|| e["agent_id"].as_str())
+                                    .or_else(|| e["agent"].as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
+                            }
                         })
-                        .unwrap_or_default();
+                        .collect();
                     let _ = tx.send(AppEvent::LogsLoaded(entries));
                 }
             }

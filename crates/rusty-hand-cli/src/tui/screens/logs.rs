@@ -1,5 +1,6 @@
 //! Logs screen: real-time log viewer with level filter and search.
 
+use super::util::truncate;
 use crate::tui::theme;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -399,12 +400,4 @@ pub fn draw(f: &mut Frame, area: Rect, state: &mut LogsState) {
         )])),
         chunks[2],
     );
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}\u{2026}", &s[..max - 1])
-    }
 }
