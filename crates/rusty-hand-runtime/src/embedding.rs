@@ -448,10 +448,17 @@ pub fn embedding_to_bytes(embedding: &[f32]) -> Vec<u8> {
 
 /// Deserialize an embedding vector from bytes.
 pub fn embedding_from_bytes(bytes: &[u8]) -> Vec<f32> {
-    bytes
-        .chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-        .collect()
+    // NB: written as an explicit split_at loop rather than `chunks_exact(4)` or
+    // `as_chunks::<4>()`. clippy 1.98 rejects the former (chunks_exact_to_as_chunks)
+    // and the latter needs Rust 1.88, above the workspace MSRV of 1.75.
+    let mut out = Vec::with_capacity(bytes.len() / 4);
+    let mut rest = bytes;
+    while rest.len() >= 4 {
+        let (head, tail) = rest.split_at(4);
+        out.push(f32::from_le_bytes([head[0], head[1], head[2], head[3]]));
+        rest = tail;
+    }
+    out
 }
 
 #[cfg(test)]
